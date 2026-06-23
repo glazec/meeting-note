@@ -14,6 +14,13 @@ type CreateUploadUrlInput = {
   contentType: string;
 };
 
+export class UnsafeObjectKeySegmentError extends Error {
+  constructor(segmentName: string) {
+    super(`Unsafe object key segment: ${segmentName}`);
+    this.name = "UnsafeObjectKeySegmentError";
+  }
+}
+
 const r2EnvSchema = z.object({
   R2_ACCOUNT_ID: z.string().min(1),
   R2_ACCESS_KEY_ID: z.string().min(1),
@@ -21,7 +28,24 @@ const r2EnvSchema = z.object({
   R2_BUCKET: z.string().min(1),
 });
 
+export function assertSafeObjectKeySegment(value: string, segmentName = "segment") {
+  if (
+    value.length === 0 ||
+    value.includes("/") ||
+    value.includes("\\") ||
+    value.includes("..") ||
+    /\s/.test(value)
+  ) {
+    throw new UnsafeObjectKeySegmentError(segmentName);
+  }
+}
+
 export function buildMeetingObjectKey(input: MeetingObjectKeyInput) {
+  assertSafeObjectKeySegment(input.teamId, "teamId");
+  assertSafeObjectKeySegment(input.meetingId, "meetingId");
+  assertSafeObjectKeySegment(input.assetId, "assetId");
+  assertSafeObjectKeySegment(input.extension, "extension");
+
   return `teams/${input.teamId}/meetings/${input.meetingId}/assets/${input.assetId}.${input.extension}`;
 }
 

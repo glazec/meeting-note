@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-import { buildMeetingObjectKey, createUploadUrl } from "@/lib/r2";
+import { getCurrentUser } from "@/lib/auth";
+import {
+  buildMeetingObjectKey,
+  createUploadUrl,
+  UnsafeObjectKeySegmentError,
+} from "@/lib/r2";
 
 export const runtime = "nodejs";
 
@@ -13,6 +18,12 @@ const uploadRequestSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const body = await request.json().catch(() => null);
   const result = uploadRequestSchema.safeParse(body);
 
@@ -20,11 +31,25 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid upload request" }, { status: 400 });
   }
 
-  const key = buildMeetingObjectKey(result.data);
-  const uploadUrl = await createUploadUrl({
-    key,
-    contentType: result.data.contentType,
-  });
+  try {
+    const key = buildMeetingObjectKey(result.data);
+    const uploadUrl = await createUploadUrl({
+      key,
+      contentType: result.data.contentType,
+    });
 
-  return Response.json({ key, uploadUrl });
+    return Response.json({ key, uploadUrl });
+  } catch (error) {
+    if (error instanceof UnsafeObjectKeySegmentError) {
+      return Response.json(
+        { error: "Invalid upload request" },
+        { status: 400 },
+      );
+    }
+
+    return Response.json(
+      { error: "Upload URL unavailable" },
+      { status: 500 },
+    );
+  }
 }
