@@ -33,12 +33,12 @@ export default async function SharedTranscriptPage({
 
   return (
     <main className="min-h-screen bg-[var(--background)] px-6 py-10 text-[var(--text)]">
-      <section className="mx-auto w-full max-w-4xl">
+      <section className="mx-auto w-full max-w-4xl min-w-0">
         <p className="text-sm font-medium uppercase tracking-normal text-[var(--primary)]">
           Shared transcript
         </p>
         <h1 className="mt-3 text-3xl font-semibold">Weekly product review</h1>
-        <p className="mt-3 max-w-2xl text-base leading-7 text-[var(--muted)]">
+        <p className="mt-3 max-w-2xl min-w-0 break-all text-base leading-7 text-[var(--muted)]">
           Read only transcript link. Token: {token}
         </p>
         <div className="mt-8">

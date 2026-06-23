@@ -47,14 +47,14 @@ export default async function MeetingPage({
 
   return (
     <AppShell>
-      <div className="grid gap-8 lg:grid-cols-[1fr_18rem]">
-        <section>
+      <div className="grid min-w-0 gap-8 lg:grid-cols-[1fr_18rem]">
+        <section className="min-w-0">
           <p className="text-sm font-medium uppercase tracking-normal text-[var(--primary)]">
             Meeting
           </p>
           <h1 className="mt-3 text-3xl font-semibold">{meeting.title}</h1>
           <dl className="mt-5 grid gap-4 border-y border-[var(--border)] py-4 sm:grid-cols-3">
-            <div>
+            <div className="min-w-0">
               <dt className="text-xs font-medium uppercase tracking-normal text-[var(--muted)]">
                 Platform
               </dt>
@@ -68,11 +68,11 @@ export default async function MeetingPage({
               </dt>
               <dd className="mt-1 text-sm font-semibold">{meeting.status}</dd>
             </div>
-            <div>
+            <div className="min-w-0">
               <dt className="text-xs font-medium uppercase tracking-normal text-[var(--muted)]">
                 Meeting ID
               </dt>
-              <dd className="mt-1 break-words text-sm font-semibold">
+              <dd className="mt-1 min-w-0 break-all text-sm font-semibold">
                 {meetingId}
               </dd>
             </div>
@@ -82,7 +82,7 @@ export default async function MeetingPage({
           </div>
         </section>
 
-        <aside className="lg:pt-24">
+        <aside className="min-w-0 lg:pt-24">
           <ShareDialog meetingId={meetingId} />
         </aside>
       </div>

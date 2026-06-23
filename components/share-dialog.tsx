@@ -24,7 +24,7 @@ export function ShareDialog({ meetingId }: ShareDialogProps) {
       >
         Create share link
       </button>
-      <p className="mt-3 text-xs text-[var(--muted)]">
+      <p className="mt-3 min-w-0 break-all text-xs text-[var(--muted)]">
         Meeting ID: {meetingId}
       </p>
     </section>
