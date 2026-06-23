@@ -1,5 +1,7 @@
 import { cookies } from "next/headers";
+import type { JWTPayload } from "jose";
 import { createRemoteJWKSet, jwtVerify } from "jose";
+import { z } from "zod";
 
 export type SessionUser = {
   id: string;
@@ -7,21 +9,16 @@ export type SessionUser = {
   name: string | null;
 };
 
-export async function getCurrentUser(): Promise<SessionUser | null> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get("session")?.value;
+const authEnvSchema = z.object({
+  NEON_AUTH_JWKS_URL: z.string().url(),
+  NEON_AUTH_ISSUER: z.string().url(),
+});
 
-  if (!token) {
-    return null;
-  }
+export function parseAuthEnv(source: Record<string, string | undefined>) {
+  return authEnvSchema.parse(source);
+}
 
-  const { parseEnv } = await import("@/lib/env");
-  const appEnv = parseEnv(process.env);
-  const jwks = createRemoteJWKSet(new URL(appEnv.NEON_AUTH_JWKS_URL));
-  const { payload } = await jwtVerify(token, jwks, {
-    issuer: appEnv.NEON_AUTH_ISSUER,
-  });
-
+export function sessionUserFromPayload(payload: JWTPayload): SessionUser | null {
   if (typeof payload.sub !== "string" || typeof payload.email !== "string") {
     return null;
   }
@@ -31,4 +28,26 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     email: payload.email,
     name: typeof payload.name === "string" ? payload.name : null,
   };
+}
+
+export async function getCurrentUser(): Promise<SessionUser | null> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get("session")?.value;
+
+  if (!token) {
+    return null;
+  }
+
+  const authEnv = parseAuthEnv(process.env);
+  const jwks = createRemoteJWKSet(new URL(authEnv.NEON_AUTH_JWKS_URL));
+
+  try {
+    const { payload } = await jwtVerify(token, jwks, {
+      issuer: authEnv.NEON_AUTH_ISSUER,
+    });
+
+    return sessionUserFromPayload(payload);
+  } catch {
+    return null;
+  }
 }
