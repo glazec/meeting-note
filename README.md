@@ -21,7 +21,7 @@ Team meeting transcript product.
 
 ## Vendor Webhooks
 
-Recall bot status webhooks are delivered to endpoints configured in the Recall dashboard. ElevenLabs speech to text webhooks are delivered to workspace configured webhooks when transcript jobs set `webhook=true`. Per request webhook metadata is stored only for correlation.
+Recall bot status webhooks are delivered to endpoints configured in the Recall dashboard. ElevenLabs speech to text webhooks are delivered to workspace configured webhooks when transcript jobs set `webhook=true`. Both webhook routes verify vendor signatures from the raw request body before parsing the event. Per request webhook metadata is stored only for correlation.
 
 ## Verification
 

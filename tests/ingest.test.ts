@@ -1,3 +1,5 @@
+import { createHmac } from "node:crypto";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -6,29 +8,113 @@ import {
 } from "@/lib/vendors/elevenlabs";
 import { normalizeRecallWebhook, scheduleRecallBot } from "@/lib/vendors/recall";
 
-async function postElevenLabsWebhook(body: unknown) {
+const elevenLabsWebhookSecret = "elevenlabs-webhook-secret";
+const recallWebhookSecret = "whsec_cmVjYWxsLXdlYmhvb2stc2VjcmV0";
+
+function signElevenLabsWebhook(rawBody: string) {
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const signature = createHmac("sha256", elevenLabsWebhookSecret)
+    .update(`${timestamp}.${rawBody}`)
+    .digest("hex");
+
+  return `t=${timestamp},v0=${signature}`;
+}
+
+function signRecallWebhook(rawBody: string) {
+  const messageId = "msg_test";
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const key = Buffer.from(
+    recallWebhookSecret.slice("whsec_".length),
+    "base64",
+  );
+  const signature = createHmac("sha256", key)
+    .update(`${messageId}.${timestamp}.${rawBody}`)
+    .digest("base64");
+
+  return {
+    "webhook-id": messageId,
+    "webhook-timestamp": timestamp,
+    "webhook-signature": `v1,${signature}`,
+  };
+}
+
+async function postElevenLabsWebhook(body: unknown, signed = true) {
+  vi.stubEnv("ELEVENLABS_WEBHOOK_SECRET", elevenLabsWebhookSecret);
   const { POST } = await import("@/app/api/elevenlabs/webhook/route");
+  const rawBody = JSON.stringify(body);
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
+
+  if (signed) {
+    headers["elevenlabs-signature"] = signElevenLabsWebhook(rawBody);
+  }
 
   return POST(
     new Request("https://app.example.com/api/elevenlabs/webhook", {
       method: "POST",
-      body: JSON.stringify(body),
+      body: rawBody,
+      headers,
+    }),
+  );
+}
+
+async function postRecallWebhook(body: unknown, signed = true) {
+  vi.stubEnv("RECALL_WEBHOOK_SECRET", recallWebhookSecret);
+  const { POST } = await import("@/app/api/recall/webhook/route");
+  const rawBody = JSON.stringify(body);
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
+
+  if (signed) {
+    Object.assign(headers, signRecallWebhook(rawBody));
+  }
+
+  return POST(
+    new Request("https://app.example.com/api/recall/webhook", {
+      method: "POST",
+      body: rawBody,
+      headers,
+    }),
+  );
+}
+
+async function postElevenLabsWebhookWithHeaders(
+  body: unknown,
+  headers: Record<string, string>,
+) {
+  vi.stubEnv("ELEVENLABS_WEBHOOK_SECRET", elevenLabsWebhookSecret);
+  const { POST } = await import("@/app/api/elevenlabs/webhook/route");
+  const rawBody = JSON.stringify(body);
+
+  return POST(
+    new Request("https://app.example.com/api/elevenlabs/webhook", {
+      method: "POST",
+      body: rawBody,
       headers: {
         "content-type": "application/json",
+        ...headers,
       },
     }),
   );
 }
 
-async function postRecallWebhook(body: unknown) {
+async function postRecallWebhookWithHeaders(
+  body: unknown,
+  headers: Record<string, string>,
+) {
+  vi.stubEnv("RECALL_WEBHOOK_SECRET", recallWebhookSecret);
   const { POST } = await import("@/app/api/recall/webhook/route");
+  const rawBody = JSON.stringify(body);
 
   return POST(
     new Request("https://app.example.com/api/recall/webhook", {
       method: "POST",
-      body: JSON.stringify(body),
+      body: rawBody,
       headers: {
         "content-type": "application/json",
+        ...headers,
       },
     }),
   );
@@ -180,6 +266,50 @@ describe("vendor webhook normalization", () => {
     });
   });
 
+  it("rejects unsigned ElevenLabs webhook requests", async () => {
+    const response = await postElevenLabsWebhook(
+      {
+        type: "speech_to_text_transcription",
+        data: {
+          request_id: "req_123",
+          webhook_metadata: {},
+          transcription: {
+            text: "Transcript text",
+          },
+        },
+      },
+      false,
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid webhook signature",
+    });
+  });
+
+  it("rejects invalid ElevenLabs webhook signatures", async () => {
+    const response = await postElevenLabsWebhookWithHeaders(
+      {
+        type: "speech_to_text_transcription",
+        data: {
+          request_id: "req_123",
+          webhook_metadata: {},
+          transcription: {
+            text: "Transcript text",
+          },
+        },
+      },
+      {
+        "elevenlabs-signature": "t=1731705121,v0=invalid",
+      },
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid webhook signature",
+    });
+  });
+
   it("accepts real Recall webhook payloads through the route", async () => {
     const response = await postRecallWebhook({
       event: "bot.status_change",
@@ -216,6 +346,60 @@ describe("vendor webhook normalization", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       error: "Invalid webhook payload",
+    });
+  });
+
+  it("rejects unsigned Recall webhook requests", async () => {
+    const response = await postRecallWebhook(
+      {
+        event: "bot.status_change",
+        data: {
+          data: {
+            code: "done",
+            sub_code: "recording_done",
+            updated_at: "2026-06-23T12:00:00Z",
+          },
+          bot: {
+            id: "bot_123",
+            metadata: {},
+          },
+        },
+      },
+      false,
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid webhook signature",
+    });
+  });
+
+  it("rejects invalid Recall webhook signatures", async () => {
+    const response = await postRecallWebhookWithHeaders(
+      {
+        event: "bot.status_change",
+        data: {
+          data: {
+            code: "done",
+            sub_code: "recording_done",
+            updated_at: "2026-06-23T12:00:00Z",
+          },
+          bot: {
+            id: "bot_123",
+            metadata: {},
+          },
+        },
+      },
+      {
+        "webhook-id": "msg_test",
+        "webhook-timestamp": "1731705121",
+        "webhook-signature": "v1,invalid",
+      },
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid webhook signature",
     });
   });
 });

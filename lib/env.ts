@@ -15,7 +15,9 @@ const schema = z.object({
   R2_BUCKET: z.string().min(1),
   R2_PUBLIC_BASE_URL: optionalUrl,
   RECALL_API_KEY: z.string().min(1),
-  RECALL_WEBHOOK_SECRET: z.string().min(1),
+  RECALL_WEBHOOK_SECRET: z.string().regex(/^whsec_/, {
+    message: "Recall webhook secret must start with whsec_",
+  }),
   ELEVENLABS_API_KEY: z.string().min(1),
   ELEVENLABS_WEBHOOK_SECRET: z.string().min(1),
   INNGEST_EVENT_KEY: z.string().min(1),

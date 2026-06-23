@@ -9,7 +9,7 @@ const baseEnv = {
   R2_SECRET_ACCESS_KEY: "secret-access-key",
   R2_BUCKET: "recordings",
   RECALL_API_KEY: "recall-key",
-  RECALL_WEBHOOK_SECRET: "recall-secret",
+  RECALL_WEBHOOK_SECRET: "whsec_cmVjYWxsLXNlY3JldA==",
   ELEVENLABS_API_KEY: "elevenlabs-key",
   ELEVENLABS_WEBHOOK_SECRET: "elevenlabs-secret",
   INNGEST_EVENT_KEY: "inngest-event-key",

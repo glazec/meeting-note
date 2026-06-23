@@ -1,12 +1,19 @@
 import { normalizeElevenLabsWebhook } from "@/lib/vendors/elevenlabs";
+import {
+  verifyElevenLabsWebhook,
+  webhookVerificationResponse,
+} from "@/lib/webhook-signatures";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const body = await request.json().catch(() => null);
+  const rawBody = await request.text();
+  let body: unknown;
 
-  if (body === null) {
-    return Response.json({ error: "Invalid webhook payload" }, { status: 400 });
+  try {
+    body = await verifyElevenLabsWebhook(rawBody, request.headers);
+  } catch (error) {
+    return webhookVerificationResponse(error);
   }
 
   try {
