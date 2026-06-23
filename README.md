@@ -15,9 +15,13 @@ Team meeting transcript product.
 ## Local Setup
 
 1. Copy `.env.example` to `.env.local`.
-2. Fill in Neon, R2, Recall, ElevenLabs, and Inngest credentials.
+2. Fill in Neon, R2, Recall, ElevenLabs, and Inngest credentials. `NEON_AUTH_BASE_URL` is optional when `NEON_AUTH_JWKS_URL` ends with `/.well-known/jwks.json`; generate `NEON_AUTH_COOKIE_SECRET` with `openssl rand -base64 32`.
 3. Run `npm install`.
 4. Run `npm run dev`.
+
+## Auth
+
+The app uses Neon Auth through the official Next.js SDK. Browser auth requests are proxied through `/api/auth/[...path]`, the landing page routes users to `/auth/sign-in`, and server code reads the current user from Neon Auth sessions instead of a hand rolled JWT cookie.
 
 ## Vendor Webhooks
 

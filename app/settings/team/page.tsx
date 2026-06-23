@@ -1,6 +1,8 @@
 import { AppShell } from "@/components/app-shell";
 import { getCurrentUser } from "@/lib/auth";
 
+export const dynamic = "force-dynamic";
+
 export default async function TeamSettingsPage() {
   const user = await getCurrentUser();
 

@@ -1,7 +1,4 @@
-import { cookies } from "next/headers";
-import type { JWTPayload } from "jose";
-import { createRemoteJWKSet, jwtVerify } from "jose";
-import { z } from "zod";
+import { auth } from "@/lib/auth/server";
 
 export type SessionUser = {
   id: string;
@@ -9,44 +6,32 @@ export type SessionUser = {
   name: string | null;
 };
 
-const authEnvSchema = z.object({
-  NEON_AUTH_JWKS_URL: z.string().url(),
-  NEON_AUTH_ISSUER: z.string().url(),
-});
+export function sessionUserFromAuthUser(user: unknown): SessionUser | null {
+  if (!user || typeof user !== "object") {
+    return null;
+  }
 
-export function parseAuthEnv(source: Record<string, string | undefined>) {
-  return authEnvSchema.parse(source);
-}
+  const candidate = user as Record<string, unknown>;
 
-export function sessionUserFromPayload(payload: JWTPayload): SessionUser | null {
-  if (typeof payload.sub !== "string" || typeof payload.email !== "string") {
+  if (
+    typeof candidate.id !== "string" ||
+    typeof candidate.email !== "string"
+  ) {
     return null;
   }
 
   return {
-    id: payload.sub,
-    email: payload.email,
-    name: typeof payload.name === "string" ? payload.name : null,
+    id: candidate.id,
+    email: candidate.email,
+    name: typeof candidate.name === "string" ? candidate.name : null,
   };
 }
 
 export async function getCurrentUser(): Promise<SessionUser | null> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get("session")?.value;
-
-  if (!token) {
-    return null;
-  }
-
-  const authEnv = parseAuthEnv(process.env);
-  const jwks = createRemoteJWKSet(new URL(authEnv.NEON_AUTH_JWKS_URL));
-
   try {
-    const { payload } = await jwtVerify(token, jwks, {
-      issuer: authEnv.NEON_AUTH_ISSUER,
-    });
+    const { data } = await auth.getSession();
 
-    return sessionUserFromPayload(payload);
+    return sessionUserFromAuthUser(data?.user);
   } catch {
     return null;
   }

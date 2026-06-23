@@ -14,7 +14,7 @@ export default function Home() {
             tied to the right workspace.
           </p>
           <a
-            href="/api/auth/signin/google"
+            href="/auth/sign-in"
             className="mt-8 inline-flex rounded-md bg-[var(--primary)] px-5 py-3 text-sm font-semibold text-white"
           >
             Sign in with Google
