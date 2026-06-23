@@ -1,28 +1,9 @@
-import {
-  TranscriptViewer,
-  type TranscriptSegment,
-} from "@/components/transcript-viewer";
+import { notFound } from "next/navigation";
 
-const sharedTranscript: TranscriptSegment[] = [
-  {
-    id: "share-1",
-    speaker: "Maya",
-    startMs: 0,
-    text: "This shared transcript view is read only and exposes only the meeting content attached to the link.",
-  },
-  {
-    id: "share-2",
-    speaker: "Jon",
-    startMs: 19600,
-    text: "The link should expire automatically and remain revocable from the meeting workspace.",
-  },
-  {
-    id: "share-3",
-    speaker: "Priya",
-    startMs: 45100,
-    text: "No workspace navigation is shown here because external viewers should stay focused on the transcript.",
-  },
-];
+import { TranscriptViewer } from "@/components/transcript-viewer";
+import { getSharedTranscriptByToken } from "@/lib/share-links";
+
+export const dynamic = "force-dynamic";
 
 export default async function SharedTranscriptPage({
   params,
@@ -30,6 +11,11 @@ export default async function SharedTranscriptPage({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
+  const sharedTranscript = await getSharedTranscriptByToken(token);
+
+  if (!sharedTranscript) {
+    notFound();
+  }
 
   return (
     <main className="min-h-screen bg-[var(--background)] px-6 py-10 text-[var(--text)]">
@@ -37,12 +23,14 @@ export default async function SharedTranscriptPage({
         <p className="text-sm font-medium uppercase tracking-normal text-[var(--primary)]">
           Shared transcript
         </p>
-        <h1 className="mt-3 text-3xl font-semibold">Weekly product review</h1>
-        <p className="mt-3 max-w-2xl min-w-0 break-all text-base leading-7 text-[var(--muted)]">
-          Read only transcript link. Token: {token}
+        <h1 className="mt-3 break-words text-3xl font-semibold">
+          {sharedTranscript.title}
+        </h1>
+        <p className="mt-3 max-w-2xl text-base leading-7 text-[var(--muted)]">
+          Read only transcript link.
         </p>
         <div className="mt-8">
-          <TranscriptViewer segments={sharedTranscript} />
+          <TranscriptViewer segments={sharedTranscript.segments} />
         </div>
       </section>
     </main>

@@ -14,14 +14,13 @@ async function expectNoHorizontalOverflow(page: Page) {
 test.describe("dynamic route values on mobile", () => {
   test.use({ viewport: { width: 320, height: 720 } });
 
-  test("long shared transcript tokens do not create horizontal overflow", async ({
+  test("invalid shared transcript tokens do not expose transcript content", async ({
     page,
   }) => {
     await page.goto(`/share/${longValue}`);
 
-    await expect(
-      page.getByRole("heading", { name: "Weekly product review" }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "404" })).toBeVisible();
+    await expect(page.getByText("Weekly product review")).toHaveCount(0);
     await expectNoHorizontalOverflow(page);
   });
 
