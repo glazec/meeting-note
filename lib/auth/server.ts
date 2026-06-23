@@ -9,6 +9,7 @@ export const auth = createNeonAuth({
   baseUrl: getNeonAuthBaseUrl(),
   cookies: {
     secret: getNeonAuthCookieSecret(),
+    sameSite: "lax",
   },
   logLevel: "warn",
 });
