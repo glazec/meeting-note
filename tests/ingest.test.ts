@@ -8,6 +8,23 @@ import {
 } from "@/lib/vendors/elevenlabs";
 import { normalizeRecallWebhook, scheduleRecallBot } from "@/lib/vendors/recall";
 
+const { recordVendorWebhookEvent, MissingWebhookIdempotencyKeyError } =
+  vi.hoisted(() => ({
+    recordVendorWebhookEvent: vi.fn(),
+    MissingWebhookIdempotencyKeyError: class MissingWebhookIdempotencyKeyError extends Error {
+      constructor() {
+        super("Missing webhook idempotency key");
+      }
+    },
+  }));
+
+vi.mock("@/lib/vendor-webhook-events", () => {
+  return {
+    MissingWebhookIdempotencyKeyError,
+    recordVendorWebhookEvent,
+  };
+});
+
 const elevenLabsWebhookSecret = "elevenlabs-webhook-secret";
 const recallWebhookSecret = "whsec_cmVjYWxsLXdlYmhvb2stc2VjcmV0";
 
@@ -125,6 +142,7 @@ describe("vendor webhook normalization", () => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     vi.resetModules();
+    recordVendorWebhookEvent.mockReset();
   });
 
   it("normalizes Recall bot status webhooks", () => {
@@ -233,7 +251,7 @@ describe("vendor webhook normalization", () => {
   });
 
   it("accepts real ElevenLabs webhook payloads through the route", async () => {
-    const response = await postElevenLabsWebhook({
+    const payload = {
       type: "speech_to_text_transcription",
       data: {
         request_id: "req_123",
@@ -242,7 +260,8 @@ describe("vendor webhook normalization", () => {
           text: "Transcript text",
         },
       },
-    });
+    };
+    const response = await postElevenLabsWebhook(payload);
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
@@ -251,6 +270,12 @@ describe("vendor webhook normalization", () => {
         eventType: "speech_to_text_transcription",
         requestId: "req_123",
       },
+    });
+    expect(recordVendorWebhookEvent).toHaveBeenCalledWith({
+      provider: "elevenlabs",
+      eventType: "speech_to_text_transcription",
+      idempotencyKey: "req_123",
+      payload,
     });
   });
 
@@ -263,6 +288,27 @@ describe("vendor webhook normalization", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       error: "Invalid webhook payload",
+    });
+    expect(recordVendorWebhookEvent).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 when ElevenLabs webhook persistence fails", async () => {
+    recordVendorWebhookEvent.mockRejectedValueOnce(new Error("db down"));
+
+    const response = await postElevenLabsWebhook({
+      type: "speech_to_text_transcription",
+      data: {
+        request_id: "req_123",
+        webhook_metadata: {},
+        transcription: {
+          text: "Transcript text",
+        },
+      },
+    });
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: "Webhook processing failed",
     });
   });
 
@@ -311,6 +357,55 @@ describe("vendor webhook normalization", () => {
   });
 
   it("accepts real Recall webhook payloads through the route", async () => {
+    const payload = {
+      event: "bot.status_change",
+      data: {
+        data: {
+          code: "done",
+          sub_code: "recording_done",
+          updated_at: "2026-06-23T12:00:00Z",
+        },
+        bot: {
+          id: "bot_123",
+          metadata: {},
+        },
+      },
+    };
+    const response = await postRecallWebhook(payload);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      received: true,
+      event: {
+        eventType: "bot.status_change",
+        botId: "bot_123",
+        statusCode: "done",
+      },
+    });
+    expect(recordVendorWebhookEvent).toHaveBeenCalledWith({
+      provider: "recall",
+      eventType: "bot.status_change",
+      idempotencyKey: "msg_test",
+      payload,
+    });
+  });
+
+  it("returns 400 for invalid Recall webhook payloads", async () => {
+    const response = await postRecallWebhook({
+      event: "bot.status_change",
+      data: {},
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid webhook payload",
+    });
+    expect(recordVendorWebhookEvent).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 when Recall webhook persistence fails", async () => {
+    recordVendorWebhookEvent.mockRejectedValueOnce(new Error("db down"));
+
     const response = await postRecallWebhook({
       event: "bot.status_change",
       data: {
@@ -326,26 +421,9 @@ describe("vendor webhook normalization", () => {
       },
     });
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      received: true,
-      event: {
-        eventType: "bot.status_change",
-        botId: "bot_123",
-        statusCode: "done",
-      },
-    });
-  });
-
-  it("returns 400 for invalid Recall webhook payloads", async () => {
-    const response = await postRecallWebhook({
-      event: "bot.status_change",
-      data: {},
-    });
-
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({
-      error: "Invalid webhook payload",
+      error: "Webhook processing failed",
     });
   });
 

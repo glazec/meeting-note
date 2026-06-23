@@ -1,4 +1,11 @@
-import { normalizeRecallWebhook } from "@/lib/vendors/recall";
+import {
+  getRecallWebhookIdempotencyKey,
+  normalizeRecallWebhook,
+} from "@/lib/vendors/recall";
+import {
+  MissingWebhookIdempotencyKeyError,
+  recordVendorWebhookEvent,
+} from "@/lib/vendor-webhook-events";
 import {
   verifyRecallWebhook,
   webhookVerificationResponse,
@@ -24,11 +31,35 @@ export async function POST(request: Request) {
     return webhookVerificationResponse(error);
   }
 
-  try {
-    const event = normalizeRecallWebhook(body);
+  let event: ReturnType<typeof normalizeRecallWebhook>;
 
-    return Response.json({ received: true, event });
+  try {
+    event = normalizeRecallWebhook(body);
   } catch {
     return Response.json({ error: "Invalid webhook payload" }, { status: 400 });
+  }
+
+  try {
+    await recordVendorWebhookEvent({
+      provider: "recall",
+      eventType: event.eventType,
+      idempotencyKey:
+        getRecallWebhookIdempotencyKey(event, request.headers) ?? "",
+      payload: body,
+    });
+
+    return Response.json({ received: true, event });
+  } catch (error) {
+    if (error instanceof MissingWebhookIdempotencyKeyError) {
+      return Response.json(
+        { error: "Invalid webhook payload" },
+        { status: 400 },
+      );
+    }
+
+    return Response.json(
+      { error: "Webhook processing failed" },
+      { status: 500 },
+    );
   }
 }

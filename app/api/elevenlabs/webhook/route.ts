@@ -1,4 +1,11 @@
-import { normalizeElevenLabsWebhook } from "@/lib/vendors/elevenlabs";
+import {
+  getElevenLabsWebhookIdempotencyKey,
+  normalizeElevenLabsWebhook,
+} from "@/lib/vendors/elevenlabs";
+import {
+  MissingWebhookIdempotencyKeyError,
+  recordVendorWebhookEvent,
+} from "@/lib/vendor-webhook-events";
 import {
   verifyElevenLabsWebhook,
   webhookVerificationResponse,
@@ -16,11 +23,34 @@ export async function POST(request: Request) {
     return webhookVerificationResponse(error);
   }
 
-  try {
-    const event = normalizeElevenLabsWebhook(body);
+  let event: ReturnType<typeof normalizeElevenLabsWebhook>;
 
-    return Response.json({ received: true, event });
+  try {
+    event = normalizeElevenLabsWebhook(body);
   } catch {
     return Response.json({ error: "Invalid webhook payload" }, { status: 400 });
+  }
+
+  try {
+    await recordVendorWebhookEvent({
+      provider: "elevenlabs",
+      eventType: event.eventType,
+      idempotencyKey: getElevenLabsWebhookIdempotencyKey(event) ?? "",
+      payload: body,
+    });
+
+    return Response.json({ received: true, event });
+  } catch (error) {
+    if (error instanceof MissingWebhookIdempotencyKeyError) {
+      return Response.json(
+        { error: "Invalid webhook payload" },
+        { status: 400 },
+      );
+    }
+
+    return Response.json(
+      { error: "Webhook processing failed" },
+      { status: 500 },
+    );
   }
 }

@@ -70,6 +70,19 @@ export function normalizeRecallWebhook(payload: unknown) {
   };
 }
 
+export function getRecallWebhookIdempotencyKey(
+  event: ReturnType<typeof normalizeRecallWebhook>,
+  headers: Headers,
+) {
+  return (
+    headers.get("webhook-id") ??
+    headers.get("svix-id") ??
+    event.botId ??
+    event.recordingId ??
+    null
+  );
+}
+
 export async function scheduleRecallBot(input: {
   meetingUrl: string;
   startAt?: string;

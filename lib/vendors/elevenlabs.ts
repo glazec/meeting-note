@@ -70,6 +70,12 @@ export function normalizeElevenLabsWebhook(payload: unknown) {
   };
 }
 
+export function getElevenLabsWebhookIdempotencyKey(
+  event: ReturnType<typeof normalizeElevenLabsWebhook>,
+) {
+  return event.requestId ?? event.transcriptId ?? null;
+}
+
 export async function createElevenLabsTranscriptJob(input: {
   audioUrl: string;
   webhookUrl: string;
