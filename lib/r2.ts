@@ -53,12 +53,18 @@ export class ObjectNotFoundError extends Error {
   }
 }
 
+const requiredTrimmedString = z.string().trim().min(1);
+
 const r2EnvSchema = z.object({
-  R2_ACCOUNT_ID: z.string().min(1),
-  R2_ACCESS_KEY_ID: z.string().min(1),
-  R2_SECRET_ACCESS_KEY: z.string().min(1),
-  R2_BUCKET: z.string().min(1),
+  R2_ACCOUNT_ID: requiredTrimmedString,
+  R2_ACCESS_KEY_ID: requiredTrimmedString,
+  R2_SECRET_ACCESS_KEY: requiredTrimmedString,
+  R2_BUCKET: requiredTrimmedString,
 });
+
+export function parseR2Env(source: Record<string, string | undefined>) {
+  return r2EnvSchema.parse(source);
+}
 
 export function assertSafeObjectKeySegment(
   value: string,
@@ -96,7 +102,7 @@ export function buildPendingUploadObjectKey(
 
 export async function createUploadUrl(input: CreateUploadUrlInput) {
   const client = createR2Client();
-  const env = r2EnvSchema.parse(process.env);
+  const env = parseR2Env(process.env);
   const command = new PutObjectCommand({
     Bucket: env.R2_BUCKET,
     Key: input.key,
@@ -108,7 +114,7 @@ export async function createUploadUrl(input: CreateUploadUrlInput) {
 
 export async function createReadUrl(input: CreateReadUrlInput) {
   const client = createR2Client();
-  const env = r2EnvSchema.parse(process.env);
+  const env = parseR2Env(process.env);
   const command = new GetObjectCommand({
     Bucket: env.R2_BUCKET,
     Key: input.key,
@@ -119,7 +125,7 @@ export async function createReadUrl(input: CreateReadUrlInput) {
 
 export async function getObjectMetadata(input: GetObjectMetadataInput) {
   const client = createR2Client();
-  const env = r2EnvSchema.parse(process.env);
+  const env = parseR2Env(process.env);
   const command = new HeadObjectCommand({
     Bucket: env.R2_BUCKET,
     Key: input.key,
@@ -143,7 +149,7 @@ export async function getObjectMetadata(input: GetObjectMetadataInput) {
 
 export async function putObject(input: PutObjectInput) {
   const client = createR2Client();
-  const env = r2EnvSchema.parse(process.env);
+  const env = parseR2Env(process.env);
   const command = new PutObjectCommand({
     Bucket: env.R2_BUCKET,
     Key: input.key,
@@ -172,7 +178,7 @@ function isNotFoundError(error: unknown) {
 }
 
 function createR2Client() {
-  const env = r2EnvSchema.parse(process.env);
+  const env = parseR2Env(process.env);
 
   return new S3Client({
     region: "auto",

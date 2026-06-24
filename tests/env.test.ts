@@ -34,4 +34,29 @@ describe("parseEnv", () => {
       parseEnv({ ...baseEnv, R2_PUBLIC_BASE_URL: "" }).R2_PUBLIC_BASE_URL,
     ).toBeUndefined();
   });
+
+  it("trims copied environment values", async () => {
+    for (const [key, value] of Object.entries(baseEnv)) {
+      vi.stubEnv(key, value);
+    }
+
+    const { parseEnv } = await import("@/lib/env");
+
+    expect(
+      parseEnv({
+        ...baseEnv,
+        R2_ACCOUNT_ID: "account-id\n",
+        R2_ACCESS_KEY_ID: "access-key-id\n",
+        R2_SECRET_ACCESS_KEY: "secret-access-key\n",
+        R2_BUCKET: "recordings\n",
+        NEXT_PUBLIC_APP_URL: "https://app.example.com\n",
+      }),
+    ).toMatchObject({
+      R2_ACCOUNT_ID: "account-id",
+      R2_ACCESS_KEY_ID: "access-key-id",
+      R2_SECRET_ACCESS_KEY: "secret-access-key",
+      R2_BUCKET: "recordings",
+      NEXT_PUBLIC_APP_URL: "https://app.example.com",
+    });
+  });
 });

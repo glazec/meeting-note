@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { buildMeetingObjectKey, buildPendingUploadObjectKey } from "@/lib/r2";
+import {
+  buildMeetingObjectKey,
+  buildPendingUploadObjectKey,
+  parseR2Env,
+} from "@/lib/r2";
 
 describe("buildMeetingObjectKey", () => {
   it("builds the R2 object key for a meeting asset", () => {
@@ -66,5 +70,23 @@ describe("buildPendingUploadObjectKey", () => {
         extension: "mp3",
       }),
     ).toThrow("Unsafe object key segment");
+  });
+});
+
+describe("parseR2Env", () => {
+  it("trims copied R2 credential values", () => {
+    expect(
+      parseR2Env({
+        R2_ACCOUNT_ID: "account-id\n",
+        R2_ACCESS_KEY_ID: "access-key-id\n",
+        R2_SECRET_ACCESS_KEY: "secret-access-key\n",
+        R2_BUCKET: "recordings\n",
+      }),
+    ).toEqual({
+      R2_ACCOUNT_ID: "account-id",
+      R2_ACCESS_KEY_ID: "access-key-id",
+      R2_SECRET_ACCESS_KEY: "secret-access-key",
+      R2_BUCKET: "recordings",
+    });
   });
 });
