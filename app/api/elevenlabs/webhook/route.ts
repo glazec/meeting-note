@@ -6,6 +6,7 @@ import {
   MissingWebhookIdempotencyKeyError,
   recordVendorWebhookEvent,
 } from "@/lib/vendor-webhook-events";
+import { applyElevenLabsTranscriptEvent } from "@/lib/elevenlabs-transcripts";
 import {
   verifyElevenLabsWebhook,
   webhookVerificationResponse,
@@ -32,12 +33,16 @@ export async function POST(request: Request) {
   }
 
   try {
-    await recordVendorWebhookEvent({
+    const recorded = await recordVendorWebhookEvent({
       provider: "elevenlabs",
       eventType: event.eventType,
       idempotencyKey: getElevenLabsWebhookIdempotencyKey(event) ?? "",
       payload: body,
     });
+
+    if (recorded.inserted) {
+      await applyElevenLabsTranscriptEvent(event);
+    }
 
     return Response.json({ received: true, event });
   } catch (error) {

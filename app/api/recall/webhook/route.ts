@@ -6,6 +6,7 @@ import {
   MissingWebhookIdempotencyKeyError,
   recordVendorWebhookEvent,
 } from "@/lib/vendor-webhook-events";
+import { applyRecallMeetingEvent } from "@/lib/recall-meetings";
 import {
   verifyRecallWebhook,
   webhookVerificationResponse,
@@ -40,13 +41,17 @@ export async function POST(request: Request) {
   }
 
   try {
-    await recordVendorWebhookEvent({
+    const recorded = await recordVendorWebhookEvent({
       provider: "recall",
       eventType: event.eventType,
       idempotencyKey:
         getRecallWebhookIdempotencyKey(event, request.headers) ?? "",
       payload: body,
     });
+
+    if (recorded.inserted) {
+      await applyRecallMeetingEvent(event);
+    }
 
     return Response.json({ received: true, event });
   } catch (error) {

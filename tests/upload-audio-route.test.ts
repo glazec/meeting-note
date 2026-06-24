@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const getCurrentUser = vi.fn();
 const putObject = vi.fn();
+const createUploadedAudioTranscription = vi.fn();
 const send = vi.fn();
 
 vi.mock("@/lib/auth", () => ({
@@ -23,6 +24,10 @@ vi.mock("@/inngest/client", () => ({
   },
 }));
 
+vi.mock("@/lib/transcription-records", () => ({
+  createUploadedAudioTranscription,
+}));
+
 async function postAudioUpload(file: File) {
   const { POST } = await import("@/app/api/uploads/audio/route");
   const formData = new FormData();
@@ -41,6 +46,7 @@ describe("POST /api/uploads/audio", () => {
     vi.restoreAllMocks();
     getCurrentUser.mockReset();
     putObject.mockReset();
+    createUploadedAudioTranscription.mockReset();
     send.mockReset();
     vi.resetModules();
   });
@@ -67,6 +73,11 @@ describe("POST /api/uploads/audio", () => {
       name: null,
     });
     putObject.mockResolvedValue(undefined);
+    createUploadedAudioTranscription.mockResolvedValue({
+      meetingId: "22222222-2222-4222-8222-222222222222",
+      mediaAssetId: "33333333-3333-4333-8333-333333333333",
+      transcriptJobId: "44444444-4444-4444-8444-444444444444",
+    });
     send.mockResolvedValue({ ids: ["evt_123"] });
 
     const response = await postAudioUpload(
@@ -77,17 +88,33 @@ describe("POST /api/uploads/audio", () => {
     await expect(response.json()).resolves.toEqual({
       queued: true,
       key: "users/user_123/uploads/11111111-1111-4111-8111-111111111111.mp3",
+      meetingId: "22222222-2222-4222-8222-222222222222",
     });
     expect(putObject).toHaveBeenCalledWith({
       key: "users/user_123/uploads/11111111-1111-4111-8111-111111111111.mp3",
       body: expect.any(Uint8Array),
       contentType: "audio/mpeg",
     });
+    expect(createUploadedAudioTranscription).toHaveBeenCalledWith({
+      sessionUser: {
+        id: "user_123",
+        email: "user@example.com",
+        name: null,
+      },
+      objectKey:
+        "users/user_123/uploads/11111111-1111-4111-8111-111111111111.mp3",
+      title: "sample",
+      fileSizeBytes: 8,
+      mimeType: "audio/mpeg",
+    });
     expect(send).toHaveBeenCalledWith({
       name: "meeting/transcribe.audio",
       data: {
+        meetingId: "22222222-2222-4222-8222-222222222222",
+        mediaAssetId: "33333333-3333-4333-8333-333333333333",
         objectKey:
           "users/user_123/uploads/11111111-1111-4111-8111-111111111111.mp3",
+        transcriptJobId: "44444444-4444-4444-8444-444444444444",
       },
     });
   });
@@ -108,5 +135,6 @@ describe("POST /api/uploads/audio", () => {
       error: "Invalid audio upload request",
     });
     expect(putObject).not.toHaveBeenCalled();
+    expect(createUploadedAudioTranscription).not.toHaveBeenCalled();
   });
 });

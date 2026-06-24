@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createElevenLabsTranscriptJob,
@@ -11,8 +11,14 @@ import {
   scheduleRecallBot,
 } from "@/lib/vendors/recall";
 
-const { recordVendorWebhookEvent, MissingWebhookIdempotencyKeyError } =
-  vi.hoisted(() => ({
+const {
+  applyElevenLabsTranscriptEvent,
+  applyRecallMeetingEvent,
+  recordVendorWebhookEvent,
+  MissingWebhookIdempotencyKeyError,
+} = vi.hoisted(() => ({
+    applyElevenLabsTranscriptEvent: vi.fn(),
+    applyRecallMeetingEvent: vi.fn(),
     recordVendorWebhookEvent: vi.fn(),
     MissingWebhookIdempotencyKeyError: class MissingWebhookIdempotencyKeyError extends Error {
       constructor() {
@@ -27,6 +33,14 @@ vi.mock("@/lib/vendor-webhook-events", () => {
     recordVendorWebhookEvent,
   };
 });
+
+vi.mock("@/lib/elevenlabs-transcripts", () => ({
+  applyElevenLabsTranscriptEvent,
+}));
+
+vi.mock("@/lib/recall-meetings", () => ({
+  applyRecallMeetingEvent,
+}));
 
 const elevenLabsWebhookSecret = "elevenlabs-webhook-secret";
 const recallWebhookSecret = "whsec_cmVjYWxsLXdlYmhvb2stc2VjcmV0";
@@ -138,11 +152,19 @@ async function postRecallWebhookWithHeaders(
 }
 
 describe("vendor webhook normalization", () => {
+  beforeEach(() => {
+    recordVendorWebhookEvent.mockResolvedValue({ inserted: true });
+    applyElevenLabsTranscriptEvent.mockResolvedValue({ action: "skip" });
+    applyRecallMeetingEvent.mockResolvedValue({ action: "skip" });
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     vi.resetModules();
     recordVendorWebhookEvent.mockReset();
+    applyElevenLabsTranscriptEvent.mockReset();
+    applyRecallMeetingEvent.mockReset();
   });
 
   it("normalizes Recall bot status webhooks", () => {
@@ -279,6 +301,34 @@ describe("vendor webhook normalization", () => {
       idempotencyKey: "req_123",
       payload,
     });
+    expect(applyElevenLabsTranscriptEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "speech_to_text_transcription",
+        requestId: "req_123",
+        transcriptionText: "Transcript text",
+      }),
+    );
+  });
+
+  it("skips ElevenLabs transcript persistence for duplicate webhooks", async () => {
+    recordVendorWebhookEvent.mockResolvedValueOnce({ inserted: false });
+
+    const response = await postElevenLabsWebhook({
+      type: "speech_to_text_transcription",
+      data: {
+        request_id: "req_123",
+        webhook_metadata: {
+          meetingId: "11111111-1111-4111-8111-111111111111",
+          transcriptJobId: "22222222-2222-4222-8222-222222222222",
+        },
+        transcription: {
+          text: "Transcript text",
+        },
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(applyElevenLabsTranscriptEvent).not.toHaveBeenCalled();
   });
 
   it("returns 400 for invalid ElevenLabs webhook payloads", async () => {
@@ -292,6 +342,7 @@ describe("vendor webhook normalization", () => {
       error: "Invalid webhook payload",
     });
     expect(recordVendorWebhookEvent).not.toHaveBeenCalled();
+    expect(applyElevenLabsTranscriptEvent).not.toHaveBeenCalled();
   });
 
   it("returns 500 when ElevenLabs webhook persistence fails", async () => {
@@ -312,6 +363,7 @@ describe("vendor webhook normalization", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Webhook processing failed",
     });
+    expect(applyElevenLabsTranscriptEvent).not.toHaveBeenCalled();
   });
 
   it("rejects unsigned ElevenLabs webhook requests", async () => {
@@ -390,6 +442,37 @@ describe("vendor webhook normalization", () => {
       idempotencyKey: "msg_test",
       payload,
     });
+    expect(applyRecallMeetingEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "bot.status_change",
+        botId: "bot_123",
+        statusCode: "done",
+      }),
+    );
+  });
+
+  it("skips Recall meeting updates for duplicate webhooks", async () => {
+    recordVendorWebhookEvent.mockResolvedValueOnce({ inserted: false });
+
+    const response = await postRecallWebhook({
+      event: "bot.status_change",
+      data: {
+        data: {
+          code: "done",
+          sub_code: "recording_done",
+          updated_at: "2026-06-23T12:00:00Z",
+        },
+        bot: {
+          id: "bot_123",
+          metadata: {
+            meetingId: "11111111-1111-4111-8111-111111111111",
+          },
+        },
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(applyRecallMeetingEvent).not.toHaveBeenCalled();
   });
 
   it("returns 400 for invalid Recall webhook payloads", async () => {
@@ -403,6 +486,7 @@ describe("vendor webhook normalization", () => {
       error: "Invalid webhook payload",
     });
     expect(recordVendorWebhookEvent).not.toHaveBeenCalled();
+    expect(applyRecallMeetingEvent).not.toHaveBeenCalled();
   });
 
   it("returns 500 when Recall webhook persistence fails", async () => {
@@ -427,6 +511,7 @@ describe("vendor webhook normalization", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Webhook processing failed",
     });
+    expect(applyRecallMeetingEvent).not.toHaveBeenCalled();
   });
 
   it("rejects unsigned Recall webhook requests", async () => {

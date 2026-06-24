@@ -32,6 +32,7 @@ const recallBotInputSchema = z.object({
   meetingUrl: z.string().url(),
   startAt: z.string().datetime().optional(),
   webhookUrl: z.string().url(),
+  metadata: z.record(z.string(), z.string()).optional(),
 });
 
 const recallApiEnvSchema = z.object({
@@ -87,6 +88,7 @@ export async function scheduleRecallBot(input: {
   meetingUrl: string;
   startAt?: string;
   webhookUrl: string;
+  metadata?: Record<string, string>;
 }) {
   const parsedInput = recallBotInputSchema.parse(input);
   const env = recallApiEnvSchema.parse(process.env);
@@ -104,6 +106,7 @@ export async function scheduleRecallBot(input: {
       metadata: {
         // Recall delivers bot status webhooks to dashboard configured endpoints. This metadata only correlates the request with our app URL.
         requested_webhook_url: parsedInput.webhookUrl,
+        ...parsedInput.metadata,
       },
     }),
   });

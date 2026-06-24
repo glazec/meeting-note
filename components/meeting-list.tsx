@@ -57,32 +57,43 @@ export function MeetingList({ meetings }: MeetingListProps) {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {meetings.map((meeting) => (
-          <TableRow key={meeting.id}>
-            <TableCell className="min-w-48">
-              <Link
-                href={`/meetings/${meeting.id}`}
-                className="font-medium text-foreground hover:underline"
-              >
-                {meeting.title}
-              </Link>
-              <span className="mt-1 block text-xs text-muted-foreground sm:hidden">
-                {platformLabels[meeting.platform]}
-              </span>
-            </TableCell>
-            <TableCell className="hidden text-muted-foreground sm:table-cell">
-              {platformLabels[meeting.platform]}
-            </TableCell>
-            <TableCell className="hidden text-muted-foreground md:table-cell">
-              {formatStartedAt(meeting.startedAt)}
-            </TableCell>
-            <TableCell className="text-right">
-              <Badge variant={getStatusVariant(meeting.status)}>
-                {statusLabels[meeting.status]}
-              </Badge>
+        {meetings.length === 0 ? (
+          <TableRow>
+            <TableCell
+              colSpan={4}
+              className="h-24 text-center text-muted-foreground"
+            >
+              No meetings found
             </TableCell>
           </TableRow>
-        ))}
+        ) : (
+          meetings.map((meeting) => (
+            <TableRow key={meeting.id}>
+              <TableCell className="min-w-48">
+                <Link
+                  href={`/meetings/${meeting.id}`}
+                  className="font-medium text-foreground hover:underline"
+                >
+                  {meeting.title}
+                </Link>
+                <span className="mt-1 block text-xs text-muted-foreground sm:hidden">
+                  {platformLabels[meeting.platform]}
+                </span>
+              </TableCell>
+              <TableCell className="hidden text-muted-foreground sm:table-cell">
+                {platformLabels[meeting.platform]}
+              </TableCell>
+              <TableCell className="hidden text-muted-foreground md:table-cell">
+                {formatStartedAt(meeting.startedAt)}
+              </TableCell>
+              <TableCell className="text-right">
+                <Badge variant={getStatusVariant(meeting.status)}>
+                  {statusLabels[meeting.status]}
+                </Badge>
+              </TableCell>
+            </TableRow>
+          ))
+        )}
       </TableBody>
     </Table>
   );

@@ -39,11 +39,11 @@ Dashboard, meeting transcript, and team settings pages require an authenticated 
 
 ## Meeting Links
 
-The new meeting page posts Google Meet and Zoom links to `/api/meetings/link`. The route requires an authenticated Neon Auth session, rejects unsupported meeting hosts, and schedules a Recall bot with `/api/recall/webhook` as the callback URL.
+The new meeting page posts Google Meet and Zoom links to `/api/meetings/link`. The route requires an authenticated Neon Auth session, rejects unsupported meeting hosts, creates a local meeting row, and schedules a Recall bot with `/api/recall/webhook` as the callback URL. The Recall bot receives the local `meetingId` in metadata so later webhooks can update the same meeting.
 
 ## MP3 Uploads
 
-The upload form requests a signed R2 PUT URL from `/api/upload`, uploads the MP3 directly to R2, then posts the returned `uploadId` to `/api/uploads/complete`. If the browser PUT fails, the form falls back to `/api/uploads/audio`, which stores the MP3 server side and queues the same `meeting/transcribe.audio` event. The worker creates a short lived R2 read URL and starts an ElevenLabs transcription job.
+The upload form requests a signed R2 PUT URL from `/api/upload`, uploads the MP3 directly to R2, then posts the returned `uploadId` to `/api/uploads/complete`. The completion route checks that the R2 object exists, creates local meeting, media asset, and transcript job rows, then queues `meeting/transcribe.audio`. If the browser PUT fails, the form falls back to `/api/uploads/audio`, which stores the MP3 server side and creates the same durable records. The worker creates a short lived R2 read URL, starts an ElevenLabs transcription job, and passes the local record ids as webhook metadata.
 
 The R2 bucket must allow browser PUT requests from the app origin:
 
@@ -74,7 +74,9 @@ Shared transcript pages use `/share/[token]`. The route hashes the URL token, lo
 
 ## Vendor Webhooks
 
-Recall bot status webhooks are delivered to endpoints configured in the Recall dashboard. ElevenLabs speech to text webhooks are delivered to workspace configured webhooks when transcript jobs set `webhook=true`. Both webhook routes verify vendor signatures from the raw request body before parsing the event. Per request webhook metadata is stored only for correlation.
+Recall bot status webhooks are delivered to endpoints configured in the Recall dashboard. ElevenLabs speech to text webhooks are delivered to workspace configured webhooks when transcript jobs set `webhook=true`. Both webhook routes verify vendor signatures from the raw request body before parsing the event, store an idempotency record, and only apply side effects for newly inserted webhook events.
+
+Recall webhooks update the local meeting status when metadata contains a `meetingId`. ElevenLabs webhooks update the local transcript job, store transcript text as a transcript segment, and mark the meeting ready when metadata contains `meetingId` and `transcriptJobId`.
 
 ## Verification
 

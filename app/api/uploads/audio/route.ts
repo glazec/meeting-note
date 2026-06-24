@@ -5,6 +5,7 @@ import {
   putObject,
   UnsafeObjectKeySegmentError,
 } from "@/lib/r2";
+import { createUploadedAudioTranscription } from "@/lib/transcription-records";
 
 export const runtime = "nodejs";
 
@@ -40,12 +41,23 @@ export async function POST(request: Request) {
       contentType: "audio/mpeg",
     });
 
-    await inngest.send({
-      name: "meeting/transcribe.audio",
-      data: { objectKey: key },
+    const transcription = await createUploadedAudioTranscription({
+      sessionUser: user,
+      objectKey: key,
+      title: titleFromFileName(file.name),
+      fileSizeBytes: file.size,
+      mimeType: "audio/mpeg",
     });
 
-    return Response.json({ queued: true, key }, { status: 202 });
+    await inngest.send({
+      name: "meeting/transcribe.audio",
+      data: { objectKey: key, ...transcription },
+    });
+
+    return Response.json(
+      { queued: true, key, meetingId: transcription.meetingId },
+      { status: 202 },
+    );
   } catch (error) {
     if (error instanceof UnsafeObjectKeySegmentError) {
       return Response.json(
@@ -63,4 +75,14 @@ export async function POST(request: Request) {
 
 function isMp3(file: File) {
   return file.name.toLowerCase().endsWith(".mp3");
+}
+
+function titleFromFileName(fileName: string) {
+  const title = fileName
+    .replace(/\.mp3$/i, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return title || "Uploaded audio";
 }

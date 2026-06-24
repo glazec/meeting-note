@@ -1,0 +1,59 @@
+import { db } from "@/db/client";
+import { mediaAssets, meetings, transcriptJobs } from "@/db/schema";
+import type { SessionUser } from "@/lib/auth";
+import { env } from "@/lib/env";
+import { getOrCreateWorkspaceForSessionUser } from "@/lib/workspace";
+
+type CreateUploadedAudioTranscriptionInput = {
+  sessionUser: SessionUser;
+  objectKey: string;
+  title?: string;
+  fileSizeBytes?: number;
+  mimeType?: string;
+};
+
+export async function createUploadedAudioTranscription(
+  input: CreateUploadedAudioTranscriptionInput,
+) {
+  const workspace = await getOrCreateWorkspaceForSessionUser(input.sessionUser);
+  const [meeting] = await db
+    .insert(meetings)
+    .values({
+      teamId: workspace.teamId,
+      ownerUserId: workspace.userId,
+      title: input.title?.trim() || "Uploaded audio",
+      platform: "upload",
+      status: "processing",
+      startedAt: new Date(),
+    })
+    .returning({ id: meetings.id });
+
+  const [asset] = await db
+    .insert(mediaAssets)
+    .values({
+      meetingId: meeting.id,
+      source: "upload",
+      type: "audio",
+      bucket: env.R2_BUCKET,
+      objectKey: input.objectKey,
+      mimeType: input.mimeType ?? "audio/mpeg",
+      fileSizeBytes: input.fileSizeBytes,
+    })
+    .returning({ id: mediaAssets.id });
+
+  const [job] = await db
+    .insert(transcriptJobs)
+    .values({
+      meetingId: meeting.id,
+      mediaAssetId: asset.id,
+      provider: "elevenlabs",
+      status: "queued",
+    })
+    .returning({ id: transcriptJobs.id });
+
+  return {
+    meetingId: meeting.id,
+    mediaAssetId: asset.id,
+    transcriptJobId: job.id,
+  };
+}

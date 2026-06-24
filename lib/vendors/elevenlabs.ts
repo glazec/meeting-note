@@ -28,6 +28,7 @@ const elevenLabsWebhookSchema = z.object({
 const elevenLabsTranscriptInputSchema = z.object({
   audioUrl: z.string().url(),
   webhookUrl: z.string().url(),
+  metadata: z.record(z.string(), z.string()).optional(),
 });
 
 const elevenLabsApiEnvSchema = z.object({
@@ -81,6 +82,7 @@ export function getElevenLabsWebhookIdempotencyKey(
 export async function createElevenLabsTranscriptJob(input: {
   audioUrl: string;
   webhookUrl: string;
+  metadata?: Record<string, string>;
 }) {
   const parsedInput = elevenLabsTranscriptInputSchema.parse(input);
   const env = elevenLabsApiEnvSchema.parse(process.env);
@@ -92,7 +94,10 @@ export async function createElevenLabsTranscriptJob(input: {
   // ElevenLabs delivers webhooks to workspace configured endpoints. This metadata only correlates the request with our app URL.
   body.append(
     "webhook_metadata",
-    JSON.stringify({ requestedWebhookUrl: parsedInput.webhookUrl }),
+    JSON.stringify({
+      requestedWebhookUrl: parsedInput.webhookUrl,
+      ...parsedInput.metadata,
+    }),
   );
 
   const response = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {

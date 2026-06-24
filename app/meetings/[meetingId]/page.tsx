@@ -1,56 +1,27 @@
+import { notFound } from "next/navigation";
+
 import { AppShell } from "@/components/app-shell";
 import { ShareDialog } from "@/components/share-dialog";
-import {
-  TranscriptViewer,
-  type TranscriptSegment,
-} from "@/components/transcript-viewer";
+import { TranscriptViewer } from "@/components/transcript-viewer";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { requireCurrentUser } from "@/lib/auth-guards";
+import { getWorkspaceMeetingTranscript } from "@/lib/meeting-queries";
 
 export const dynamic = "force-dynamic";
-
-const transcript: TranscriptSegment[] = [
-  {
-    id: "s1",
-    speaker: "Maya",
-    startMs: 0,
-    text: "The main decision is to keep transcript access tied to workspace membership before we open external sharing.",
-  },
-  {
-    id: "s2",
-    speaker: "Jon",
-    startMs: 18400,
-    text: "Search should stay lightweight for now. Tokenizing the query is enough until we have the storage layer in place.",
-  },
-  {
-    id: "s3",
-    speaker: "Priya",
-    startMs: 42600,
-    text: "For uploads, the visible flow can collect the file and meeting link, but there should be no vendor call from this screen yet.",
-  },
-  {
-    id: "s4",
-    speaker: null,
-    startMs: 67300,
-    text: "Follow up on share link revocation copy before the next access review.",
-  },
-];
-
-const meeting = {
-  title: "Weekly product review",
-  platform: "Google Meet",
-  status: "Ready",
-};
 
 export default async function MeetingPage({
   params,
 }: {
   params: Promise<{ meetingId: string }>;
 }) {
-  await requireCurrentUser();
-
+  const user = await requireCurrentUser();
   const { meetingId } = await params;
+  const meeting = await getWorkspaceMeetingTranscript(user, meetingId);
+
+  if (!meeting) {
+    notFound();
+  }
 
   return (
     <AppShell>
@@ -65,14 +36,16 @@ export default async function MeetingPage({
               <dt className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
                 Platform
               </dt>
-              <dd className="mt-1 text-sm font-semibold">{meeting.platform}</dd>
+              <dd className="mt-1 text-sm font-semibold">
+                {formatPlatform(meeting.platform)}
+              </dd>
             </div>
             <div>
               <dt className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
                 Status
               </dt>
               <dd className="mt-1">
-                <Badge>{meeting.status}</Badge>
+                <Badge>{formatStatus(meeting.status)}</Badge>
               </dd>
             </div>
             <div className="min-w-0">
@@ -86,7 +59,7 @@ export default async function MeetingPage({
           </dl>
           <Separator />
           <div className="mt-8">
-            <TranscriptViewer segments={transcript} />
+            <TranscriptViewer segments={meeting.segments} />
           </div>
         </section>
 
@@ -96,4 +69,20 @@ export default async function MeetingPage({
       </div>
     </AppShell>
   );
+}
+
+function formatPlatform(platform: string) {
+  if (platform === "google_meet") {
+    return "Google Meet";
+  }
+
+  if (platform === "zoom") {
+    return "Zoom";
+  }
+
+  return "Upload";
+}
+
+function formatStatus(status: string) {
+  return status.charAt(0).toUpperCase() + status.slice(1);
 }

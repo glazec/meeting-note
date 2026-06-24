@@ -4,8 +4,11 @@ import { inngest } from "@/inngest/client";
 import { getCurrentUser } from "@/lib/auth";
 import {
   buildPendingUploadObjectKey,
+  getObjectMetadata,
+  ObjectNotFoundError,
   UnsafeObjectKeySegmentError,
 } from "@/lib/r2";
+import { createUploadedAudioTranscription } from "@/lib/transcription-records";
 
 export const runtime = "nodejs";
 
@@ -39,18 +42,33 @@ export async function POST(request: Request) {
       extension: "mp3",
     });
 
-    await inngest.send({
-      name: "meeting/transcribe.audio",
-      data: { objectKey: key },
+    const objectMetadata = await getObjectMetadata({ key });
+    const transcription = await createUploadedAudioTranscription({
+      sessionUser: user,
+      objectKey: key,
+      fileSizeBytes: objectMetadata.contentLength,
+      mimeType: objectMetadata.contentType,
     });
 
-    return Response.json({ queued: true, key }, { status: 202 });
+    await inngest.send({
+      name: "meeting/transcribe.audio",
+      data: { objectKey: key, ...transcription },
+    });
+
+    return Response.json(
+      { queued: true, key, meetingId: transcription.meetingId },
+      { status: 202 },
+    );
   } catch (error) {
     if (error instanceof UnsafeObjectKeySegmentError) {
       return Response.json(
         { error: "Invalid upload completion request" },
         { status: 400 },
       );
+    }
+
+    if (error instanceof ObjectNotFoundError) {
+      return Response.json({ error: "Uploaded audio not found" }, { status: 404 });
     }
 
     return Response.json(

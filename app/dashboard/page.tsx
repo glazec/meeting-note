@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Plus, Search } from "lucide-react";
 
 import { AppShell } from "@/components/app-shell";
-import { MeetingList, type MeetingListItem } from "@/components/meeting-list";
+import { MeetingList } from "@/components/meeting-list";
 import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
@@ -14,43 +14,19 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { requireCurrentUser } from "@/lib/auth-guards";
+import { listWorkspaceMeetings } from "@/lib/meeting-queries";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-const meetings: MeetingListItem[] = [
-  {
-    id: "weekly-product-review",
-    title: "Weekly product review",
-    platform: "google_meet",
-    startedAt: "2026-06-22T14:00:00.000Z",
-    status: "ready",
-  },
-  {
-    id: "pipeline-sync",
-    title: "Pipeline sync",
-    platform: "zoom",
-    startedAt: "2026-06-23T16:30:00.000Z",
-    status: "processing",
-  },
-  {
-    id: "customer-call-upload",
-    title: "Customer call upload",
-    platform: "upload",
-    startedAt: "2026-06-20T18:15:00.000Z",
-    status: "ready",
-  },
-  {
-    id: "design-critique",
-    title: "Design critique",
-    platform: "google_meet",
-    startedAt: "2026-06-24T15:00:00.000Z",
-    status: "scheduled",
-  },
-];
-
-export default async function DashboardPage() {
-  await requireCurrentUser();
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>;
+}) {
+  const user = await requireCurrentUser();
+  const { q } = await searchParams;
+  const meetings = await listWorkspaceMeetings(user, q);
 
   return (
     <AppShell>
@@ -93,6 +69,7 @@ export default async function DashboardPage() {
                   id="meeting-search"
                   name="q"
                   type="search"
+                  defaultValue={q ?? ""}
                   placeholder="Search title, speaker, or transcript"
                 />
               </div>

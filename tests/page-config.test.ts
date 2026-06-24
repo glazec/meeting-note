@@ -8,6 +8,11 @@ vi.mock("@/lib/share-links", () => ({
   getSharedTranscriptByToken: vi.fn(),
 }));
 
+vi.mock("@/lib/meeting-queries", () => ({
+  getWorkspaceMeetingTranscript: vi.fn(),
+  listWorkspaceMeetings: vi.fn(),
+}));
+
 describe("page rendering configuration", () => {
   it("renders dashboard dynamically because it reads auth cookies", async () => {
     const page = await import("@/app/dashboard/page");

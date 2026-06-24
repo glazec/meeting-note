@@ -1,5 +1,6 @@
 import {
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -28,6 +29,10 @@ type CreateReadUrlInput = {
   key: string;
 };
 
+type GetObjectMetadataInput = {
+  key: string;
+};
+
 type PutObjectInput = {
   key: string;
   body: Uint8Array;
@@ -38,6 +43,13 @@ export class UnsafeObjectKeySegmentError extends Error {
   constructor(segmentName: string) {
     super(`Unsafe object key segment: ${segmentName}`);
     this.name = "UnsafeObjectKeySegmentError";
+  }
+}
+
+export class ObjectNotFoundError extends Error {
+  constructor(key: string) {
+    super(`Object not found: ${key}`);
+    this.name = "ObjectNotFoundError";
   }
 }
 
@@ -105,6 +117,30 @@ export async function createReadUrl(input: CreateReadUrlInput) {
   return getSignedUrl(client, command, { expiresIn: 900 });
 }
 
+export async function getObjectMetadata(input: GetObjectMetadataInput) {
+  const client = createR2Client();
+  const env = r2EnvSchema.parse(process.env);
+  const command = new HeadObjectCommand({
+    Bucket: env.R2_BUCKET,
+    Key: input.key,
+  });
+
+  try {
+    const response = await client.send(command);
+
+    return {
+      contentLength: response.ContentLength,
+      contentType: response.ContentType,
+    };
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      throw new ObjectNotFoundError(input.key);
+    }
+
+    throw error;
+  }
+}
+
 export async function putObject(input: PutObjectInput) {
   const client = createR2Client();
   const env = r2EnvSchema.parse(process.env);
@@ -116,6 +152,23 @@ export async function putObject(input: PutObjectInput) {
   });
 
   await client.send(command);
+}
+
+function isNotFoundError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const candidate = error as {
+    name?: unknown;
+    $metadata?: { httpStatusCode?: unknown };
+  };
+
+  return (
+    candidate.name === "NotFound" ||
+    candidate.name === "NoSuchKey" ||
+    candidate.$metadata?.httpStatusCode === 404
+  );
 }
 
 function createR2Client() {

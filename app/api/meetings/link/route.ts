@@ -1,6 +1,11 @@
 import { z } from "zod";
 
 import { getCurrentUser } from "@/lib/auth";
+import {
+  createScheduledMeetingBot,
+  markMeetingBotFailed,
+  markMeetingBotScheduled,
+} from "@/lib/meeting-bot-records";
 import { buildAppUrl, detectMeetingPlatform } from "@/lib/meeting-links";
 import { scheduleRecallBot } from "@/lib/vendors/recall";
 
@@ -39,23 +44,40 @@ export async function POST(request: Request) {
     );
   }
 
+  const scheduledMeeting = await createScheduledMeetingBot({
+    sessionUser: user,
+    meetingUrl: result.data.meetingUrl,
+    platform,
+  });
+
   try {
     const bot = (await scheduleRecallBot({
       meetingUrl: result.data.meetingUrl,
       webhookUrl: buildAppUrl("/api/recall/webhook"),
+      metadata: {
+        meetingId: scheduledMeeting.meetingId,
+      },
     })) as RecallBotResponse;
 
     if (typeof bot.id !== "string") {
       throw new Error("Recall bot response missing id");
     }
 
+    await markMeetingBotScheduled({
+      meetingId: scheduledMeeting.meetingId,
+      recallBotId: bot.id,
+    });
+
     return Response.json({
       botId: bot.id,
+      meetingId: scheduledMeeting.meetingId,
       meetingUrl: result.data.meetingUrl,
       platform,
       status: "scheduled",
     });
   } catch {
+    await markMeetingBotFailed({ meetingId: scheduledMeeting.meetingId });
+
     return Response.json({ error: "Meeting bot unavailable" }, { status: 502 });
   }
 }
