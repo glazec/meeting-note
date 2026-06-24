@@ -69,8 +69,12 @@ function signRecallWebhook(rawBody: string) {
   };
 }
 
-async function postElevenLabsWebhook(body: unknown, signed = true) {
-  vi.stubEnv("ELEVENLABS_WEBHOOK_SECRET", elevenLabsWebhookSecret);
+async function postElevenLabsWebhook(
+  body: unknown,
+  signed = true,
+  envSecret = elevenLabsWebhookSecret,
+) {
+  vi.stubEnv("ELEVENLABS_WEBHOOK_SECRET", envSecret);
   const { POST } = await import("@/app/api/elevenlabs/webhook/route");
   const rawBody = JSON.stringify(body);
   const headers: Record<string, string> = {
@@ -90,8 +94,12 @@ async function postElevenLabsWebhook(body: unknown, signed = true) {
   );
 }
 
-async function postRecallWebhook(body: unknown, signed = true) {
-  vi.stubEnv("RECALL_WEBHOOK_SECRET", recallWebhookSecret);
+async function postRecallWebhook(
+  body: unknown,
+  signed = true,
+  envSecret = recallWebhookSecret,
+) {
+  vi.stubEnv("RECALL_WEBHOOK_SECRET", envSecret);
   const { POST } = await import("@/app/api/recall/webhook/route");
   const rawBody = JSON.stringify(body);
   const headers: Record<string, string> = {
@@ -310,6 +318,25 @@ describe("vendor webhook normalization", () => {
     );
   });
 
+  it("accepts copied ElevenLabs webhook secret values", async () => {
+    const response = await postElevenLabsWebhook(
+      {
+        type: "speech_to_text_transcription",
+        data: {
+          request_id: "req_123",
+          webhook_metadata: {},
+          transcription: {
+            text: "Transcript text",
+          },
+        },
+      },
+      true,
+      `${elevenLabsWebhookSecret}\n`,
+    );
+
+    expect(response.status).toBe(200);
+  });
+
   it("skips ElevenLabs transcript persistence for duplicate webhooks", async () => {
     recordVendorWebhookEvent.mockResolvedValueOnce({ inserted: false });
 
@@ -451,6 +478,27 @@ describe("vendor webhook normalization", () => {
     );
   });
 
+  it("accepts copied Recall webhook secret values", async () => {
+    const response = await postRecallWebhook(
+      {
+        event: "bot.status_change",
+        data: {
+          data: {
+            code: "done",
+          },
+          bot: {
+            id: "bot_123",
+            metadata: {},
+          },
+        },
+      },
+      true,
+      `${recallWebhookSecret}\n`,
+    );
+
+    expect(response.status).toBe(200);
+  });
+
   it("skips Recall meeting updates for duplicate webhooks", async () => {
     recordVendorWebhookEvent.mockResolvedValueOnce({ inserted: false });
 
@@ -576,7 +624,7 @@ describe("vendor job creation", () => {
   });
 
   it("sends ElevenLabs webhook metadata only as request correlation data", async () => {
-    vi.stubEnv("ELEVENLABS_API_KEY", "elevenlabs-key");
+    vi.stubEnv("ELEVENLABS_API_KEY", "elevenlabs-key\n");
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ request_id: "req_123" }), {
         status: 200,
@@ -600,7 +648,7 @@ describe("vendor job creation", () => {
   });
 
   it("sends Recall webhook URL only as request correlation metadata", async () => {
-    vi.stubEnv("RECALL_API_KEY", "recall-key");
+    vi.stubEnv("RECALL_API_KEY", "recall-key\n");
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ id: "bot_123" }), {
         status: 200,

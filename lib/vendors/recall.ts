@@ -36,7 +36,7 @@ const recallBotInputSchema = z.object({
 });
 
 const recallApiEnvSchema = z.object({
-  RECALL_API_KEY: z.string().min(1),
+  RECALL_API_KEY: z.string().trim().min(1),
 });
 
 export function normalizeRecallWebhook(payload: unknown) {

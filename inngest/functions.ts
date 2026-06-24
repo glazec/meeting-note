@@ -8,7 +8,7 @@ import { createReadUrl } from "@/lib/r2";
 import { createElevenLabsTranscriptJob } from "@/lib/vendors/elevenlabs";
 import { scheduleRecallBot } from "@/lib/vendors/recall";
 
-const appUrlSchema = z.string().url();
+const appUrlSchema = z.string().trim().url();
 
 const scheduleMeetingBotDataSchema = z.object({
   meetingUrl: z.string().url(),

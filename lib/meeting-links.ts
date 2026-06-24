@@ -28,7 +28,7 @@ export function detectMeetingPlatform(
 }
 
 export function buildAppUrl(pathname: string) {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL;
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
 
   if (!baseUrl) {
     throw new Error("NEXT_PUBLIC_APP_URL is required");

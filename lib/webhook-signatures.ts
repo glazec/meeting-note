@@ -17,7 +17,7 @@ export async function verifyElevenLabsWebhook(
   rawBody: string,
   headers: Headers,
 ) {
-  const secret = process.env.ELEVENLABS_WEBHOOK_SECRET;
+  const secret = process.env.ELEVENLABS_WEBHOOK_SECRET?.trim();
   const signature = headers.get("elevenlabs-signature");
 
   if (!secret) {
@@ -40,7 +40,7 @@ export async function verifyElevenLabsWebhook(
 }
 
 export function verifyRecallWebhook(rawBody: string, headers: Headers) {
-  const secret = process.env.RECALL_WEBHOOK_SECRET;
+  const secret = process.env.RECALL_WEBHOOK_SECRET?.trim();
 
   if (!secret || !secret.startsWith("whsec_")) {
     throw new WebhookVerificationError("Webhook secret is not configured", 500);

@@ -32,7 +32,7 @@ const elevenLabsTranscriptInputSchema = z.object({
 });
 
 const elevenLabsApiEnvSchema = z.object({
-  ELEVENLABS_API_KEY: z.string().min(1),
+  ELEVENLABS_API_KEY: z.string().trim().min(1),
 });
 
 export function normalizeElevenLabsWebhook(payload: unknown) {

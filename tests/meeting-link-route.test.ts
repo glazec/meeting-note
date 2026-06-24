@@ -58,7 +58,7 @@ describe("POST /api/meetings/link", () => {
   });
 
   it("schedules a Recall bot for Google Meet links", async () => {
-    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com\n");
     getCurrentUser.mockResolvedValue({
       id: "user_123",
       email: "user@example.com",
