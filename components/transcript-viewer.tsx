@@ -3,7 +3,9 @@
 import {
   type ChangeEvent,
   type FormEvent,
+  type PointerEvent,
   type RefObject,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -29,6 +31,8 @@ export type TranscriptSegment = {
   endMs: number | null;
   text: string;
 };
+
+const WAVEFORM_BAR_COUNT = 120;
 
 type TranscriptViewerProps = {
   audioUrl?: string | null;
@@ -183,7 +187,7 @@ export function TranscriptViewer({
 
   return (
     <>
-      <section className={audioUrl ? "pb-28" : undefined}>
+      <section className={audioUrl ? "pb-44" : undefined}>
         <header className="mb-5">
           <h2 className="text-lg font-semibold">Transcript</h2>
         </header>
@@ -318,12 +322,14 @@ export function TranscriptViewer({
 
       {audioUrl ? (
         <TranscriptAudioPlayer
+          activeSegmentId={activeSegmentId}
           audioRef={audioRef}
           audioUrl={audioUrl}
           currentTime={currentTime}
           duration={duration}
           isPlaying={isPlaying}
           playbackRate={playbackRate}
+          segments={segments}
           setCurrentTime={setCurrentTime}
           setDuration={setDuration}
           setIsPlaying={setIsPlaying}
@@ -335,30 +341,114 @@ export function TranscriptViewer({
 }
 
 function TranscriptAudioPlayer({
+  activeSegmentId,
   audioRef,
   audioUrl,
   currentTime,
   duration,
   isPlaying,
   playbackRate,
+  segments,
   setCurrentTime,
   setDuration,
   setIsPlaying,
   setPlaybackRate,
 }: {
+  activeSegmentId: string | null;
   audioRef: RefObject<HTMLAudioElement | null>;
   audioUrl: string;
   currentTime: number;
   duration: number;
   isPlaying: boolean;
   playbackRate: number;
+  segments: TranscriptSegment[];
   setCurrentTime: (value: number) => void;
   setDuration: (value: number) => void;
   setIsPlaying: (value: boolean) => void;
   setPlaybackRate: (value: number) => void;
 }) {
+  const [waveformPeaks, setWaveformPeaks] = useState<number[]>([]);
+  const [waveformStatus, setWaveformStatus] = useState<
+    "idle" | "loading" | "ready" | "fallback"
+  >("idle");
   const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
+  const segmentDuration = useMemo(() => getSegmentTimelineDuration(segments), [
+    segments,
+  ]);
+  const timelineDuration = safeDuration || segmentDuration;
   const progressValue = safeDuration ? currentTime : 0;
+  const waveformValues = useMemo(() => {
+    if (waveformPeaks.length > 0) {
+      return waveformPeaks;
+    }
+
+    return buildFallbackWaveform(segments, WAVEFORM_BAR_COUNT);
+  }, [segments, waveformPeaks]);
+  const sectionMarkers = useMemo(
+    () => buildWaveformSections(segments, timelineDuration),
+    [segments, timelineDuration],
+  );
+  const progressPercent = timelineDuration
+    ? clamp((currentTime / timelineDuration) * 100, 0, 100)
+    : 0;
+
+  useEffect(() => {
+    let isCancelled = false;
+    const controller = new AbortController();
+
+    async function loadWaveform() {
+      setWaveformStatus("loading");
+      setWaveformPeaks([]);
+
+      try {
+        const response = await fetch(getWaveformAudioUrl(audioUrl), {
+          credentials: "include",
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error("Audio waveform request failed");
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        const AudioContextConstructor =
+          window.AudioContext ??
+          (window as typeof window & {
+            webkitAudioContext?: typeof AudioContext;
+          }).webkitAudioContext;
+
+        if (!AudioContextConstructor) {
+          throw new Error("AudioContext is unavailable");
+        }
+
+        const audioContext = new AudioContextConstructor();
+
+        try {
+          const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+          const peaks = buildAudioPeaks(audioBuffer, WAVEFORM_BAR_COUNT);
+
+          if (!isCancelled) {
+            setWaveformPeaks(peaks);
+            setWaveformStatus("ready");
+          }
+        } finally {
+          void audioContext.close();
+        }
+      } catch {
+        if (!isCancelled && !controller.signal.aborted) {
+          setWaveformStatus("fallback");
+          setWaveformPeaks([]);
+        }
+      }
+    }
+
+    void loadWaveform();
+
+    return () => {
+      isCancelled = true;
+      controller.abort();
+    };
+  }, [audioUrl]);
 
   async function togglePlayback() {
     const audio = audioRef.current;
@@ -409,6 +499,21 @@ function TranscriptAudioPlayer({
     setCurrentTime(nextTime);
   }
 
+  function seekFromWaveform(event: PointerEvent<HTMLButtonElement>) {
+    const audio = audioRef.current;
+
+    if (!audio || !timelineDuration) {
+      return;
+    }
+
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const position = clamp((event.clientX - bounds.left) / bounds.width, 0, 1);
+    const nextTime = position * timelineDuration;
+
+    audio.currentTime = nextTime;
+    setCurrentTime(nextTime);
+  }
+
   function changePlaybackRate(event: ChangeEvent<HTMLSelectElement>) {
     const audio = audioRef.current;
     const nextRate = Number(event.currentTarget.value);
@@ -437,6 +542,62 @@ function TranscriptAudioPlayer({
         src={audioUrl}
       />
       <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-3">
+        <button
+          aria-label="Audio waveform"
+          className="relative h-14 w-full overflow-hidden rounded-lg border bg-muted/30 px-1 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          onPointerDown={seekFromWaveform}
+          type="button"
+        >
+          {sectionMarkers.map((section) => (
+            <span
+              aria-hidden="true"
+              className={cn(
+                "absolute inset-y-1 rounded-md",
+                section.id === activeSegmentId
+                  ? "bg-primary/10"
+                  : "bg-foreground/[0.03]",
+              )}
+              key={section.id}
+              style={{
+                left: `${section.left}%`,
+                width: `${section.width}%`,
+              }}
+            />
+          ))}
+          <span
+            aria-hidden="true"
+            className="absolute inset-x-1 top-1/2 flex -translate-y-1/2 items-center gap-px"
+          >
+            {waveformValues.map((peak, index) => {
+              const barPercent =
+                ((index + 0.5) / waveformValues.length) * 100;
+              const isPast = barPercent <= progressPercent;
+
+              return (
+                <span
+                  className={cn(
+                    "min-w-0 flex-1 rounded-full transition-colors",
+                    isPast ? "bg-primary/80" : "bg-muted-foreground/35",
+                  )}
+                  key={`${index}-${waveformStatus}`}
+                  style={{
+                    height: `${Math.round(8 + peak * 36)}px`,
+                  }}
+                />
+              );
+            })}
+          </span>
+          <span
+            aria-hidden="true"
+            className="absolute bottom-1 top-1 w-0.5 rounded-full bg-primary shadow-[0_0_0_1px_var(--background)]"
+            style={{ left: `${progressPercent}%` }}
+          />
+          <span aria-live="polite" className="sr-only">
+            {waveformStatus === "ready"
+              ? "Audio waveform ready"
+              : "Transcript section waveform"}
+          </span>
+        </button>
         <input
           aria-label="Audio progress"
           className="h-2 w-full accent-primary"
@@ -521,6 +682,126 @@ function formatPlayerTime(value: number) {
   return `${minutes.toString().padStart(2, "0")}:${seconds
     .toString()
     .padStart(2, "0")}`;
+}
+
+function getWaveformAudioUrl(audioUrl: string) {
+  const separator = audioUrl.includes("?") ? "&" : "?";
+
+  return `${audioUrl}${separator}proxy=1`;
+}
+
+function buildAudioPeaks(audioBuffer: AudioBuffer, count: number) {
+  const channelCount = Math.min(audioBuffer.numberOfChannels, 2);
+  const samplesPerPeak = Math.max(1, Math.floor(audioBuffer.length / count));
+  const peaks: number[] = [];
+
+  for (let peakIndex = 0; peakIndex < count; peakIndex += 1) {
+    const start = peakIndex * samplesPerPeak;
+    const end = Math.min(start + samplesPerPeak, audioBuffer.length);
+    let sum = 0;
+    let sampleCount = 0;
+
+    for (let channelIndex = 0; channelIndex < channelCount; channelIndex += 1) {
+      const samples = audioBuffer.getChannelData(channelIndex);
+
+      for (let sampleIndex = start; sampleIndex < end; sampleIndex += 1) {
+        sum += samples[sampleIndex] ** 2;
+        sampleCount += 1;
+      }
+    }
+
+    peaks.push(Math.sqrt(sum / Math.max(1, sampleCount)));
+  }
+
+  return normalizePeaks(peaks);
+}
+
+function buildFallbackWaveform(segments: TranscriptSegment[], count: number) {
+  if (segments.length === 0) {
+    return Array.from({ length: count }, () => 0.18);
+  }
+
+  const totalMs = getSegmentTimelineDuration(segments);
+
+  if (!totalMs) {
+    return Array.from({ length: count }, () => 0.18);
+  }
+
+  const peaks = Array.from({ length: count }, (_, index) => {
+    const currentMs = (index / count) * totalMs;
+    const segment = findSegmentAtTime(segments, currentMs);
+
+    if (!segment) {
+      return 0.12;
+    }
+
+    const segmentMs = Math.max(1, (segment.endMs ?? segment.startMs) - segment.startMs);
+    const density = segment.text.length / (segmentMs / 1000);
+
+    return Math.min(1, 0.18 + density / 45);
+  });
+
+  return normalizePeaks(peaks);
+}
+
+function normalizePeaks(peaks: number[]) {
+  const maxPeak = Math.max(...peaks, 0.01);
+
+  return peaks.map((peak) => clamp(peak / maxPeak, 0.08, 1));
+}
+
+function buildWaveformSections(
+  segments: TranscriptSegment[],
+  timelineDuration: number,
+) {
+  if (!timelineDuration) {
+    return [];
+  }
+
+  return segments
+    .map((segment, index) => {
+      const nextSegment = segments[index + 1];
+      const endMs = segment.endMs ?? nextSegment?.startMs ?? timelineDuration * 1000;
+      const left = clamp((segment.startMs / 1000 / timelineDuration) * 100, 0, 100);
+      const width = clamp(
+        ((endMs - segment.startMs) / 1000 / timelineDuration) * 100,
+        0.4,
+        100 - left,
+      );
+
+      return {
+        id: segment.id,
+        left,
+        width,
+      };
+    })
+    .filter((section) => section.width > 0);
+}
+
+function getSegmentTimelineDuration(segments: TranscriptSegment[]) {
+  const lastSegment = segments.at(-1);
+
+  if (!lastSegment) {
+    return 0;
+  }
+
+  return Math.max(lastSegment.endMs ?? lastSegment.startMs, 0) / 1000;
+}
+
+function findSegmentAtTime(segments: TranscriptSegment[], currentMs: number) {
+  return (
+    segments.find((segment, index) => {
+      const nextSegment = segments[index + 1];
+      const endMs =
+        segment.endMs ?? nextSegment?.startMs ?? Number.POSITIVE_INFINITY;
+
+      return currentMs >= segment.startMs && currentMs < endMs;
+    }) ?? null
+  );
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
 }
 
 function getSpeakerKey(speaker: string | null) {

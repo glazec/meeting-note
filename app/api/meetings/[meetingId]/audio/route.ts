@@ -16,7 +16,7 @@ export const runtime = "nodejs";
 const meetingIdSchema = z.string().uuid();
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ meetingId: string }> },
 ) {
   const user = await getCurrentUser();
@@ -27,6 +27,7 @@ export async function GET(
 
   const { meetingId } = await context.params;
   const parsedMeetingId = meetingIdSchema.safeParse(meetingId);
+  const shouldProxy = new URL(request.url).searchParams.get("proxy") === "1";
 
   if (!parsedMeetingId.success) {
     return Response.json({ error: "Audio not found" }, { status: 404 });
@@ -55,7 +56,9 @@ export async function GET(
   const objectKey = rows[0]?.objectKey;
 
   if (objectKey) {
-    return Response.redirect(await createReadUrl({ key: objectKey }));
+    const audioUrl = await createReadUrl({ key: objectKey });
+
+    return shouldProxy ? proxyAudio(audioUrl) : Response.redirect(audioUrl);
   }
 
   const recallBotId = rows[0]?.recallBotId;
@@ -68,9 +71,24 @@ export async function GET(
     );
 
     if (audioUrl) {
-      return Response.redirect(audioUrl);
+      return shouldProxy ? proxyAudio(audioUrl) : Response.redirect(audioUrl);
     }
   }
 
   return Response.json({ error: "Audio not found" }, { status: 404 });
+}
+
+async function proxyAudio(audioUrl: string) {
+  const response = await fetch(audioUrl);
+
+  if (!response.ok || !response.body) {
+    return Response.json({ error: "Audio not found" }, { status: 404 });
+  }
+
+  return new Response(response.body, {
+    headers: {
+      "cache-control": "private, max-age=300",
+      "content-type": response.headers.get("content-type") ?? "audio/mpeg",
+    },
+  });
 }
