@@ -49,13 +49,13 @@ vi.mock("@/db/client", () => ({
   },
 }));
 
-async function getMeetingAudio() {
+async function getMeetingAudio(
+  url = "https://app.example.com/api/meetings/11111111-1111-4111-8111-111111111111/audio",
+) {
   const { GET } = await import("@/app/api/meetings/[meetingId]/audio/route");
 
   return GET(
-    new Request(
-      "https://app.example.com/api/meetings/11111111-1111-4111-8111-111111111111/audio",
-    ),
+    new Request(url),
     {
       params: Promise.resolve({
         meetingId: "11111111-1111-4111-8111-111111111111",
@@ -72,6 +72,7 @@ describe("GET /api/meetings/[meetingId]/audio", () => {
     getWorkspace.mockReset();
     limit.mockReset();
     retrieveRecallBot.mockReset();
+    vi.unstubAllGlobals();
     vi.resetModules();
   });
 
@@ -105,6 +106,34 @@ describe("GET /api/meetings/[meetingId]/audio", () => {
       key: "users/user_123/uploads/audio.mp3",
     });
     expect(retrieveRecallBot).not.toHaveBeenCalled();
+  });
+
+  it("proxies authenticated R2 audio when waveform decoding requests same-origin media", async () => {
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({ teamId: "team_123" });
+    limit.mockResolvedValue([{ objectKey: "users/user_123/uploads/audio.mp3" }]);
+    createReadUrl.mockResolvedValue("https://r2.example.com/audio.mp3");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("fake mp3", {
+        headers: { "content-type": "audio/mpeg" },
+        status: 200,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await getMeetingAudio(
+      "https://app.example.com/api/meetings/11111111-1111-4111-8111-111111111111/audio?proxy=1",
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("audio/mpeg");
+    expect(response.headers.get("location")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith("https://r2.example.com/audio.mp3");
+    await expect(response.text()).resolves.toBe("fake mp3");
   });
 
   it("redirects Recall recordings to the vendor audio URL when no R2 asset exists", async () => {
