@@ -42,9 +42,18 @@ const recallBotInputSchema = z.object({
   metadata: z.record(z.string(), z.string()).optional(),
 });
 
+const optionalRecallApiBaseUrl = z.preprocess(
+  (value) =>
+    typeof value === "string" && value.trim() === "" ? undefined : value,
+  z.string().trim().url().optional(),
+);
+
 const recallApiEnvSchema = z.object({
   RECALL_API_KEY: z.string().trim().min(1),
+  RECALL_API_BASE_URL: optionalRecallApiBaseUrl,
 });
+
+const DEFAULT_RECALL_API_BASE_URL = "https://us-east-1.recall.ai";
 
 export function normalizeRecallWebhook(payload: unknown) {
   const realPayload = recallWebhookSchema.safeParse(payload);
@@ -100,7 +109,7 @@ export async function scheduleRecallBot(input: {
   const parsedInput = recallBotInputSchema.parse(input);
   const env = recallApiEnvSchema.parse(process.env);
 
-  const response = await fetch("https://us-east-1.recall.ai/api/v1/bot/", {
+  const response = await fetch(buildRecallApiUrl(env, "/api/v1/bot/"), {
     method: "POST",
     headers: {
       Authorization: `Token ${env.RECALL_API_KEY}`,
@@ -129,16 +138,13 @@ export async function scheduleRecallBot(input: {
 
 export async function retrieveRecallBot(botId: string) {
   const env = recallApiEnvSchema.parse(process.env);
-  const response = await fetch(
-    `https://us-east-1.recall.ai/api/v1/bot/${botId}/`,
-    {
-      method: "GET",
-      headers: {
-        Authorization: `Token ${env.RECALL_API_KEY}`,
-        Accept: "application/json",
-      },
+  const response = await fetch(buildRecallApiUrl(env, `/api/v1/bot/${botId}/`), {
+    method: "GET",
+    headers: {
+      Authorization: `Token ${env.RECALL_API_KEY}`,
+      Accept: "application/json",
     },
-  );
+  });
 
   if (!response.ok) {
     throw new Error(
@@ -147,6 +153,16 @@ export async function retrieveRecallBot(botId: string) {
   }
 
   return response.json();
+}
+
+function buildRecallApiUrl(
+  env: z.infer<typeof recallApiEnvSchema>,
+  pathname: string,
+) {
+  return new URL(
+    pathname,
+    env.RECALL_API_BASE_URL ?? DEFAULT_RECALL_API_BASE_URL,
+  ).toString();
 }
 
 export function findRecallRecordingMediaUrl(

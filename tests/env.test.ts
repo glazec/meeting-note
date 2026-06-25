@@ -59,4 +59,21 @@ describe("parseEnv", () => {
       NEXT_PUBLIC_APP_URL: "https://app.example.com",
     });
   });
+
+  it("accepts an optional Recall API base URL", async () => {
+    for (const [key, value] of Object.entries(baseEnv)) {
+      vi.stubEnv(key, value);
+    }
+
+    const { parseEnv } = await import("@/lib/env");
+
+    expect(
+      parseEnv({
+        ...baseEnv,
+        RECALL_API_BASE_URL: "https://ap-northeast-1.recall.ai/\n",
+      }),
+    ).toMatchObject({
+      RECALL_API_BASE_URL: "https://ap-northeast-1.recall.ai/",
+    });
+  });
 });

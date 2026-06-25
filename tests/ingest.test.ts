@@ -730,6 +730,28 @@ describe("vendor job creation", () => {
     });
   });
 
+  it("uses the configured Recall API base URL when scheduling bots", async () => {
+    vi.stubEnv("RECALL_API_KEY", "recall-key\n");
+    vi.stubEnv("RECALL_API_BASE_URL", "https://ap-northeast-1.recall.ai/");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "bot_123" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await scheduleRecallBot({
+      meetingUrl: "https://meet.google.com/abc-defg-hij",
+      webhookUrl: "https://app.example.com/api/recall/webhook",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://ap-northeast-1.recall.ai/api/v1/bot/",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("retrieves Recall bot details", async () => {
     vi.stubEnv("RECALL_API_KEY", "recall-key\n");
     const fetchMock = vi.fn().mockResolvedValue(

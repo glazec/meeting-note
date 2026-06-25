@@ -16,6 +16,7 @@ Team meeting transcript product.
 
 1. Copy `.env.example` to `.env.local`.
 2. Fill in Neon, R2, Recall, ElevenLabs, and Inngest credentials. `NEON_AUTH_BASE_URL` is optional when `NEON_AUTH_JWKS_URL` ends with `/.well-known/jwks.json`; generate `NEON_AUTH_COOKIE_SECRET` with `openssl rand -base64 32`.
+   Set `RECALL_API_BASE_URL` to the region for the Recall API key, for example `https://ap-northeast-1.recall.ai`.
 3. Run `npm install`.
 4. Run `npm run dev`.
 
