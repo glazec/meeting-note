@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { getCurrentUser, getWorkspace, limit, deleteMeeting, where } =
+const { getCurrentUser, getWorkspace, limit, deleteMeeting, updateMeeting, where } =
   vi.hoisted(() => ({
     getCurrentUser: vi.fn(),
     getWorkspace: vi.fn(),
     limit: vi.fn(),
     deleteMeeting: vi.fn(),
+    updateMeeting: vi.fn(),
     where: vi.fn(),
   }));
 
@@ -27,6 +28,7 @@ vi.mock("@/db/client", () => ({
       }),
     }),
     delete: deleteMeeting,
+    update: updateMeeting,
   },
 }));
 
@@ -46,12 +48,42 @@ async function deleteMeetingRequest() {
   );
 }
 
+async function patchMeetingRequest(body: unknown) {
+  const route = await import("@/app/api/meetings/[meetingId]/route");
+  const patch = (route as Record<string, unknown>).PATCH;
+
+  expect(patch).toBeTypeOf("function");
+
+  if (typeof patch !== "function") {
+    throw new Error("PATCH handler missing");
+  }
+
+  return patch(
+    new Request(
+      "https://app.example.com/api/meetings/11111111-1111-4111-8111-111111111111",
+      {
+        method: "PATCH",
+        body: JSON.stringify(body),
+        headers: {
+          "content-type": "application/json",
+        },
+      },
+    ),
+    {
+      params: Promise.resolve({
+        meetingId: "11111111-1111-4111-8111-111111111111",
+      }),
+    },
+  ) as Promise<Response>;
+}
+
 describe("DELETE /api/meetings/[meetingId]", () => {
   afterEach(() => {
     getCurrentUser.mockReset();
     getWorkspace.mockReset();
     limit.mockReset();
     deleteMeeting.mockReset();
+    updateMeeting.mockReset();
     where.mockReset();
     vi.resetModules();
   });
@@ -82,6 +114,41 @@ describe("DELETE /api/meetings/[meetingId]", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ deleted: true });
     expect(deleteMeeting).toHaveBeenCalled();
+    expect(where).toHaveBeenCalled();
+  });
+});
+
+describe("PATCH /api/meetings/[meetingId]", () => {
+  afterEach(() => {
+    getCurrentUser.mockReset();
+    getWorkspace.mockReset();
+    limit.mockReset();
+    updateMeeting.mockReset();
+    where.mockReset();
+    vi.resetModules();
+  });
+
+  it("renames an authenticated workspace meeting", async () => {
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({ teamId: "team_123" });
+    limit.mockResolvedValue([{ id: "11111111-1111-4111-8111-111111111111" }]);
+    updateMeeting.mockReturnValue({
+      set: vi.fn().mockReturnValue({ where }),
+    });
+    where.mockResolvedValue(undefined);
+
+    const response = await patchMeetingRequest({ title: "New weekly sync" });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      meetingId: "11111111-1111-4111-8111-111111111111",
+      title: "New weekly sync",
+    });
+    expect(updateMeeting).toHaveBeenCalled();
     expect(where).toHaveBeenCalled();
   });
 });

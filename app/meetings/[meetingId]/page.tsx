@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
 import { MeetingActions } from "@/components/meeting-actions";
+import { MeetingTitleEditor } from "@/components/meeting-title-editor";
 import { ShareDialog } from "@/components/share-dialog";
 import { TranscriptViewer } from "@/components/transcript-viewer";
 import { Badge } from "@/components/ui/badge";
@@ -32,9 +33,10 @@ export default async function MeetingPage({
             Meeting
           </p>
           <div className="mt-3 flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <h1 className="min-w-0 text-3xl font-semibold">
-              {meeting.title}
-            </h1>
+            <MeetingTitleEditor
+              meetingId={meetingId}
+              meetingTitle={meeting.title}
+            />
             <MeetingActions meetingId={meetingId} />
           </div>
           <dl className="mt-5 grid gap-4 py-4 sm:grid-cols-3">

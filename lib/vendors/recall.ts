@@ -35,8 +35,11 @@ const recallWebhookSchema = z.object({
   }),
 });
 
+export const DEFAULT_RECALL_BOT_NAME = "IOSG Old Friend";
+
 const recallBotInputSchema = z.object({
   meetingUrl: z.string().url(),
+  botName: z.string().trim().min(1).max(100).default(DEFAULT_RECALL_BOT_NAME),
   startAt: z.string().datetime().optional(),
   webhookUrl: z.string().url(),
   metadata: z.record(z.string(), z.string()).optional(),
@@ -102,6 +105,7 @@ export function getRecallWebhookIdempotencyKey(
 
 export async function scheduleRecallBot(input: {
   meetingUrl: string;
+  botName?: string;
   startAt?: string;
   webhookUrl: string;
   metadata?: Record<string, string>;
@@ -118,6 +122,7 @@ export async function scheduleRecallBot(input: {
     },
     body: JSON.stringify({
       meeting_url: parsedInput.meetingUrl,
+      bot_name: parsedInput.botName,
       join_at: parsedInput.startAt,
       metadata: {
         // Recall delivers bot status webhooks to dashboard configured endpoints. This metadata only correlates the request with our app URL.

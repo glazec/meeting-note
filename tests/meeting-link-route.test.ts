@@ -11,6 +11,7 @@ vi.mock("@/lib/auth", () => ({
 }));
 
 vi.mock("@/lib/vendors/recall", () => ({
+  DEFAULT_RECALL_BOT_NAME: "IOSG Old Friend",
   scheduleRecallBot,
 }));
 
@@ -93,6 +94,7 @@ describe("POST /api/meetings/link", () => {
     });
     expect(scheduleRecallBot).toHaveBeenCalledWith({
       meetingUrl: "https://meet.google.com/abc-defg-hij",
+      botName: "IOSG Old Friend",
       webhookUrl: "https://app.example.com/api/recall/webhook",
       metadata: {
         meetingId: "11111111-1111-4111-8111-111111111111",

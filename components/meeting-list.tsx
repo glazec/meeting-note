@@ -15,6 +15,7 @@ import {
   type MeetingRecordStatus,
   type TranscriptJobStatus,
 } from "@/lib/meeting-display-status";
+import { LocalDateTime } from "@/components/local-date-time";
 
 export type MeetingListItem = {
   id: string;
@@ -44,15 +45,6 @@ const statusLabels: Record<MeetingDisplayStatus, string> = {
   ready: "Ready",
   failed: "Failed",
 };
-
-function formatStartedAt(value: string) {
-  return new Intl.DateTimeFormat("en", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(value));
-}
 
 export function MeetingList({ meetings }: MeetingListProps) {
   return (
@@ -99,7 +91,7 @@ export function MeetingList({ meetings }: MeetingListProps) {
                   {platformLabels[meeting.platform]}
                 </TableCell>
                 <TableCell className="hidden text-muted-foreground md:table-cell">
-                  {formatStartedAt(meeting.startedAt)}
+                  <LocalDateTime value={meeting.startedAt} />
                 </TableCell>
                 <TableCell className="text-right">
                   <Badge variant={getStatusVariant(displayStatus)}>

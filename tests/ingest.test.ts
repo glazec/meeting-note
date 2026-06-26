@@ -724,6 +724,7 @@ describe("vendor job creation", () => {
     const [, init] = fetchMock.mock.calls[0];
     expect(JSON.parse(String(init.body))).toMatchObject({
       meeting_url: "https://meet.google.com/abc-defg-hij",
+      bot_name: "IOSG Old Friend",
       metadata: {
         requested_webhook_url: "https://app.example.com/api/recall/webhook",
       },
