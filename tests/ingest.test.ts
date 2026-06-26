@@ -11,6 +11,7 @@ import {
   normalizeRecallWebhook,
   retrieveRecallBot,
   scheduleRecallBot,
+  updateScheduledRecallBot,
 } from "@/lib/vendors/recall";
 
 const {
@@ -750,6 +751,49 @@ describe("vendor job creation", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "https://ap-northeast-1.recall.ai/api/v1/bot/",
       expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("updates a scheduled Recall bot with changed calendar meeting details", async () => {
+    vi.stubEnv("RECALL_API_KEY", "recall-key\n");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "bot_123" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      updateScheduledRecallBot({
+        botId: "bot_123",
+        meetingUrl: "https://meet.google.com/new-link",
+        startAt: "2026-06-30T13:00:00.000Z",
+        metadata: {
+          calendarEventId: "calendar_event_123",
+          meetingId: "meeting_123",
+        },
+      }),
+    ).resolves.toEqual({ id: "bot_123" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://us-east-1.recall.ai/api/v1/bot/bot_123/",
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: "Token recall-key",
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          meeting_url: "https://meet.google.com/new-link",
+          join_at: "2026-06-30T13:00:00.000Z",
+          metadata: {
+            calendarEventId: "calendar_event_123",
+            meetingId: "meeting_123",
+          },
+        }),
+      },
     );
   });
 

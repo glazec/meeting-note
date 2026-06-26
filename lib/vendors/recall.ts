@@ -45,6 +45,13 @@ const recallBotInputSchema = z.object({
   metadata: z.record(z.string(), z.string()).optional(),
 });
 
+const recallBotUpdateInputSchema = z.object({
+  botId: z.string().trim().min(1),
+  meetingUrl: z.string().url(),
+  startAt: z.string().datetime(),
+  metadata: z.record(z.string(), z.string()).optional(),
+});
+
 const optionalRecallApiBaseUrl = z.preprocess(
   (value) =>
     typeof value === "string" && value.trim() === "" ? undefined : value,
@@ -136,6 +143,45 @@ export async function scheduleRecallBot(input: {
     throw new Error(
       `Recall bot scheduling failed with ${response.status} ${response.statusText}`,
     );
+  }
+
+  return response.json();
+}
+
+export async function updateScheduledRecallBot(input: {
+  botId: string;
+  meetingUrl: string;
+  startAt: string;
+  metadata?: Record<string, string>;
+}) {
+  const parsedInput = recallBotUpdateInputSchema.parse(input);
+  const env = recallApiEnvSchema.parse(process.env);
+
+  const response = await fetch(
+    buildRecallApiUrl(env, `/api/v1/bot/${encodeURIComponent(parsedInput.botId)}/`),
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Token ${env.RECALL_API_KEY}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        meeting_url: parsedInput.meetingUrl,
+        join_at: parsedInput.startAt,
+        metadata: parsedInput.metadata,
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Recall bot update failed with ${response.status} ${response.statusText}`,
+    );
+  }
+
+  if (response.status === 204) {
+    return {};
   }
 
   return response.json();

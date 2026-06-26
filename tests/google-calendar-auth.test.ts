@@ -7,7 +7,7 @@ describe("Google Calendar auth", () => {
 
     expect(buildGoogleSignInOptions()).toEqual({
       provider: "google",
-      callbackURL: "/dashboard",
+      callbackURL: "/dashboard?syncCalendar=1",
       errorCallbackURL: "/auth/sign-in",
       scopes: [GOOGLE_CALENDAR_EVENT_READ_SCOPE],
     });
@@ -29,30 +29,26 @@ describe("Google Calendar auth", () => {
     });
   });
 
-  it("starts calendar reconnect through the Google link endpoint", async () => {
-    const fetchAuth = vi.fn().mockResolvedValue(
-      Response.json({
+  it("starts calendar reconnect through the Neon auth client link flow", async () => {
+    const linkSocial = vi.fn().mockResolvedValue({
+      data: {
         redirect: false,
         url: "https://accounts.google.com/o/oauth2/v2/auth",
-      }),
-    );
+      },
+      error: null,
+    });
     const { connectGoogleCalendar, buildGoogleCalendarReconnectOptions } =
       await import("@/lib/google-calendar-auth");
 
     await expect(
       connectGoogleCalendar({
-        fetch: fetchAuth,
+        authClient: { linkSocial },
       }),
     ).resolves.toEqual({
       ok: true,
       url: "https://accounts.google.com/o/oauth2/v2/auth",
     });
-    expect(fetchAuth).toHaveBeenCalledWith("/api/auth/link-social", {
-      method: "POST",
-      credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(buildGoogleCalendarReconnectOptions()),
-    });
+    expect(linkSocial).toHaveBeenCalledWith(buildGoogleCalendarReconnectOptions());
   });
 
   it("fails reconnect when Google does not return an auth URL", async () => {
@@ -60,7 +56,9 @@ describe("Google Calendar auth", () => {
 
     await expect(
       connectGoogleCalendar({
-        fetch: vi.fn().mockResolvedValue(Response.json({ url: "" })),
+        authClient: {
+          linkSocial: vi.fn().mockResolvedValue({ data: { url: "" } }),
+        },
       }),
     ).resolves.toEqual({
       ok: false,
@@ -73,7 +71,12 @@ describe("Google Calendar auth", () => {
 
     await expect(
       connectGoogleCalendar({
-        fetch: vi.fn().mockResolvedValue(new Response(null, { status: 401 })),
+        authClient: {
+          linkSocial: vi.fn().mockResolvedValue({
+            data: null,
+            error: { code: "UNAUTHORIZED", message: "Unauthorized" },
+          }),
+        },
       }),
     ).resolves.toEqual({
       ok: false,

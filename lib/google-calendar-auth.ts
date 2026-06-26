@@ -1,10 +1,12 @@
+import { authClient as defaultAuthClient } from "@/lib/auth/client";
+
 export const GOOGLE_CALENDAR_EVENT_READ_SCOPE =
   "https://www.googleapis.com/auth/calendar.events.readonly";
 
 export function buildGoogleSignInOptions() {
   return {
     provider: "google" as const,
-    callbackURL: "/dashboard",
+    callbackURL: "/dashboard?syncCalendar=1",
     errorCallbackURL: "/auth/sign-in",
     scopes: [GOOGLE_CALENDAR_EVENT_READ_SCOPE],
   };
@@ -21,37 +23,34 @@ export function buildGoogleCalendarReconnectOptions() {
 }
 
 type GoogleCalendarAuthClient = {
-  fetch: typeof fetch;
+  linkSocial: (
+    options: ReturnType<typeof buildGoogleCalendarReconnectOptions>,
+  ) => Promise<{
+    data?: { url?: string | null } | null;
+    error?: { code?: string; message?: string } | null;
+  }>;
 };
 
 export async function connectGoogleCalendar({
-  fetch: fetchAuth = fetch,
-}: Partial<GoogleCalendarAuthClient> = {}) {
-  const response = await fetchAuth("/api/auth/link-social", {
-    method: "POST",
-    credentials: "include",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(buildGoogleCalendarReconnectOptions()),
-  });
+  authClient = defaultAuthClient,
+}: { authClient?: GoogleCalendarAuthClient } = {}) {
+  const result = await authClient.linkSocial(buildGoogleCalendarReconnectOptions());
 
-  if (response.status === 401) {
+  if (isSessionError(result.error)) {
     return {
       ok: false as const,
       message: "Please sign in again to connect Google Calendar.",
     };
   }
 
-  if (!response.ok) {
+  if (result.error) {
     return {
       ok: false as const,
-      message: "Google Calendar could not connect.",
+      message: result.error.message || "Google Calendar could not connect.",
     };
   }
 
-  const result = (await response.json().catch(() => ({}))) as {
-    url?: string | null;
-  };
-  const url = result.url;
+  const url = result.data?.url;
 
   if (!url) {
     return {
@@ -61,4 +60,16 @@ export async function connectGoogleCalendar({
   }
 
   return { ok: true as const, url };
+}
+
+function isSessionError(error?: { code?: string; message?: string } | null) {
+  const code = error?.code?.toLowerCase() ?? "";
+  const message = error?.message?.toLowerCase() ?? "";
+
+  return (
+    code.includes("unauthorized") ||
+    code.includes("session") ||
+    message.includes("unauthorized") ||
+    message.includes("session")
+  );
 }

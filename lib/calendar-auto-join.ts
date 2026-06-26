@@ -11,6 +11,7 @@ import {
 import {
   DEFAULT_RECALL_BOT_NAME,
   scheduleRecallBot,
+  updateScheduledRecallBot,
 } from "@/lib/vendors/recall";
 
 type CalendarConnection = {
@@ -49,6 +50,14 @@ type RecallBotResponse = {
   id?: unknown;
 };
 
+type ExistingMeeting = {
+  id: string;
+  recallBotId: string | null;
+  meetingUrl: string | null;
+  startedAt: Date | null;
+  status: string;
+};
+
 export function findCalendarMeetingUrl(event: SyncedCalendarEvent) {
   const candidates = [
     event.meetingUrl,
@@ -64,6 +73,7 @@ export function findCalendarMeetingUrl(event: SyncedCalendarEvent) {
 export async function autoJoinCalendarEvent(input: AutoJoinInput) {
   const meetingUrl = findCalendarMeetingUrl(input.event);
   const platform = meetingUrl ? detectMeetingPlatform(meetingUrl) : null;
+  const title = normalizeEventTitle(input.event, platform);
   const startsAt = parseEventDate(input.event.startsAt);
   const endsAt = input.event.endsAt ? parseEventDate(input.event.endsAt) : null;
   const [calendarEvent] = await db
@@ -72,7 +82,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
       teamId: input.connection.teamId,
       connectionId: input.connection.id,
       externalEventId: input.event.externalEventId,
-      title: normalizeEventTitle(input.event, platform),
+      title,
       meetingUrl,
       startsAt,
       endsAt,
@@ -82,7 +92,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
     .onConflictDoUpdate({
       target: [calendarEvents.connectionId, calendarEvents.externalEventId],
       set: {
-        title: normalizeEventTitle(input.event, platform),
+        title,
         meetingUrl,
         startsAt,
         endsAt,
@@ -118,7 +128,13 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
   }
 
   const existing = await db
-    .select({ id: meetings.id, recallBotId: meetings.recallBotId })
+    .select({
+      id: meetings.id,
+      recallBotId: meetings.recallBotId,
+      meetingUrl: meetings.meetingUrl,
+      startedAt: meetings.startedAt,
+      status: meetings.status,
+    })
     .from(meetings)
     .where(
       and(
@@ -128,18 +144,72 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
     )
     .limit(1);
 
-  if (existing[0]?.recallBotId) {
+  const existingMeeting = existing[0];
+
+  if (existingMeeting?.recallBotId) {
+    if (existingMeeting.status !== "scheduled") {
+      return {
+        action: "skipped" as const,
+        calendarEventId: calendarEvent.id,
+        meetingId: existingMeeting.id,
+        meetingUrl,
+        reason: "already_scheduled" as const,
+      };
+    }
+
+    const shouldUpdateBot = hasScheduledBotChange(existingMeeting, {
+      meetingUrl,
+      startsAt,
+    });
+
+    try {
+      if (shouldUpdateBot) {
+        await updateScheduledRecallBot({
+          botId: existingMeeting.recallBotId,
+          meetingUrl,
+          startAt: startsAt.toISOString(),
+          metadata: {
+            calendarEventId: calendarEvent.id,
+            meetingId: existingMeeting.id,
+          },
+        });
+      }
+
+      await updateMeetingFromCalendar({
+        meetingId: existingMeeting.id,
+        title,
+        platform,
+        meetingUrl,
+        startsAt,
+        endsAt,
+      });
+    } catch (error) {
+      await markMeetingFailed(existingMeeting.id);
+      throw error;
+    }
+
+    if (shouldUpdateBot) {
+      return {
+        action: "updated" as const,
+        calendarEventId: calendarEvent.id,
+        meetingId: existingMeeting.id,
+        meetingUrl,
+        platform,
+        recallBotId: existingMeeting.recallBotId,
+      };
+    }
+
     return {
       action: "skipped" as const,
       calendarEventId: calendarEvent.id,
-      meetingId: existing[0].id,
+      meetingId: existingMeeting.id,
       meetingUrl,
       reason: "already_scheduled" as const,
     };
   }
 
   const meeting =
-    existing[0] ??
+    existingMeeting ??
     (
       await db
         .insert(meetings)
@@ -147,7 +217,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
           teamId: input.connection.teamId,
           ownerUserId: input.connection.userId,
           calendarEventId: calendarEvent.id,
-          title: normalizeEventTitle(input.event, platform),
+          title,
           platform,
           status: "scheduled",
           meetingUrl,
@@ -159,7 +229,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
 
   const attendeeEmails = normalizeAttendeeEmails(input.event.attendeeEmails ?? []);
 
-  if (!existing[0] && attendeeEmails.length > 0) {
+  if (!existingMeeting && attendeeEmails.length > 0) {
     await db
       .insert(meetingAttendees)
       .values(
@@ -193,6 +263,11 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
       .update(meetings)
       .set({
         recallBotId: bot.id,
+        title,
+        platform,
+        meetingUrl,
+        startedAt: startsAt,
+        endedAt: endsAt,
         status: "scheduled",
         updatedAt: new Date(),
       })
@@ -207,16 +282,51 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
       recallBotId: bot.id,
     };
   } catch (error) {
-    await db
-      .update(meetings)
-      .set({
-        status: "failed",
-        updatedAt: new Date(),
-      })
-      .where(eq(meetings.id, meeting.id));
+    await markMeetingFailed(meeting.id);
 
     throw error;
   }
+}
+
+async function updateMeetingFromCalendar(input: {
+  meetingId: string;
+  title: string;
+  platform: SupportedMeetingPlatform;
+  meetingUrl: string;
+  startsAt: Date;
+  endsAt: Date | null;
+}) {
+  await db
+    .update(meetings)
+    .set({
+      title: input.title,
+      platform: input.platform,
+      meetingUrl: input.meetingUrl,
+      startedAt: input.startsAt,
+      endedAt: input.endsAt,
+      updatedAt: new Date(),
+    })
+    .where(eq(meetings.id, input.meetingId));
+}
+
+async function markMeetingFailed(meetingId: string) {
+  await db
+    .update(meetings)
+    .set({
+      status: "failed",
+      updatedAt: new Date(),
+    })
+    .where(eq(meetings.id, meetingId));
+}
+
+function hasScheduledBotChange(
+  meeting: ExistingMeeting,
+  next: { meetingUrl: string; startsAt: Date },
+) {
+  return (
+    meeting.meetingUrl !== next.meetingUrl ||
+    meeting.startedAt?.getTime() !== next.startsAt.getTime()
+  );
 }
 
 function getConferenceEntryPointUris(event: SyncedCalendarEvent) {
