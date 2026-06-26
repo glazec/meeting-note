@@ -95,6 +95,8 @@ export function CalendarSyncButton({ autoSync = false }: CalendarSyncButtonProps
         setMessage(result.message);
         return;
       }
+
+      window.location.href = result.url;
     } catch {
       setState("needs_connection");
       setMessage("Google Calendar could not connect.");

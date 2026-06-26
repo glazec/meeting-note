@@ -16,21 +16,21 @@ export function buildGoogleCalendarReconnectOptions() {
     callbackURL: "/dashboard?syncCalendar=1",
     errorCallbackURL: "/dashboard",
     scopes: [GOOGLE_CALENDAR_EVENT_READ_SCOPE],
+    disableRedirect: true,
   };
 }
 
 type GoogleCalendarAuthClient = {
-  signIn: {
-    social: (
-      options: ReturnType<typeof buildGoogleCalendarReconnectOptions>,
-    ) => Promise<{ error?: { message?: string } | null }>;
-  };
+  linkSocial: (
+    options: ReturnType<typeof buildGoogleCalendarReconnectOptions>,
+  ) => Promise<{
+    data?: { url?: string | null } | null;
+    error?: { message?: string } | null;
+  }>;
 };
 
 export async function connectGoogleCalendar(authClient: GoogleCalendarAuthClient) {
-  const result = await authClient.signIn.social(
-    buildGoogleCalendarReconnectOptions(),
-  );
+  const result = await authClient.linkSocial(buildGoogleCalendarReconnectOptions());
 
   if (result.error) {
     return {
@@ -39,5 +39,14 @@ export async function connectGoogleCalendar(authClient: GoogleCalendarAuthClient
     };
   }
 
-  return { ok: true as const };
+  const url = result.data?.url;
+
+  if (!url) {
+    return {
+      ok: false as const,
+      message: "Google Calendar could not connect.",
+    };
+  }
+
+  return { ok: true as const, url };
 }

@@ -25,12 +25,16 @@ describe("Google Calendar auth", () => {
       callbackURL: "/dashboard?syncCalendar=1",
       errorCallbackURL: "/dashboard",
       scopes: [GOOGLE_CALENDAR_EVENT_READ_SCOPE],
+      disableRedirect: true,
     });
   });
 
-  it("starts calendar reconnect through the Google sign in endpoint", async () => {
-    const signInSocial = vi.fn().mockResolvedValue({
-      data: { redirect: true, url: "https://accounts.google.com/o/oauth2/v2/auth" },
+  it("starts calendar reconnect through the Google link endpoint", async () => {
+    const linkSocial = vi.fn().mockResolvedValue({
+      data: {
+        redirect: false,
+        url: "https://accounts.google.com/o/oauth2/v2/auth",
+      },
       error: null,
     });
     const { connectGoogleCalendar, buildGoogleCalendarReconnectOptions } =
@@ -38,13 +42,30 @@ describe("Google Calendar auth", () => {
 
     await expect(
       connectGoogleCalendar({
-        signIn: {
-          social: signInSocial,
-        },
+        linkSocial,
       }),
-    ).resolves.toEqual({ ok: true });
-    expect(signInSocial).toHaveBeenCalledWith(
+    ).resolves.toEqual({
+      ok: true,
+      url: "https://accounts.google.com/o/oauth2/v2/auth",
+    });
+    expect(linkSocial).toHaveBeenCalledWith(
       buildGoogleCalendarReconnectOptions(),
     );
+  });
+
+  it("fails reconnect when Google does not return an auth URL", async () => {
+    const { connectGoogleCalendar } = await import("@/lib/google-calendar-auth");
+
+    await expect(
+      connectGoogleCalendar({
+        linkSocial: vi.fn().mockResolvedValue({
+          data: { redirect: false, url: "" },
+          error: null,
+        }),
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      message: "Google Calendar could not connect.",
+    });
   });
 });
