@@ -10,6 +10,7 @@ import { db } from "@/db/client";
 import { calendarConnections } from "@/db/schema";
 import { getNeonAuthCookieSecret } from "@/lib/auth-config";
 import { env } from "@/lib/env";
+import { parseGoogleCalendarOAuthEnv } from "@/lib/google-calendar-oauth-env";
 import { GOOGLE_CALENDAR_EVENT_READ_SCOPE } from "@/lib/google-calendar-constants";
 import type { WorkspaceContext } from "@/lib/workspace";
 
@@ -48,9 +49,10 @@ export function shouldUseSecureCalendarOAuthCookie() {
 }
 
 export function buildGoogleCalendarOAuthUrl(state: string) {
+  const googleEnv = parseGoogleCalendarOAuthEnv(process.env);
   const url = new URL(GOOGLE_OAUTH_AUTHORIZE_URL);
 
-  url.searchParams.set("client_id", env.GOOGLE_CALENDAR_CLIENT_ID);
+  url.searchParams.set("client_id", googleEnv.GOOGLE_CALENDAR_CLIENT_ID);
   url.searchParams.set("redirect_uri", getGoogleCalendarOAuthRedirectUri());
   url.searchParams.set("response_type", "code");
   url.searchParams.set(
@@ -163,9 +165,10 @@ async function refreshGoogleCalendarAccessToken(refreshToken: string) {
 }
 
 async function requestGoogleToken(params: Record<string, string>) {
+  const googleEnv = parseGoogleCalendarOAuthEnv(process.env);
   const body = new URLSearchParams({
-    client_id: env.GOOGLE_CALENDAR_CLIENT_ID,
-    client_secret: env.GOOGLE_CALENDAR_CLIENT_SECRET,
+    client_id: googleEnv.GOOGLE_CALENDAR_CLIENT_ID,
+    client_secret: googleEnv.GOOGLE_CALENDAR_CLIENT_SECRET,
     ...params,
   });
   const response = await fetch(GOOGLE_OAUTH_TOKEN_URL, {

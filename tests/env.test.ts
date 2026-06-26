@@ -12,8 +12,6 @@ const baseEnv = {
   RECALL_WEBHOOK_SECRET: "whsec_cmVjYWxsLXNlY3JldA==",
   ELEVENLABS_API_KEY: "elevenlabs-key",
   ELEVENLABS_WEBHOOK_SECRET: "elevenlabs-secret",
-  GOOGLE_CALENDAR_CLIENT_ID: "google-client-id",
-  GOOGLE_CALENDAR_CLIENT_SECRET: "google-client-secret",
   INNGEST_EVENT_KEY: "inngest-event-key",
   INNGEST_SIGNING_KEY: "inngest-signing-key",
   NEXT_PUBLIC_APP_URL: "https://app.example.com",
@@ -35,6 +33,19 @@ describe("parseEnv", () => {
     expect(
       parseEnv({ ...baseEnv, R2_PUBLIC_BASE_URL: "" }).R2_PUBLIC_BASE_URL,
     ).toBeUndefined();
+  });
+
+  it("does not require Google Calendar OAuth secrets for global app env", async () => {
+    for (const [key, value] of Object.entries(baseEnv)) {
+      vi.stubEnv(key, value);
+    }
+
+    const { parseEnv } = await import("@/lib/env");
+
+    expect(parseEnv(baseEnv)).toMatchObject({
+      DATABASE_URL: "https://db.example.com",
+      NEXT_PUBLIC_APP_URL: "https://app.example.com",
+    });
   });
 
   it("trims copied environment values", async () => {

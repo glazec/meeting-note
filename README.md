@@ -38,6 +38,7 @@ Local test webhook URLs:
 
 The app uses Neon Auth through the official Next.js SDK. Browser auth requests are proxied through `/api/auth/[...path]`, the landing page routes users to `/auth/sign-in`, and server code reads the current user from Neon Auth sessions instead of a hand rolled JWT cookie.
 Dashboard, meeting transcript, and team settings pages require an authenticated session. Anonymous visitors are redirected to `/auth/sign-in`.
+The sign out button calls the Neon Auth client sign out method, then posts to `/api/sign-out` to expire local Neon Auth cookies as a cleanup fallback.
 
 ## Meeting Links
 
@@ -50,6 +51,8 @@ Google sign in identifies the user through Neon Auth, so keep the Neon Auth Goog
 3. `http://localhost:3000/api/calendar/oauth/callback`
 
 `/api/calendar/sync` retrieves a valid stored Google Calendar access token, refreshes it when needed, reads upcoming Google Calendar events, and emits `calendar/event.synced` to Inngest. The worker stores the `calendar_events` row, extracts supported Google Meet or Zoom URLs from `meetingUrl`, Google conference entry points, `hangoutLink`, `location`, or `description`, then creates a correlated `meetings` row and schedules Recall with `meetingId` plus `calendarEventId` metadata. Events without `location` are eligible when conferencing metadata contains the meeting link.
+
+Later syncs treat Google Calendar as the source of truth for scheduled meeting details. If the event link or start time changes before the bot joins, the worker updates the scheduled Recall bot and the local `meetings` row. If a previously scheduled event loses its meeting link or changes to an unsupported URL, the worker deletes the scheduled Recall bot through Recall, clears `recallBotId`, and marks the local meeting failed so the bot does not join the stale URL. If the event later gets a supported link again, the next sync can schedule a new bot.
 
 When Recall reports a completed recording, the webhook handler retrieves the bot, reads the recording media download URL, creates a local ElevenLabs transcript job, and queues `meeting/transcribe.audio` with that URL. Meeting pages can play Recall recording audio through the authenticated meeting audio route once Recall exposes the recording media.
 
