@@ -21,6 +21,7 @@ export type MeetingTranscript = {
   title: string;
   platform: MeetingListItem["platform"];
   status: MeetingListItem["status"];
+  transcriptJobStatus: TranscriptJobStatus | null;
   audioUrl: string | null;
   segments: TranscriptSegment[];
 };
@@ -95,6 +96,13 @@ export async function getWorkspaceMeetingTranscript(
       title: meetings.title,
       platform: meetings.platform,
       status: meetings.status,
+      transcriptJobStatus: sql<TranscriptJobStatus | null>`(
+        select ${transcriptJobs.status}
+        from ${transcriptJobs}
+        where ${transcriptJobs.meetingId} = ${meetings.id}
+        order by ${transcriptJobs.createdAt} desc
+        limit 1
+      )`,
       audioObjectKey: mediaAssets.objectKey,
       recallRecordingId: meetings.recallRecordingId,
     })
@@ -134,6 +142,7 @@ export async function getWorkspaceMeetingTranscript(
     title: meeting.title,
     platform: meeting.platform,
     status: meeting.status,
+    transcriptJobStatus: meeting.transcriptJobStatus,
     audioUrl: meeting.audioObjectKey || meeting.recallRecordingId
       ? `/api/meetings/${meeting.id}/audio`
       : null,

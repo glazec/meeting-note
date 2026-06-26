@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
+import { MeetingAutoRefresh } from "@/components/meeting-auto-refresh";
 import { MeetingActions } from "@/components/meeting-actions";
 import { MeetingTitleEditor } from "@/components/meeting-title-editor";
 import { ShareDialog } from "@/components/share-dialog";
@@ -8,6 +9,7 @@ import { TranscriptViewer } from "@/components/transcript-viewer";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { requireCurrentUser } from "@/lib/auth-guards";
+import { getMeetingDisplayStatus } from "@/lib/meeting-display-status";
 import { getWorkspaceMeetingTranscript } from "@/lib/meeting-queries";
 
 export const dynamic = "force-dynamic";
@@ -25,10 +27,20 @@ export default async function MeetingPage({
     notFound();
   }
 
+  const displayStatus = getMeetingDisplayStatus({
+    meetingStatus: meeting.status,
+    transcriptJobStatus: meeting.transcriptJobStatus,
+  });
+
   return (
     <AppShell>
       <div className="grid min-w-0 gap-8 lg:grid-cols-[1fr_18rem]">
         <section className="min-w-0">
+          <MeetingAutoRefresh
+            meetingStatus={meeting.status}
+            segmentCount={meeting.segments.length}
+            transcriptJobStatus={meeting.transcriptJobStatus}
+          />
           <p className="text-sm font-medium uppercase tracking-normal text-primary">
             Meeting
           </p>
@@ -53,7 +65,7 @@ export default async function MeetingPage({
                 Status
               </dt>
               <dd className="mt-1">
-                <Badge>{formatStatus(meeting.status)}</Badge>
+                <Badge>{formatStatus(displayStatus)}</Badge>
               </dd>
             </div>
             <div className="min-w-0">
@@ -69,7 +81,7 @@ export default async function MeetingPage({
           <div className="mt-8">
             <TranscriptViewer
               audioUrl={meeting.audioUrl}
-              key={meetingId}
+              key={`${meetingId}:${displayStatus}:${meeting.segments.length}`}
               meetingId={meetingId}
               segments={meeting.segments}
             />

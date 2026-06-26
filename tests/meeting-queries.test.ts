@@ -36,6 +36,7 @@ describe("getWorkspaceMeetingTranscript", () => {
                     title: "Customer sync",
                     platform: "google_meet",
                     status: "processing",
+                    transcriptJobStatus: "running",
                     audioObjectKey: null,
                     recallRecordingId: "recording_123",
                   },
@@ -68,6 +69,7 @@ describe("getWorkspaceMeetingTranscript", () => {
     ).resolves.toMatchObject({
       audioUrl:
         "/api/meetings/11111111-1111-4111-8111-111111111111/audio",
+      transcriptJobStatus: "running",
     });
   });
 });
