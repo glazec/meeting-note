@@ -30,27 +30,29 @@ describe("Google Calendar auth", () => {
   });
 
   it("starts calendar reconnect through the Google link endpoint", async () => {
-    const linkSocial = vi.fn().mockResolvedValue({
-      data: {
+    const fetchAuth = vi.fn().mockResolvedValue(
+      Response.json({
         redirect: false,
         url: "https://accounts.google.com/o/oauth2/v2/auth",
-      },
-      error: null,
-    });
+      }),
+    );
     const { connectGoogleCalendar, buildGoogleCalendarReconnectOptions } =
       await import("@/lib/google-calendar-auth");
 
     await expect(
       connectGoogleCalendar({
-        linkSocial,
+        fetch: fetchAuth,
       }),
     ).resolves.toEqual({
       ok: true,
       url: "https://accounts.google.com/o/oauth2/v2/auth",
     });
-    expect(linkSocial).toHaveBeenCalledWith(
-      buildGoogleCalendarReconnectOptions(),
-    );
+    expect(fetchAuth).toHaveBeenCalledWith("/api/auth/link-social", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(buildGoogleCalendarReconnectOptions()),
+    });
   });
 
   it("fails reconnect when Google does not return an auth URL", async () => {
@@ -58,14 +60,24 @@ describe("Google Calendar auth", () => {
 
     await expect(
       connectGoogleCalendar({
-        linkSocial: vi.fn().mockResolvedValue({
-          data: { redirect: false, url: "" },
-          error: null,
-        }),
+        fetch: vi.fn().mockResolvedValue(Response.json({ url: "" })),
       }),
     ).resolves.toEqual({
       ok: false,
       message: "Google Calendar could not connect.",
+    });
+  });
+
+  it("asks expired sessions to sign in again before reconnecting", async () => {
+    const { connectGoogleCalendar } = await import("@/lib/google-calendar-auth");
+
+    await expect(
+      connectGoogleCalendar({
+        fetch: vi.fn().mockResolvedValue(new Response(null, { status: 401 })),
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      message: "Please sign in again to connect Google Calendar.",
     });
   });
 });

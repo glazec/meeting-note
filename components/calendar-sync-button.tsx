@@ -6,7 +6,6 @@ import { AlertCircle, CalendarCheck, RefreshCw } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { authClient } from "@/lib/auth/client";
 import { connectGoogleCalendar } from "@/lib/google-calendar-auth";
 
 type SyncState =
@@ -88,7 +87,7 @@ export function CalendarSyncButton({ autoSync = false }: CalendarSyncButtonProps
     setMessage(null);
 
     try {
-      const result = await connectGoogleCalendar(authClient);
+      const result = await connectGoogleCalendar();
 
       if (!result.ok) {
         setState("needs_connection");

@@ -21,25 +21,37 @@ export function buildGoogleCalendarReconnectOptions() {
 }
 
 type GoogleCalendarAuthClient = {
-  linkSocial: (
-    options: ReturnType<typeof buildGoogleCalendarReconnectOptions>,
-  ) => Promise<{
-    data?: { url?: string | null } | null;
-    error?: { message?: string } | null;
-  }>;
+  fetch: typeof fetch;
 };
 
-export async function connectGoogleCalendar(authClient: GoogleCalendarAuthClient) {
-  const result = await authClient.linkSocial(buildGoogleCalendarReconnectOptions());
+export async function connectGoogleCalendar({
+  fetch: fetchAuth = fetch,
+}: Partial<GoogleCalendarAuthClient> = {}) {
+  const response = await fetchAuth("/api/auth/link-social", {
+    method: "POST",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(buildGoogleCalendarReconnectOptions()),
+  });
 
-  if (result.error) {
+  if (response.status === 401) {
     return {
       ok: false as const,
-      message: result.error.message || "Google Calendar could not connect.",
+      message: "Please sign in again to connect Google Calendar.",
     };
   }
 
-  const url = result.data?.url;
+  if (!response.ok) {
+    return {
+      ok: false as const,
+      message: "Google Calendar could not connect.",
+    };
+  }
+
+  const result = (await response.json().catch(() => ({}))) as {
+    url?: string | null;
+  };
+  const url = result.url;
 
   if (!url) {
     return {
