@@ -44,7 +44,7 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof GoogleCalendarAccessTokenError) {
       return Response.json(
-        { error: "Google Calendar access is not connected" },
+        { error: "Google Calendar access is not connected", reconnect: true },
         { status: 409 },
       );
     }

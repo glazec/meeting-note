@@ -12,4 +12,16 @@ describe("Google Calendar auth", () => {
       scopes: [GOOGLE_CALENDAR_EVENT_READ_SCOPE],
     });
   });
+
+  it("builds a calendar link flow for existing signed in users", async () => {
+    const { GOOGLE_CALENDAR_EVENT_READ_SCOPE, buildGoogleCalendarLinkOptions } =
+      await import("@/lib/google-calendar-auth");
+
+    expect(buildGoogleCalendarLinkOptions()).toEqual({
+      provider: "google",
+      callbackURL: "/dashboard?syncCalendar=1",
+      errorCallbackURL: "/dashboard",
+      scopes: [GOOGLE_CALENDAR_EVENT_READ_SCOPE],
+    });
+  });
 });

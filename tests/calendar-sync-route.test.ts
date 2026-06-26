@@ -7,6 +7,8 @@ const { getCurrentUser, getWorkspace, syncGooglePrimaryCalendarEvents } =
     syncGooglePrimaryCalendarEvents: vi.fn(),
   }));
 
+class GoogleCalendarAccessTokenError extends Error {}
+
 vi.mock("@/lib/auth", () => ({
   getCurrentUser,
 }));
@@ -16,6 +18,7 @@ vi.mock("@/lib/workspace", () => ({
 }));
 
 vi.mock("@/lib/google-calendar", () => ({
+  GoogleCalendarAccessTokenError,
   syncGooglePrimaryCalendarEvents,
 }));
 
@@ -81,6 +84,33 @@ describe("POST /api/calendar/sync", () => {
       sessionUser,
       workspace,
       autoJoinEnabled: true,
+    });
+  });
+
+  it("returns a reconnect signal when Google Calendar access is missing", async () => {
+    const sessionUser = {
+      id: "auth_user_123",
+      email: "alice@example.com",
+      name: null,
+    };
+    const workspace = {
+      userId: "11111111-1111-4111-8111-111111111111",
+      teamId: "22222222-2222-4222-8222-222222222222",
+      domain: "example.com",
+    };
+
+    getCurrentUser.mockResolvedValue(sessionUser);
+    getWorkspace.mockResolvedValue(workspace);
+    syncGooglePrimaryCalendarEvents.mockRejectedValue(
+      new GoogleCalendarAccessTokenError(),
+    );
+
+    const response = await postCalendarSync({ autoJoinEnabled: true });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Google Calendar access is not connected",
+      reconnect: true,
     });
   });
 });

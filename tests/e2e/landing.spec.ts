@@ -55,5 +55,6 @@ test("starts Google sign in through the Neon Auth social endpoint", async ({
       provider: "google",
       callbackURL: "/dashboard",
       errorCallbackURL: "/auth/sign-in",
+      scopes: ["https://www.googleapis.com/auth/calendar.events.readonly"],
     });
 });

@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { authClient } from "@/lib/auth/client";
 
 export function SignOutButton() {
   const router = useRouter();
@@ -17,10 +16,12 @@ export function SignOutButton() {
     setError(null);
 
     try {
-      const result = await authClient.signOut();
+      const response = await fetch("/api/sign-out", {
+        method: "POST",
+      });
 
-      if (result.error) {
-        setError(result.error.message || "Sign out failed");
+      if (!response.ok) {
+        setError("Sign out failed");
         setIsPending(false);
         return;
       }

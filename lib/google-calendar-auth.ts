@@ -9,3 +9,12 @@ export function buildGoogleSignInOptions() {
     scopes: [GOOGLE_CALENDAR_EVENT_READ_SCOPE],
   };
 }
+
+export function buildGoogleCalendarLinkOptions() {
+  return {
+    provider: "google" as const,
+    callbackURL: "/dashboard?syncCalendar=1",
+    errorCallbackURL: "/dashboard",
+    scopes: [GOOGLE_CALENDAR_EVENT_READ_SCOPE],
+  };
+}

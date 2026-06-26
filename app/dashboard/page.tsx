@@ -23,10 +23,10 @@ export const dynamic = "force-dynamic";
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; syncCalendar?: string }>;
 }) {
   const user = await requireCurrentUser();
-  const { q } = await searchParams;
+  const { q, syncCalendar } = await searchParams;
   const meetings = await listWorkspaceMeetings(user, q);
 
   return (
@@ -50,7 +50,7 @@ export default async function DashboardPage({
               <Plus data-icon="inline-start" />
               Record
             </Link>
-            <CalendarSyncButton />
+            <CalendarSyncButton autoSync={syncCalendar === "1"} />
           </div>
         </div>
 
