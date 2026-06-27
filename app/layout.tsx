@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import "./globals.css";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist-sans" });
-const oneSignalAppId = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
+const oneSignalAppId = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID?.trim();
 const oneSignalInitScript = oneSignalAppId
   ? `
 window.OneSignalDeferred = window.OneSignalDeferred || [];
