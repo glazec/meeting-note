@@ -41,6 +41,18 @@ The app uses Neon Auth through the official Next.js SDK. Browser auth requests a
 Dashboard, meeting transcript, and team settings pages require an authenticated session. Anonymous visitors are redirected to `/auth/sign-in`.
 The sign out button calls the Neon Auth client sign out method, then posts to `/api/sign-out` to expire local Neon Auth cookies as a cleanup fallback.
 
+## Dashboard
+
+The authenticated dashboard is a meeting operations hub for investors and team operators. It shows global workspace coverage before the meeting table:
+
+1. Upcoming joins counts scheduled future meetings that already have a Recall bot.
+2. Ready for review counts meetings with completed transcripts.
+3. Needs attention counts failed meetings, stale scheduled meetings, and future scheduled meetings without a bot.
+
+The Calendar automation panel shows whether Recall Calendar is connected, whether team bot coverage is on, when the calendar was last checked, and the Sync Recall calendar repair action. Normal calendar capture is driven by Recall Calendar V2 webhooks, so users should not need to click Sync calendar for every new event.
+
+The Meeting library remains the searchable recent meeting table. It is filtered by the search box and capped for browsing, while the dashboard summary is computed separately from all workspace meetings in Neon so search does not hide bot coverage or exception counts. Scheduled rows show whether a bot is linked, recording rows show that the bot is in the meeting, and failed rows are marked for review.
+
 ## Meeting Links
 
 The new meeting page posts Google Meet and Zoom links to `/api/meetings/link`. The route requires an authenticated Neon Auth session, rejects unsupported meeting hosts, creates a local meeting row, and schedules a Recall bot with `/api/recall/webhook` as the callback URL. The Recall bot receives the local `meetingId` in metadata so later webhooks can update the same meeting.
@@ -99,7 +111,9 @@ The R2 bucket must allow browser PUT requests from the app origin:
 
 ## Share Links
 
-Shared transcript pages use `/share/[token]`. The route hashes the URL token, looks up an active `share_links` row, and returns 404 when the token is missing, expired, or revoked.
+Shared transcript pages use `/share/[token]` for legacy token links, but they still require sign in before transcript data is read. The route hashes the URL token, looks up an active `share_links` row, and returns 404 when the token is missing, expired, or revoked.
+
+Meeting transcript pages also support signed in sharing by app URL. Workspace members can open the meeting URL directly, known users outside the workspace can receive direct transcript access, and unknown emails are stored as pending shares that are granted when that person signs in. Shared only users can read transcripts, but they cannot add new meetings.
 
 ## Exports
 

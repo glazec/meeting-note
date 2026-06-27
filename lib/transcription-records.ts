@@ -2,7 +2,10 @@ import { db } from "@/db/client";
 import { mediaAssets, meetings, transcriptJobs } from "@/db/schema";
 import type { SessionUser } from "@/lib/auth";
 import { env } from "@/lib/env";
-import { getOrCreateWorkspaceForSessionUser } from "@/lib/workspace";
+import {
+  assertCanCreateMeetings,
+  getOrCreateWorkspaceForSessionUser,
+} from "@/lib/workspace";
 
 type CreateUploadedAudioTranscriptionInput = {
   sessionUser: SessionUser;
@@ -16,6 +19,8 @@ export async function createUploadedAudioTranscription(
   input: CreateUploadedAudioTranscriptionInput,
 ) {
   const workspace = await getOrCreateWorkspaceForSessionUser(input.sessionUser);
+  await assertCanCreateMeetings(workspace);
+
   const [meeting] = await db
     .insert(meetings)
     .values({

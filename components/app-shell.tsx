@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 type AppShellProps = {
   children: ReactNode;
   activeHref?: string;
+  canCreateMeetings?: boolean;
 };
 
 const navItems = [
@@ -16,7 +17,15 @@ const navItems = [
   { href: "/settings/team", label: "Team settings" },
 ];
 
-export function AppShell({ children, activeHref }: AppShellProps) {
+export function AppShell({
+  children,
+  activeHref,
+  canCreateMeetings = true,
+}: AppShellProps) {
+  const visibleNavItems = canCreateMeetings
+    ? navItems
+    : navItems.filter((item) => item.href === "/dashboard");
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b bg-card">
@@ -29,7 +38,7 @@ export function AppShell({ children, activeHref }: AppShellProps) {
               aria-label="Primary navigation"
               className="flex flex-wrap gap-2"
             >
-              {navItems.map((item) => (
+              {visibleNavItems.map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}

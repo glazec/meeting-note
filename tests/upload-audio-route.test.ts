@@ -1,12 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const getCurrentUser = vi.fn();
+const getWorkspace = vi.fn();
+const assertCanCreateMeetings = vi.fn();
 const putObject = vi.fn();
 const createUploadedAudioTranscription = vi.fn();
 const send = vi.fn();
 
 vi.mock("@/lib/auth", () => ({
   getCurrentUser,
+}));
+
+vi.mock("@/lib/workspace", () => ({
+  assertCanCreateMeetings,
+  getOrCreateWorkspaceForSessionUser: getWorkspace,
 }));
 
 vi.mock("@/lib/r2", async (importOriginal) => {
@@ -44,7 +51,9 @@ async function postAudioUpload(file: File) {
 describe("POST /api/uploads/audio", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    assertCanCreateMeetings.mockReset();
     getCurrentUser.mockReset();
+    getWorkspace.mockReset();
     putObject.mockReset();
     createUploadedAudioTranscription.mockReset();
     send.mockReset();
@@ -72,6 +81,12 @@ describe("POST /api/uploads/audio", () => {
       email: "user@example.com",
       name: null,
     });
+    getWorkspace.mockResolvedValue({
+      userId: "user_123",
+      teamId: "team_123",
+      domain: "example.com",
+    });
+    assertCanCreateMeetings.mockResolvedValue(undefined);
     putObject.mockResolvedValue(undefined);
     createUploadedAudioTranscription.mockResolvedValue({
       meetingId: "22222222-2222-4222-8222-222222222222",
@@ -136,5 +151,34 @@ describe("POST /api/uploads/audio", () => {
     });
     expect(putObject).not.toHaveBeenCalled();
     expect(createUploadedAudioTranscription).not.toHaveBeenCalled();
+  });
+
+  it("rejects shared only users before storing fallback MP3 uploads", async () => {
+    const { SharedOnlyAccessError } = await import("@/lib/access-errors");
+
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "reader@partner.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({
+      userId: "user_123",
+      teamId: "team_123",
+      domain: "partner.com",
+      canCreateMeetings: false,
+    });
+    assertCanCreateMeetings.mockRejectedValue(new SharedOnlyAccessError());
+
+    const response = await postAudioUpload(
+      new File(["fake mp3"], "sample.mp3", { type: "audio/mpeg" }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "Shared users cannot add meetings",
+    });
+    expect(putObject).not.toHaveBeenCalled();
+    expect(createUploadedAudioTranscription).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
   });
 });

@@ -303,6 +303,7 @@ export function TranscriptViewer({
                           </form>
                         ) : canEditSpeakers ? (
                           <button
+                            aria-label={`Edit speaker ${segment.speaker ?? "Unknown speaker"}`}
                             className="group inline-flex min-h-8 items-center gap-2 rounded-lg px-0 text-left text-sm font-semibold text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
                             onClick={() => startEditing(segment.speaker)}
                             type="button"

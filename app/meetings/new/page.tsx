@@ -1,8 +1,25 @@
+import { redirect } from "next/navigation";
+
 import { AppShell } from "@/components/app-shell";
 import { MeetingLinkForm } from "@/components/meeting-link-form";
 import { UploadDropzone } from "@/components/upload-dropzone";
+import { requireCurrentUser } from "@/lib/auth-guards";
+import {
+  getOrCreateWorkspaceForSessionUser,
+  getWorkspaceAccessSummary,
+} from "@/lib/workspace";
 
-export default function NewMeetingPage() {
+export const dynamic = "force-dynamic";
+
+export default async function NewMeetingPage() {
+  const user = await requireCurrentUser();
+  const workspace = await getOrCreateWorkspaceForSessionUser(user);
+  const accessSummary = await getWorkspaceAccessSummary(workspace);
+
+  if (!accessSummary.canCreateMeetings) {
+    redirect("/dashboard");
+  }
+
   return (
     <AppShell activeHref="/meetings/new">
       <section className="flex max-w-3xl flex-col gap-6">

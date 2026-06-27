@@ -9,11 +9,13 @@ import {
 import {
   deleteScheduledRecallBot,
   findRecallRecordingMediaUrl,
+  sendRecallChatMessage,
   normalizeRecallWebhook,
   retrieveRecallBot,
   scheduleRecallBot,
   updateScheduledRecallBot,
 } from "@/lib/vendors/recall";
+import { generateOpenRouterChatReply } from "@/lib/vendors/openrouter";
 
 const {
   applyElevenLabsTranscriptEvent,
@@ -738,12 +740,39 @@ describe("vendor job creation", () => {
     });
 
     const [, init] = fetchMock.mock.calls[0];
-    expect(JSON.parse(String(init.body))).toMatchObject({
+    const body = JSON.parse(String(init.body));
+
+    expect(body).toMatchObject({
       meeting_url: "https://meet.google.com/abc-defg-hij",
       bot_name: "IOSG Old Friend",
       metadata: {
         requested_webhook_url: "https://app.example.com/api/recall/webhook",
       },
+    });
+    expect(body.automatic_video_output).toEqual({
+      in_call_not_recording: {
+        kind: "jpeg",
+        b64_data: expect.any(String),
+      },
+      in_call_recording: {
+        kind: "jpeg",
+        b64_data: expect.any(String),
+      },
+    });
+    expect(body.automatic_video_output.in_call_recording.b64_data.length).toBeGreaterThan(
+      1000,
+    );
+    expect(body.automatic_video_output.in_call_recording.b64_data).toBe(
+      body.automatic_video_output.in_call_not_recording.b64_data,
+    );
+    expect(body.recording_config).toEqual({
+      realtime_endpoints: [
+        {
+          type: "webhook",
+          url: "https://app.example.com/api/recall/chat/webhook",
+          events: ["participant_events.chat_message"],
+        },
+      ],
     });
   });
 
@@ -771,6 +800,7 @@ describe("vendor job creation", () => {
 
   it("updates a scheduled Recall bot with changed calendar meeting details", async () => {
     vi.stubEnv("RECALL_API_KEY", "recall-key\n");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com");
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ id: "bot_123" }), {
         status: 200,
@@ -791,25 +821,124 @@ describe("vendor job creation", () => {
       }),
     ).resolves.toEqual({ id: "bot_123" });
 
-    expect(fetchMock).toHaveBeenCalledWith(
+    const [, init] = fetchMock.mock.calls[0];
+    expect(fetchMock.mock.calls[0][0]).toBe(
       "https://us-east-1.recall.ai/api/v1/bot/bot_123/",
+    );
+    expect(init).toMatchObject({
+      method: "PATCH",
+      headers: {
+        Authorization: "Token recall-key",
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+    });
+    expect(JSON.parse(String(init.body))).toEqual({
+      meeting_url: "https://meet.google.com/new-link",
+      join_at: "2026-06-30T13:00:00.000Z",
+      automatic_video_output: {
+        in_call_not_recording: {
+          kind: "jpeg",
+          b64_data: expect.any(String),
+        },
+        in_call_recording: {
+          kind: "jpeg",
+          b64_data: expect.any(String),
+        },
+      },
+      recording_config: {
+        realtime_endpoints: [
+          {
+            type: "webhook",
+            url: "https://app.example.com/api/recall/chat/webhook",
+            events: ["participant_events.chat_message"],
+          },
+        ],
+      },
+      metadata: {
+        calendarEventId: "calendar_event_123",
+        meetingId: "meeting_123",
+      },
+    });
+  });
+
+  it("sends chat replies through Recall", async () => {
+    vi.stubEnv("RECALL_API_KEY", "recall-key\n");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "bot_123" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendRecallChatMessage({
+      botId: "bot_123",
+      message: "Answer from the bot",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://us-east-1.recall.ai/api/v1/bot/bot_123/send_chat_message/",
       {
-        method: "PATCH",
+        method: "POST",
         headers: {
           Authorization: "Token recall-key",
           "Content-Type": "application/json",
           Accept: "application/json",
         },
-        body: JSON.stringify({
-          meeting_url: "https://meet.google.com/new-link",
-          join_at: "2026-06-30T13:00:00.000Z",
-          metadata: {
-            calendarEventId: "calendar_event_123",
-            meetingId: "meeting_123",
-          },
-        }),
+        body: JSON.stringify({ message: "Answer from the bot" }),
       },
     );
+  });
+
+  it("gets meeting chat answers from OpenRouter", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "openrouter-key\n");
+    vi.stubEnv("OPENROUTER_MODEL", "z-ai/glm-5.2");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "Here is the answer." } }],
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      generateOpenRouterChatReply({
+        question: "What did we decide?",
+        participantName: "Alice",
+      }),
+    ).resolves.toBe("Here is the answer.");
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://openrouter.ai/api/v1/chat/completions",
+    );
+    expect(init).toMatchObject({
+      method: "POST",
+      headers: {
+        Authorization: "Bearer openrouter-key",
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "HTTP-Referer": "https://app.example.com",
+        "X-Title": "Meeting Note",
+      },
+    });
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      model: "z-ai/glm-5.2",
+      messages: [
+        expect.objectContaining({ role: "system" }),
+        {
+          role: "user",
+          content: "Alice asked in the meeting chat:\nWhat did we decide?",
+        },
+      ],
+    });
   });
 
   it("deletes a scheduled Recall bot before it joins", async () => {

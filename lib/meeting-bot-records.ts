@@ -4,7 +4,10 @@ import { db } from "@/db/client";
 import { meetings } from "@/db/schema";
 import type { SessionUser } from "@/lib/auth";
 import type { SupportedMeetingPlatform } from "@/lib/meeting-links";
-import { getOrCreateWorkspaceForSessionUser } from "@/lib/workspace";
+import {
+  assertCanCreateMeetings,
+  getOrCreateWorkspaceForSessionUser,
+} from "@/lib/workspace";
 
 type CreateScheduledMeetingBotInput = {
   sessionUser: SessionUser;
@@ -16,6 +19,8 @@ export async function createScheduledMeetingBot(
   input: CreateScheduledMeetingBotInput,
 ) {
   const workspace = await getOrCreateWorkspaceForSessionUser(input.sessionUser);
+  await assertCanCreateMeetings(workspace);
+
   const [meeting] = await db
     .insert(meetings)
     .values({

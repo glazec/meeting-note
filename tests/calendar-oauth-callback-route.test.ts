@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const {
+  assertCanCreateMeetings,
   cookies,
   exchangeGoogleCalendarCode,
   getCurrentUser,
@@ -8,6 +9,7 @@ const {
   storeGoogleCalendarTokens,
   syncRecallCalendarEventsForWorkspace,
 } = vi.hoisted(() => ({
+  assertCanCreateMeetings: vi.fn(),
   cookies: vi.fn(),
   exchangeGoogleCalendarCode: vi.fn(),
   getCurrentUser: vi.fn(),
@@ -25,6 +27,7 @@ vi.mock("@/lib/auth", () => ({
 }));
 
 vi.mock("@/lib/workspace", () => ({
+  assertCanCreateMeetings,
   getOrCreateWorkspaceForSessionUser: getWorkspace,
 }));
 
@@ -40,6 +43,7 @@ vi.mock("@/lib/recall-calendar", () => ({
 
 describe("GET /api/calendar/oauth/callback", () => {
   afterEach(() => {
+    assertCanCreateMeetings.mockReset();
     cookies.mockReset();
     exchangeGoogleCalendarCode.mockReset();
     getCurrentUser.mockReset();
@@ -68,6 +72,7 @@ describe("GET /api/calendar/oauth/callback", () => {
     });
     getCurrentUser.mockResolvedValue(sessionUser);
     getWorkspace.mockResolvedValue(workspace);
+    assertCanCreateMeetings.mockResolvedValue(undefined);
     exchangeGoogleCalendarCode.mockResolvedValue({
       accessToken: "google-access-token",
       accessTokenExpiresAt: new Date("2026-06-30T12:00:00.000Z"),
@@ -96,5 +101,43 @@ describe("GET /api/calendar/oauth/callback", () => {
       workspace,
       autoJoinEnabled: true,
     });
+  });
+
+  it("redirects shared only users before storing calendar tokens", async () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com");
+    const { SharedOnlyAccessError } = await import("@/lib/access-errors");
+    const sessionUser = {
+      id: "auth_user_123",
+      email: "reader@partner.com",
+      name: null,
+    };
+    const workspace = {
+      userId: "11111111-1111-4111-8111-111111111111",
+      teamId: "22222222-2222-4222-8222-222222222222",
+      domain: "partner.com",
+      canCreateMeetings: false,
+    };
+
+    cookies.mockResolvedValue({
+      get: vi.fn().mockReturnValue({ value: "state_123" }),
+    });
+    getCurrentUser.mockResolvedValue(sessionUser);
+    getWorkspace.mockResolvedValue(workspace);
+    assertCanCreateMeetings.mockRejectedValue(new SharedOnlyAccessError());
+
+    const { GET } = await import("@/app/api/calendar/oauth/callback/route");
+    const response = await GET(
+      new Request(
+        "https://app.example.com/api/calendar/oauth/callback?code=code_123&state=state_123",
+      ),
+    );
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "https://app.example.com/dashboard",
+    );
+    expect(exchangeGoogleCalendarCode).not.toHaveBeenCalled();
+    expect(storeGoogleCalendarTokens).not.toHaveBeenCalled();
+    expect(syncRecallCalendarEventsForWorkspace).not.toHaveBeenCalled();
   });
 });

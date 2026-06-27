@@ -1,8 +1,12 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
+import { SharedOnlyAccessError } from "@/lib/access-errors";
 import { getCurrentUser } from "@/lib/auth";
-import { getOrCreateWorkspaceForSessionUser } from "@/lib/workspace";
+import {
+  assertCanCreateMeetings,
+  getOrCreateWorkspaceForSessionUser,
+} from "@/lib/workspace";
 import {
   exchangeGoogleCalendarCode,
   GOOGLE_CALENDAR_OAUTH_STATE_COOKIE,
@@ -36,6 +40,8 @@ export async function GET(request: Request) {
 
   try {
     const workspace = await getOrCreateWorkspaceForSessionUser(user);
+    await assertCanCreateMeetings(workspace);
+
     const tokens = await exchangeGoogleCalendarCode(code);
 
     await storeGoogleCalendarTokens({
@@ -51,14 +57,19 @@ export async function GET(request: Request) {
     }).catch(() => null);
 
     return redirectToDashboard("syncCalendar=1");
-  } catch {
+  } catch (error) {
+    if (error instanceof SharedOnlyAccessError) {
+      return redirectToDashboard();
+    }
+
     return redirectToDashboard("calendarError=connect_failed");
   }
 }
 
-function redirectToDashboard(search: string) {
+function redirectToDashboard(search?: string) {
+  const path = search ? `/dashboard?${search}` : "/dashboard";
   const response = NextResponse.redirect(
-    new URL(`/dashboard?${search}`, getAppUrl()),
+    new URL(path, getAppUrl()),
   );
 
   expireOAuthStateCookie(response);

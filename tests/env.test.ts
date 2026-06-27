@@ -12,6 +12,8 @@ const baseEnv = {
   RECALL_WEBHOOK_SECRET: "whsec_cmVjYWxsLXNlY3JldA==",
   ELEVENLABS_API_KEY: "elevenlabs-key",
   ELEVENLABS_WEBHOOK_SECRET: "elevenlabs-secret",
+  OPENROUTER_API_KEY: "openrouter-key",
+  OPENROUTER_MODEL: "z-ai/glm-5.2",
   INNGEST_EVENT_KEY: "inngest-event-key",
   INNGEST_SIGNING_KEY: "inngest-signing-key",
   NEXT_PUBLIC_APP_URL: "https://app.example.com",
@@ -46,6 +48,27 @@ describe("parseEnv", () => {
       DATABASE_URL: "https://db.example.com",
       NEXT_PUBLIC_APP_URL: "https://app.example.com",
     });
+  });
+
+  it("requires OpenRouter settings for meeting chat answers", async () => {
+    for (const [key, value] of Object.entries(baseEnv)) {
+      vi.stubEnv(key, value);
+    }
+
+    const { parseEnv } = await import("@/lib/env");
+
+    expect(() =>
+      parseEnv({
+        ...baseEnv,
+        OPENROUTER_API_KEY: undefined,
+      }),
+    ).toThrow();
+    expect(() =>
+      parseEnv({
+        ...baseEnv,
+        OPENROUTER_MODEL: undefined,
+      }),
+    ).toThrow();
   });
 
   it("trims copied environment values", async () => {

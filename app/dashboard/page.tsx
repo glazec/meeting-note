@@ -22,7 +22,10 @@ import {
   listMeetingsForWorkspace,
 } from "@/lib/meeting-queries";
 import { cn } from "@/lib/utils";
-import { getOrCreateWorkspaceForSessionUser } from "@/lib/workspace";
+import {
+  getOrCreateWorkspaceForSessionUser,
+  getWorkspaceAccessSummary,
+} from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -34,14 +37,22 @@ export default async function DashboardPage({
   const user = await requireCurrentUser();
   const { q, syncCalendar } = await searchParams;
   const workspace = await getOrCreateWorkspaceForSessionUser(user);
+  const accessSummary = await getWorkspaceAccessSummary(workspace);
   const [meetings, dashboardSummary, calendarStatus] = await Promise.all([
     listMeetingsForWorkspace(workspace, q),
-    getMeetingDashboardSummaryForWorkspace(workspace),
-    getCalendarConnectionSummaryForWorkspace(workspace),
+    accessSummary.canCreateMeetings
+      ? getMeetingDashboardSummaryForWorkspace(workspace)
+      : Promise.resolve(null),
+    accessSummary.canCreateMeetings
+      ? getCalendarConnectionSummaryForWorkspace(workspace)
+      : Promise.resolve(null),
   ]);
 
   return (
-    <AppShell activeHref="/dashboard">
+    <AppShell
+      activeHref="/dashboard"
+      canCreateMeetings={accessSummary.canCreateMeetings}
+    >
       <section className="flex flex-col gap-6">
         <div className="grid gap-4 lg:grid-cols-[1fr_22rem] lg:items-start">
           <div>
@@ -49,34 +60,42 @@ export default async function DashboardPage({
               Dashboard
             </p>
             <h1 className="mt-3 text-3xl font-semibold">
-              Meeting hub
+              {accessSummary.isSharedOnly ? "Shared transcripts" : "Meeting hub"}
             </h1>
             <p className="mt-3 max-w-2xl text-base leading-7 text-muted-foreground">
-              Track founder calls, IC discussions, and team syncs from calendar
-              invite to reviewed transcript.
+              {accessSummary.isSharedOnly
+                ? "Open transcripts that teammates shared with you."
+                : "Track founder calls, IC discussions, and team syncs from calendar invite to reviewed transcript."}
             </p>
-            <Link
-              href="/meetings/new"
-              className={cn(buttonVariants(), "mt-5 w-fit")}
-            >
-              <Plus data-icon="inline-start" />
-              Add meeting
-            </Link>
+            {accessSummary.canCreateMeetings ? (
+              <Link
+                href="/meetings/new"
+                className={cn(buttonVariants(), "mt-5 w-fit")}
+              >
+                <Plus data-icon="inline-start" />
+                Add meeting
+              </Link>
+            ) : null}
           </div>
-          <CalendarAutomationPanel
-            autoSync={syncCalendar === "1"}
-            status={calendarStatus}
-          />
+          {calendarStatus ? (
+            <CalendarAutomationPanel
+              autoSync={syncCalendar === "1"}
+              status={calendarStatus}
+            />
+          ) : null}
         </div>
 
-        <DashboardWorkflowSummary summary={dashboardSummary} />
+        {dashboardSummary ? (
+          <DashboardWorkflowSummary summary={dashboardSummary} />
+        ) : null}
 
         <Card>
           <CardHeader>
             <CardTitle>Meeting library</CardTitle>
             <CardDescription>
-              Recent transcripts, scheduled joins, and recordings that need
-              review.
+              {accessSummary.isSharedOnly
+                ? "Transcripts shared with your account."
+                : "Recent transcripts, scheduled joins, and recordings that need review."}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
@@ -92,12 +111,23 @@ export default async function DashboardPage({
                   name="q"
                   type="search"
                   defaultValue={q ?? ""}
-                  placeholder="Search company, founder, speaker, or transcript"
+                  placeholder={
+                    accessSummary.isSharedOnly
+                      ? "Search shared transcript"
+                      : "Search company, founder, speaker, or transcript"
+                  }
                 />
               </div>
             </form>
 
-            <MeetingList meetings={meetings} />
+            <MeetingList
+              emptyMessage={
+                accessSummary.isSharedOnly
+                  ? "No transcripts have been shared with you yet"
+                  : "No meetings found"
+              }
+              meetings={meetings}
+            />
           </CardContent>
         </Card>
       </section>

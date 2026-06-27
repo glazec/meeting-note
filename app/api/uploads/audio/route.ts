@@ -1,11 +1,16 @@
 import { inngest } from "@/inngest/client";
 import { getCurrentUser } from "@/lib/auth";
 import {
+  assertCanCreateMeetings,
+  getOrCreateWorkspaceForSessionUser,
+} from "@/lib/workspace";
+import {
   buildPendingUploadObjectKey,
   putObject,
   UnsafeObjectKeySegmentError,
 } from "@/lib/r2";
 import { createUploadedAudioTranscription } from "@/lib/transcription-records";
+import { SharedOnlyAccessError } from "@/lib/access-errors";
 
 export const runtime = "nodejs";
 
@@ -27,6 +32,9 @@ export async function POST(request: Request) {
   }
 
   try {
+    const workspace = await getOrCreateWorkspaceForSessionUser(user);
+    await assertCanCreateMeetings(workspace);
+
     const uploadId = crypto.randomUUID();
     const key = buildPendingUploadObjectKey({
       userId: user.id,
@@ -63,6 +71,13 @@ export async function POST(request: Request) {
       return Response.json(
         { error: "Invalid audio upload request" },
         { status: 400 },
+      );
+    }
+
+    if (error instanceof SharedOnlyAccessError) {
+      return Response.json(
+        { error: "Shared users cannot add meetings" },
+        { status: 403 },
       );
     }
 

@@ -5,7 +5,11 @@ import {
   RecallCalendarConnectionError,
   syncRecallCalendarEventsForWorkspace,
 } from "@/lib/recall-calendar";
-import { getOrCreateWorkspaceForSessionUser } from "@/lib/workspace";
+import { SharedOnlyAccessError } from "@/lib/access-errors";
+import {
+  assertCanCreateMeetings,
+  getOrCreateWorkspaceForSessionUser,
+} from "@/lib/workspace";
 
 export const runtime = "nodejs";
 
@@ -34,6 +38,8 @@ export async function POST(request: Request) {
 
   try {
     const workspace = await getOrCreateWorkspaceForSessionUser(user);
+    await assertCanCreateMeetings(workspace);
+
     const syncResult = await syncRecallCalendarEventsForWorkspace({
       workspace,
       autoJoinEnabled: result.data.autoJoinEnabled,
@@ -45,6 +51,13 @@ export async function POST(request: Request) {
       return Response.json(
         { error: "Recall Calendar is not connected", reconnect: true },
         { status: 409 },
+      );
+    }
+
+    if (error instanceof SharedOnlyAccessError) {
+      return Response.json(
+        { error: "Shared users cannot add meetings" },
+        { status: 403 },
       );
     }
 

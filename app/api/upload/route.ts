@@ -1,11 +1,16 @@
 import { z } from "zod";
 
+import { SharedOnlyAccessError } from "@/lib/access-errors";
 import { getCurrentUser } from "@/lib/auth";
 import {
   buildPendingUploadObjectKey,
   createUploadUrl,
   UnsafeObjectKeySegmentError,
 } from "@/lib/r2";
+import {
+  assertCanCreateMeetings,
+  getOrCreateWorkspaceForSessionUser,
+} from "@/lib/workspace";
 
 export const runtime = "nodejs";
 
@@ -31,6 +36,9 @@ export async function POST(request: Request) {
   }
 
   try {
+    const workspace = await getOrCreateWorkspaceForSessionUser(user);
+    await assertCanCreateMeetings(workspace);
+
     const uploadId = crypto.randomUUID();
     const key = buildPendingUploadObjectKey({
       userId: user.id,
@@ -48,6 +56,13 @@ export async function POST(request: Request) {
       return Response.json(
         { error: "Invalid upload request" },
         { status: 400 },
+      );
+    }
+
+    if (error instanceof SharedOnlyAccessError) {
+      return Response.json(
+        { error: "Shared users cannot add meetings" },
+        { status: 403 },
       );
     }
 

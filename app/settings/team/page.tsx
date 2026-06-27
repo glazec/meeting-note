@@ -1,3 +1,5 @@
+import { redirect } from "next/navigation";
+
 import { AppShell } from "@/components/app-shell";
 import {
   Card,
@@ -7,14 +9,24 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { requireCurrentUser } from "@/lib/auth-guards";
+import {
+  getOrCreateWorkspaceForSessionUser,
+  getWorkspaceAccessSummary,
+} from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
 export default async function TeamSettingsPage() {
   const user = await requireCurrentUser();
+  const workspace = await getOrCreateWorkspaceForSessionUser(user);
+  const accessSummary = await getWorkspaceAccessSummary(workspace);
+
+  if (!accessSummary.canCreateMeetings) {
+    redirect("/dashboard");
+  }
 
   return (
-    <AppShell activeHref="/settings/team">
+    <AppShell activeHref="/settings/team" canCreateMeetings>
       <section className="flex max-w-3xl flex-col gap-6">
         <div>
           <p className="text-sm font-medium uppercase tracking-normal text-primary">

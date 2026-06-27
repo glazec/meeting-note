@@ -1,12 +1,15 @@
-import { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
 import {
   mediaAssets,
+  meetingAccess,
   meetings,
+  teamMemberships,
   transcriptJobs,
   transcriptSegments,
+  users,
 } from "@/db/schema";
 import type { MeetingListItem } from "@/components/meeting-list";
 import type { TranscriptSegment } from "@/components/transcript-viewer";
@@ -31,6 +34,12 @@ export type MeetingTranscript = {
   transcriptJobStatus: TranscriptJobStatus | null;
   audioUrl: string | null;
   segments: TranscriptSegment[];
+  accessScope: "workspace" | "shared";
+};
+
+export type ShareRecipient = {
+  email: string;
+  name: string | null;
 };
 
 export async function listWorkspaceMeetings(
@@ -47,9 +56,15 @@ export async function listMeetingsForWorkspace(
   query?: string,
 ): Promise<MeetingListItem[]> {
   const search = query?.trim();
+  const hasMeetingAccess = sql`exists (
+    select 1
+    from ${meetingAccess}
+    where ${meetingAccess.meetingId} = ${meetings.id}
+      and ${meetingAccess.userId} = ${workspace.userId}
+  )`;
   const where = search
     ? and(
-        eq(meetings.teamId, workspace.teamId),
+        or(eq(meetings.teamId, workspace.teamId), hasMeetingAccess),
         or(
           ilike(meetings.title, `%${search}%`),
           ilike(meetings.meetingUrl, `%${search}%`),
@@ -61,11 +76,12 @@ export async function listMeetingsForWorkspace(
           )`,
         ),
       )
-    : eq(meetings.teamId, workspace.teamId);
+    : or(eq(meetings.teamId, workspace.teamId), hasMeetingAccess);
 
   const rows = await db
     .select({
       id: meetings.id,
+      teamId: meetings.teamId,
       title: meetings.title,
       platform: meetings.platform,
       status: meetings.status,
@@ -93,6 +109,7 @@ export async function listMeetingsForWorkspace(
     transcriptJobStatus: meeting.transcriptJobStatus,
     hasRecallBot: Boolean(meeting.recallBotId),
     startedAt: (meeting.startedAt ?? meeting.createdAt).toISOString(),
+    accessScope: meeting.teamId === workspace.teamId ? "workspace" : "shared",
   }));
 }
 
@@ -132,16 +149,25 @@ export async function getWorkspaceMeetingTranscript(
   sessionUser: SessionUser,
   meetingId: string,
 ): Promise<MeetingTranscript | null> {
+  const workspace = await getOrCreateWorkspaceForSessionUser(sessionUser);
+
+  return getMeetingTranscriptForWorkspace(workspace, meetingId);
+}
+
+export async function getMeetingTranscriptForWorkspace(
+  workspace: WorkspaceContext,
+  meetingId: string,
+): Promise<MeetingTranscript | null> {
   const parsedMeetingId = uuidSchema.safeParse(meetingId);
 
   if (!parsedMeetingId.success) {
     return null;
   }
 
-  const workspace = await getOrCreateWorkspaceForSessionUser(sessionUser);
   const meetingRows = await db
     .select({
       id: meetings.id,
+      teamId: meetings.teamId,
       title: meetings.title,
       platform: meetings.platform,
       status: meetings.status,
@@ -163,7 +189,15 @@ export async function getWorkspaceMeetingTranscript(
     .where(
       and(
         eq(meetings.id, parsedMeetingId.data),
-        eq(meetings.teamId, workspace.teamId),
+        or(
+          eq(meetings.teamId, workspace.teamId),
+          sql`exists (
+            select 1
+            from ${meetingAccess}
+            where ${meetingAccess.meetingId} = ${meetings.id}
+              and ${meetingAccess.userId} = ${workspace.userId}
+          )`,
+        ),
       ),
     )
     .orderBy(desc(mediaAssets.createdAt))
@@ -192,9 +226,32 @@ export async function getWorkspaceMeetingTranscript(
     platform: meeting.platform,
     status: meeting.status,
     transcriptJobStatus: meeting.transcriptJobStatus,
-    audioUrl: meeting.audioObjectKey || meeting.recallRecordingId
-      ? `/api/meetings/${meeting.id}/audio`
-      : null,
+    audioUrl:
+      meeting.teamId === workspace.teamId &&
+      (meeting.audioObjectKey || meeting.recallRecordingId)
+        ? `/api/meetings/${meeting.id}/audio`
+        : null,
     segments,
+    accessScope: meeting.teamId === workspace.teamId ? "workspace" : "shared",
   };
+}
+
+export async function listWorkspaceShareRecipients(
+  workspace: WorkspaceContext,
+): Promise<ShareRecipient[]> {
+  return db
+    .select({
+      email: users.email,
+      name: users.name,
+    })
+    .from(teamMemberships)
+    .innerJoin(users, eq(teamMemberships.userId, users.id))
+    .where(
+      and(
+        eq(teamMemberships.teamId, workspace.teamId),
+        ne(teamMemberships.userId, workspace.userId),
+      ),
+    )
+    .orderBy(asc(users.email))
+    .limit(100);
 }

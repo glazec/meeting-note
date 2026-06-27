@@ -36,9 +36,9 @@ const transcriptRows = [
 ];
 
 const metrics = [
-  { label: "Internal members", value: "24" },
-  { label: "Sources", value: "Meet, Zoom, MP3" },
-  { label: "Storage", value: "Cloud" },
+  { label: "Default access", value: "Organization" },
+  { label: "Share options", value: "Link or email" },
+  { label: "External access", value: "Read only" },
 ];
 
 export default function Home() {
@@ -68,7 +68,8 @@ export default function Home() {
           </h1>
           <p className="mt-5 max-w-2xl text-lg leading-8 text-muted-foreground">
             Record Google Meet and Zoom calls, upload MP3 files, and keep every
-            transcript available only to the right internal workspace members.
+            transcript available only to your organization or the people you
+            explicitly share with.
           </p>
 
           <div className="mt-8 flex flex-wrap gap-3">
@@ -154,8 +155,8 @@ export default function Home() {
               <div>
                 <p className="text-sm font-semibold">Share controls</p>
                 <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                  Share transcripts with managed links after processing
-                  finishes.
+                  Publish a meeting URL, select a coworker, or add an email for
+                  read only transcript access.
                 </p>
               </div>
             </div>

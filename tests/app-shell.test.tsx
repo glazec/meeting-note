@@ -38,4 +38,16 @@ describe("AppShell", () => {
     expect(html).toContain('href="/dashboard"');
     expect(html).toContain('aria-current="page"');
   });
+
+  it("hides creator navigation for read only users", () => {
+    const html = renderToStaticMarkup(
+      <AppShell activeHref="/dashboard" canCreateMeetings={false}>
+        Dashboard body
+      </AppShell>,
+    );
+
+    expect(html).toContain("Dashboard");
+    expect(html).not.toContain("New meeting");
+    expect(html).not.toContain("Team settings");
+  });
 });

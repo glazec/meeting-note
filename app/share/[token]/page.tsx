@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { TranscriptViewer } from "@/components/transcript-viewer";
+import { requireCurrentUser } from "@/lib/auth-guards";
 import { getSharedTranscriptByToken } from "@/lib/share-links";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +11,8 @@ export default async function SharedTranscriptPage({
 }: {
   params: Promise<{ token: string }>;
 }) {
+  await requireCurrentUser();
+
   const { token } = await params;
   const sharedTranscript = await getSharedTranscriptByToken(token);
 

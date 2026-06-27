@@ -10,7 +10,11 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { requireCurrentUser } from "@/lib/auth-guards";
 import { getMeetingDisplayStatus } from "@/lib/meeting-display-status";
-import { getWorkspaceMeetingTranscript } from "@/lib/meeting-queries";
+import {
+  getMeetingTranscriptForWorkspace,
+  listWorkspaceShareRecipients,
+} from "@/lib/meeting-queries";
+import { getOrCreateWorkspaceForSessionUser } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +25,11 @@ export default async function MeetingPage({
 }) {
   const user = await requireCurrentUser();
   const { meetingId } = await params;
-  const meeting = await getWorkspaceMeetingTranscript(user, meetingId);
+  const workspace = await getOrCreateWorkspaceForSessionUser(user);
+  const [meeting, shareRecipients] = await Promise.all([
+    getMeetingTranscriptForWorkspace(workspace, meetingId),
+    listWorkspaceShareRecipients(workspace),
+  ]);
 
   if (!meeting) {
     notFound();
@@ -33,8 +41,11 @@ export default async function MeetingPage({
   });
 
   return (
-    <AppShell activeHref="/dashboard">
-      <div className="grid min-w-0 gap-8 lg:grid-cols-[1fr_18rem]">
+    <AppShell
+      activeHref="/dashboard"
+      canCreateMeetings={meeting.accessScope === "workspace"}
+    >
+      <div className="grid min-w-0 gap-8 lg:grid-cols-[1fr_20rem]">
         <section className="min-w-0">
           <MeetingAutoRefresh
             meetingStatus={meeting.status}
@@ -45,11 +56,19 @@ export default async function MeetingPage({
             Meeting
           </p>
           <div className="mt-3 flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <MeetingTitleEditor
-              meetingId={meetingId}
-              meetingTitle={meeting.title}
-            />
-            <MeetingActions meetingId={meetingId} />
+            {meeting.accessScope === "workspace" ? (
+              <MeetingTitleEditor
+                meetingId={meetingId}
+                meetingTitle={meeting.title}
+              />
+            ) : (
+              <h1 className="break-words text-3xl font-semibold">
+                {meeting.title}
+              </h1>
+            )}
+            {meeting.accessScope === "workspace" ? (
+              <MeetingActions meetingId={meetingId} />
+            ) : null}
           </div>
           <dl className="mt-5 grid gap-4 py-4 sm:grid-cols-3">
             <div className="min-w-0">
@@ -70,10 +89,12 @@ export default async function MeetingPage({
             </div>
             <div className="min-w-0">
               <dt className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-                Meeting ID
+                Access
               </dt>
-              <dd className="mt-1 min-w-0 break-all text-sm font-semibold">
-                {meetingId}
+              <dd className="mt-1 text-sm font-semibold">
+                {meeting.accessScope === "workspace"
+                  ? "Organization"
+                  : "Shared with you"}
               </dd>
             </div>
           </dl>
@@ -82,14 +103,30 @@ export default async function MeetingPage({
             <TranscriptViewer
               audioUrl={meeting.audioUrl}
               key={`${meetingId}:${displayStatus}:${meeting.segments.length}`}
-              meetingId={meetingId}
+              meetingId={
+                meeting.accessScope === "workspace" ? meetingId : null
+              }
               segments={meeting.segments}
             />
           </div>
         </section>
 
         <aside className="min-w-0 lg:pt-24">
-          <ShareDialog meetingId={meetingId} />
+          {meeting.accessScope === "workspace" ? (
+            <ShareDialog
+              meetingId={meetingId}
+              organizationDomain={workspace.domain}
+              teamMembers={shareRecipients}
+            />
+          ) : (
+            <div className="rounded-lg border bg-card p-5">
+              <p className="text-sm font-semibold">Shared transcript</p>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                You can read this transcript. Adding meetings and sharing stay
+                with the workspace owner.
+              </p>
+            </div>
+          )}
         </aside>
       </div>
     </AppShell>

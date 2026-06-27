@@ -25,9 +25,11 @@ export type MeetingListItem = {
   status: MeetingRecordStatus;
   transcriptJobStatus?: TranscriptJobStatus | null;
   hasRecallBot?: boolean;
+  accessScope?: "workspace" | "shared";
 };
 
 type MeetingListProps = {
+  emptyMessage?: string;
   meetings: MeetingListItem[];
 };
 
@@ -47,7 +49,10 @@ const statusLabels: Record<MeetingDisplayStatus, string> = {
   failed: "Failed",
 };
 
-export function MeetingList({ meetings }: MeetingListProps) {
+export function MeetingList({
+  emptyMessage = "No meetings found",
+  meetings,
+}: MeetingListProps) {
   return (
     <Table>
       <TableHeader>
@@ -65,7 +70,7 @@ export function MeetingList({ meetings }: MeetingListProps) {
               colSpan={4}
               className="h-24 text-center text-muted-foreground"
             >
-              No meetings found
+              {emptyMessage}
             </TableCell>
           </TableRow>
         ) : (
@@ -88,6 +93,7 @@ export function MeetingList({ meetings }: MeetingListProps) {
                     {platformLabels[meeting.platform]}
                   </span>
                   <MeetingCoverageNote
+                    accessScope={meeting.accessScope}
                     displayStatus={displayStatus}
                     hasRecallBot={meeting.hasRecallBot}
                   />
@@ -113,12 +119,22 @@ export function MeetingList({ meetings }: MeetingListProps) {
 }
 
 function MeetingCoverageNote({
+  accessScope,
   displayStatus,
   hasRecallBot,
 }: {
+  accessScope?: "workspace" | "shared";
   displayStatus: MeetingDisplayStatus;
   hasRecallBot?: boolean;
 }) {
+  if (accessScope === "shared") {
+    return (
+      <span className="mt-1 block text-xs text-muted-foreground">
+        Shared with you
+      </span>
+    );
+  }
+
   if (displayStatus === "scheduled") {
     return (
       <span className="mt-1 block text-xs text-muted-foreground">

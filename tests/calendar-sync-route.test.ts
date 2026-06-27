@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { getCurrentUser, getWorkspace, syncRecallCalendarEventsForWorkspace } =
+const {
+  assertCanCreateMeetings,
+  getCurrentUser,
+  getWorkspace,
+  syncRecallCalendarEventsForWorkspace,
+} =
   vi.hoisted(() => ({
+    assertCanCreateMeetings: vi.fn(),
     getCurrentUser: vi.fn(),
     getWorkspace: vi.fn(),
     syncRecallCalendarEventsForWorkspace: vi.fn(),
@@ -14,6 +20,7 @@ vi.mock("@/lib/auth", () => ({
 }));
 
 vi.mock("@/lib/workspace", () => ({
+  assertCanCreateMeetings,
   getOrCreateWorkspaceForSessionUser: getWorkspace,
 }));
 
@@ -38,6 +45,7 @@ async function postCalendarSync(body: unknown = { autoJoinEnabled: true }) {
 
 describe("POST /api/calendar/sync", () => {
   afterEach(() => {
+    assertCanCreateMeetings.mockReset();
     getCurrentUser.mockReset();
     getWorkspace.mockReset();
     syncRecallCalendarEventsForWorkspace.mockReset();
@@ -68,6 +76,7 @@ describe("POST /api/calendar/sync", () => {
 
     getCurrentUser.mockResolvedValue(sessionUser);
     getWorkspace.mockResolvedValue(workspace);
+    assertCanCreateMeetings.mockResolvedValue(undefined);
     syncRecallCalendarEventsForWorkspace.mockResolvedValue({
       connectionId: "33333333-3333-4333-8333-333333333333",
       syncedEventCount: 2,
@@ -100,6 +109,7 @@ describe("POST /api/calendar/sync", () => {
 
     getCurrentUser.mockResolvedValue(sessionUser);
     getWorkspace.mockResolvedValue(workspace);
+    assertCanCreateMeetings.mockResolvedValue(undefined);
     syncRecallCalendarEventsForWorkspace.mockRejectedValue(
       new RecallCalendarConnectionError(),
     );
@@ -111,5 +121,32 @@ describe("POST /api/calendar/sync", () => {
       error: "Recall Calendar is not connected",
       reconnect: true,
     });
+  });
+
+  it("rejects shared only users before syncing Recall Calendar", async () => {
+    const { SharedOnlyAccessError } = await import("@/lib/access-errors");
+    const sessionUser = {
+      id: "auth_user_123",
+      email: "reader@partner.com",
+      name: null,
+    };
+    const workspace = {
+      userId: "11111111-1111-4111-8111-111111111111",
+      teamId: "22222222-2222-4222-8222-222222222222",
+      domain: "partner.com",
+      canCreateMeetings: false,
+    };
+
+    getCurrentUser.mockResolvedValue(sessionUser);
+    getWorkspace.mockResolvedValue(workspace);
+    assertCanCreateMeetings.mockRejectedValue(new SharedOnlyAccessError());
+
+    const response = await postCalendarSync({ autoJoinEnabled: true });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "Shared users cannot add meetings",
+    });
+    expect(syncRecallCalendarEventsForWorkspace).not.toHaveBeenCalled();
   });
 });

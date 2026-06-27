@@ -294,6 +294,30 @@ export const shareLinks = pgTable(
   (table) => [uniqueIndex("share_links_token_hash_unique").on(table.tokenHash)],
 );
 
+export const meetingShareInvites = pgTable(
+  "meeting_share_invites",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    meetingId: uuid("meeting_id")
+      .notNull()
+      .references(() => meetings.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    role: accessRole("role").notNull().default("shared"),
+    createdByUserId: uuid("created_by_user_id")
+      .notNull()
+      .references(() => users.id),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("meeting_share_invites_meeting_email_unique").on(
+      table.meetingId,
+      table.email,
+    ),
+    index("meeting_share_invites_email_index").on(table.email),
+  ],
+);
+
 export const recordings = pgTable("recordings", {
   id: uuid("id").primaryKey().defaultRandom(),
   meetingId: uuid("meeting_id")

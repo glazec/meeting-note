@@ -61,11 +61,16 @@ function mockMeetingRows(rows: Array<{ id: string }>) {
 }
 
 function mockTargetRows(
-  rows: Array<{ id: string; email: string; name: string | null }>,
+  rows: Array<{
+    id: string;
+    email: string;
+    membershipId: string | null;
+    name: string | null;
+  }>,
 ) {
   select.mockReturnValueOnce({
     from: () => ({
-      innerJoin: () => ({
+      leftJoin: () => ({
         where: () => ({
           limit: vi.fn().mockResolvedValue(rows),
         }),
@@ -110,6 +115,7 @@ describe("POST /api/meetings/[meetingId]/share", () => {
       {
         email: "teammate@example.com",
         id: "teammate_user_id",
+        membershipId: "membership_123",
         name: "Team Mate",
       },
     ]);
@@ -128,6 +134,7 @@ describe("POST /api/meetings/[meetingId]/share", () => {
         email: "teammate@example.com",
         name: "Team Mate",
       },
+      audience: "organization",
     });
     expect(values).toHaveBeenCalledWith({
       meetingId: "11111111-1111-4111-8111-111111111111",
@@ -137,7 +144,50 @@ describe("POST /api/meetings/[meetingId]/share", () => {
     expect(onConflictDoNothing).toHaveBeenCalled();
   });
 
-  it("rejects coworkers outside the current team", async () => {
+  it("shares a meeting with an existing external user", async () => {
+    getCurrentUser.mockResolvedValue({
+      email: "owner@example.com",
+      id: "auth_owner",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({
+      teamId: "team_123",
+      userId: "owner_user_id",
+    });
+    mockMeetingRows([{ id: "11111111-1111-4111-8111-111111111111" }]);
+    mockTargetRows([
+      {
+        email: "partner@vendor.com",
+        id: "partner_user_id",
+        membershipId: null,
+        name: "External Partner",
+      },
+    ]);
+    insert.mockReturnValue({ values });
+    values.mockReturnValue({ onConflictDoNothing });
+    onConflictDoNothing.mockResolvedValue(undefined);
+
+    const response = await shareMeetingRequest({
+      email: "partner@vendor.com",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      audience: "external",
+      shared: true,
+      user: {
+        email: "partner@vendor.com",
+        name: "External Partner",
+      },
+    });
+    expect(values).toHaveBeenCalledWith({
+      meetingId: "11111111-1111-4111-8111-111111111111",
+      role: "shared",
+      userId: "partner_user_id",
+    });
+  });
+
+  it("saves a pending share when the email has not signed in yet", async () => {
     getCurrentUser.mockResolvedValue({
       email: "owner@example.com",
       id: "auth_owner",
@@ -149,15 +199,26 @@ describe("POST /api/meetings/[meetingId]/share", () => {
     });
     mockMeetingRows([{ id: "11111111-1111-4111-8111-111111111111" }]);
     mockTargetRows([]);
+    insert.mockReturnValue({ values });
+    values.mockReturnValue({ onConflictDoNothing });
+    onConflictDoNothing.mockResolvedValue(undefined);
 
     const response = await shareMeetingRequest({
       email: "outside@example.com",
     });
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      error: "Coworker must be a member of this team first.",
+      email: "outside@example.com",
+      pending: true,
+      shared: true,
     });
-    expect(insert).not.toHaveBeenCalled();
+    expect(values).toHaveBeenCalledWith({
+      createdByUserId: "owner_user_id",
+      email: "outside@example.com",
+      meetingId: "11111111-1111-4111-8111-111111111111",
+      role: "shared",
+    });
+    expect(onConflictDoNothing).toHaveBeenCalled();
   });
 });

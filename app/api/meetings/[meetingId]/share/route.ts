@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/db/client";
 import {
   meetingAccess,
+  meetingShareInvites,
   meetings,
   teamMemberships,
   users,
@@ -65,10 +66,11 @@ export async function POST(
     .select({
       id: users.id,
       email: users.email,
+      membershipId: teamMemberships.id,
       name: users.name,
     })
     .from(users)
-    .innerJoin(
+    .leftJoin(
       teamMemberships,
       and(
         eq(teamMemberships.userId, users.id),
@@ -79,14 +81,7 @@ export async function POST(
     .limit(1);
   const targetUser = targetRows[0];
 
-  if (!targetUser) {
-    return Response.json(
-      { error: "Coworker must be a member of this team first." },
-      { status: 404 },
-    );
-  }
-
-  if (targetUser.id !== workspace.userId) {
+  if (targetUser && targetUser.id !== workspace.userId) {
     await db
       .insert(meetingAccess)
       .values({
@@ -99,7 +94,28 @@ export async function POST(
       });
   }
 
+  if (!targetUser) {
+    await db
+      .insert(meetingShareInvites)
+      .values({
+        createdByUserId: workspace.userId,
+        email: result.data.email,
+        meetingId: parsedMeetingId.data,
+        role: "shared",
+      })
+      .onConflictDoNothing({
+        target: [meetingShareInvites.meetingId, meetingShareInvites.email],
+      });
+
+    return Response.json({
+      email: result.data.email,
+      pending: true,
+      shared: true,
+    });
+  }
+
   return Response.json({
+    audience: targetUser.membershipId ? "organization" : "external",
     shared: true,
     user: {
       email: targetUser.email,

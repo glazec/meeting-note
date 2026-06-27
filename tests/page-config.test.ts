@@ -17,13 +17,16 @@ vi.mock("@/lib/share-links", () => ({
 }));
 
 vi.mock("@/lib/meeting-queries", () => ({
+  getMeetingTranscriptForWorkspace: vi.fn(),
   getWorkspaceMeetingTranscript: vi.fn(),
   listMeetingsForWorkspace: vi.fn(),
+  listWorkspaceShareRecipients: vi.fn(),
   listWorkspaceMeetings: vi.fn(),
 }));
 
 vi.mock("@/lib/workspace", () => ({
   getOrCreateWorkspaceForSessionUser: vi.fn(),
+  getWorkspaceAccessSummary: vi.fn(),
 }));
 
 describe("page rendering configuration", () => {
@@ -35,6 +38,12 @@ describe("page rendering configuration", () => {
 
   it("renders meeting detail dynamically because it reads auth cookies", async () => {
     const page = await import("@/app/meetings/[meetingId]/page");
+
+    expect(page.dynamic).toBe("force-dynamic");
+  });
+
+  it("renders new meeting dynamically because it reads auth cookies", async () => {
+    const page = await import("@/app/meetings/new/page");
 
     expect(page.dynamic).toBe("force-dynamic");
   });

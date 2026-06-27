@@ -11,6 +11,7 @@ import {
   DEFAULT_RECALL_BOT_NAME,
   scheduleRecallBot,
 } from "@/lib/vendors/recall";
+import { SharedOnlyAccessError } from "@/lib/access-errors";
 
 export const runtime = "nodejs";
 
@@ -47,11 +48,23 @@ export async function POST(request: Request) {
     );
   }
 
-  const scheduledMeeting = await createScheduledMeetingBot({
-    sessionUser: user,
-    meetingUrl: result.data.meetingUrl,
-    platform,
-  });
+  let scheduledMeeting: { meetingId: string };
+
+  try {
+    scheduledMeeting = await createScheduledMeetingBot({
+      sessionUser: user,
+      meetingUrl: result.data.meetingUrl,
+      platform,
+    });
+  } catch (error) {
+    const response = handleMeetingLinkError(error);
+
+    if (response) {
+      return response;
+    }
+
+    return Response.json({ error: "Meeting unavailable" }, { status: 500 });
+  }
 
   try {
     const bot = (await scheduleRecallBot({
@@ -84,4 +97,15 @@ export async function POST(request: Request) {
 
     return Response.json({ error: "Meeting bot unavailable" }, { status: 502 });
   }
+}
+
+function handleMeetingLinkError(error: unknown) {
+  if (error instanceof SharedOnlyAccessError) {
+    return Response.json(
+      { error: "Shared users cannot add meetings" },
+      { status: 403 },
+    );
+  }
+
+  return null;
 }

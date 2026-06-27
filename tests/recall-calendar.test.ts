@@ -116,6 +116,7 @@ describe("Recall Calendar V2 adapter", () => {
 
   it("schedules a Recall bot for a Calendar V2 event", async () => {
     vi.stubEnv("RECALL_API_KEY", "recall-key\n");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com");
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -163,26 +164,46 @@ describe("Recall Calendar V2 adapter", () => {
       ],
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(
+    const [, init] = fetchMock.mock.calls[0];
+    expect(fetchMock.mock.calls[0][0]).toBe(
       "https://us-east-1.recall.ai/api/v2/calendar-events/55555555-5555-4555-8555-555555555555/bot/",
-      {
-        method: "POST",
-        headers: {
-          Authorization: "Token recall-key",
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify({
-          deduplication_key: "shared_event_123@example.com",
-          bot_config: {
-            bot_name: "IOSG Old Friend",
-            metadata: {
-              calendarEventId: "33333333-3333-4333-8333-333333333333",
-              meetingId: "11111111-1111-4111-8111-111111111111",
-            },
-          },
-        }),
-      },
     );
+    expect(init).toMatchObject({
+      method: "POST",
+      headers: {
+        Authorization: "Token recall-key",
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+    });
+    expect(JSON.parse(String(init.body))).toEqual({
+      deduplication_key: "shared_event_123@example.com",
+      bot_config: {
+        bot_name: "IOSG Old Friend",
+        automatic_video_output: {
+          in_call_not_recording: {
+            kind: "jpeg",
+            b64_data: expect.any(String),
+          },
+          in_call_recording: {
+            kind: "jpeg",
+            b64_data: expect.any(String),
+          },
+        },
+        recording_config: {
+          realtime_endpoints: [
+            {
+              type: "webhook",
+              url: "https://app.example.com/api/recall/chat/webhook",
+              events: ["participant_events.chat_message"],
+            },
+          ],
+        },
+        metadata: {
+          calendarEventId: "33333333-3333-4333-8333-333333333333",
+          meetingId: "11111111-1111-4111-8111-111111111111",
+        },
+      },
+    });
   });
 });

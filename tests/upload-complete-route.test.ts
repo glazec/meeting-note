@@ -1,12 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const getCurrentUser = vi.fn();
+const getWorkspace = vi.fn();
+const assertCanCreateMeetings = vi.fn();
 const getObjectMetadata = vi.fn();
 const createUploadedAudioTranscription = vi.fn();
 const send = vi.fn();
 
 vi.mock("@/lib/auth", () => ({
   getCurrentUser,
+}));
+
+vi.mock("@/lib/workspace", () => ({
+  assertCanCreateMeetings,
+  getOrCreateWorkspaceForSessionUser: getWorkspace,
 }));
 
 vi.mock("@/inngest/client", () => ({
@@ -45,7 +52,9 @@ async function postUploadComplete(body: unknown) {
 describe("POST /api/uploads/complete", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    assertCanCreateMeetings.mockReset();
     getCurrentUser.mockReset();
+    getWorkspace.mockReset();
     getObjectMetadata.mockReset();
     createUploadedAudioTranscription.mockReset();
     send.mockReset();
@@ -86,6 +95,12 @@ describe("POST /api/uploads/complete", () => {
       email: "user@example.com",
       name: null,
     });
+    getWorkspace.mockResolvedValue({
+      userId: "user_123",
+      teamId: "team_123",
+      domain: "example.com",
+    });
+    assertCanCreateMeetings.mockResolvedValue(undefined);
     send.mockResolvedValue({ ids: ["evt_123"] });
     getObjectMetadata.mockResolvedValue({
       contentLength: 1024,
@@ -131,5 +146,34 @@ describe("POST /api/uploads/complete", () => {
         transcriptJobId: "44444444-4444-4444-8444-444444444444",
       },
     });
+  });
+
+  it("rejects shared only users before reading uploaded object metadata", async () => {
+    const { SharedOnlyAccessError } = await import("@/lib/access-errors");
+
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "reader@partner.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({
+      userId: "user_123",
+      teamId: "team_123",
+      domain: "partner.com",
+      canCreateMeetings: false,
+    });
+    assertCanCreateMeetings.mockRejectedValue(new SharedOnlyAccessError());
+
+    const response = await postUploadComplete({
+      uploadId: "11111111-1111-4111-8111-111111111111",
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "Shared users cannot add meetings",
+    });
+    expect(getObjectMetadata).not.toHaveBeenCalled();
+    expect(createUploadedAudioTranscription).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
   });
 });

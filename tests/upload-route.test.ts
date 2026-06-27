@@ -1,10 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const getCurrentUser = vi.fn();
+const getWorkspace = vi.fn();
+const assertCanCreateMeetings = vi.fn();
 const createUploadUrl = vi.fn();
 
 vi.mock("@/lib/auth", () => ({
   getCurrentUser,
+}));
+
+vi.mock("@/lib/workspace", () => ({
+  assertCanCreateMeetings,
+  getOrCreateWorkspaceForSessionUser: getWorkspace,
 }));
 
 vi.mock("@/lib/r2", async (importOriginal) => {
@@ -38,7 +45,9 @@ const validBody = {
 describe("POST /api/upload", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    assertCanCreateMeetings.mockReset();
     getCurrentUser.mockReset();
+    getWorkspace.mockReset();
     createUploadUrl.mockReset();
     vi.resetModules();
   });
@@ -59,6 +68,12 @@ describe("POST /api/upload", () => {
       email: "user@example.com",
       name: null,
     });
+    getWorkspace.mockResolvedValue({
+      userId: "user_123",
+      teamId: "team_123",
+      domain: "example.com",
+    });
+    assertCanCreateMeetings.mockResolvedValue(undefined);
     createUploadUrl.mockRejectedValue(new Error("missing R2 env"));
 
     const response = await postUpload(validBody);
@@ -99,6 +114,12 @@ describe("POST /api/upload", () => {
       email: "user@example.com",
       name: null,
     });
+    getWorkspace.mockResolvedValue({
+      userId: "user_123",
+      teamId: "team_123",
+      domain: "example.com",
+    });
+    assertCanCreateMeetings.mockResolvedValue(undefined);
     createUploadUrl.mockResolvedValue("https://upload.example.com/signed");
 
     const response = await postUpload(validBody);
@@ -145,12 +166,43 @@ describe("POST /api/upload", () => {
       email: "user@example.com",
       name: null,
     });
+    getWorkspace.mockResolvedValue({
+      userId: "user_123",
+      teamId: "team_123",
+      domain: "example.com",
+    });
+    assertCanCreateMeetings.mockResolvedValue(undefined);
 
     const response = await postUpload(validBody);
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       error: "Invalid upload request",
+    });
+    expect(createUploadUrl).not.toHaveBeenCalled();
+  });
+
+  it("rejects shared only users before creating an upload URL", async () => {
+    const { SharedOnlyAccessError } = await import("@/lib/access-errors");
+
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "reader@partner.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({
+      userId: "user_123",
+      teamId: "team_123",
+      domain: "partner.com",
+      canCreateMeetings: false,
+    });
+    assertCanCreateMeetings.mockRejectedValue(new SharedOnlyAccessError());
+
+    const response = await postUpload(validBody);
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "Shared users cannot add meetings",
     });
     expect(createUploadUrl).not.toHaveBeenCalled();
   });

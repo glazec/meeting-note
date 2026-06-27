@@ -1,12 +1,17 @@
 import { randomBytes } from "crypto";
 import { NextResponse } from "next/server";
 
+import { SharedOnlyAccessError } from "@/lib/access-errors";
 import { getCurrentUser } from "@/lib/auth";
 import {
   buildGoogleCalendarOAuthUrl,
   GOOGLE_CALENDAR_OAUTH_STATE_COOKIE,
   shouldUseSecureCalendarOAuthCookie,
 } from "@/lib/google-calendar-oauth";
+import {
+  assertCanCreateMeetings,
+  getOrCreateWorkspaceForSessionUser,
+} from "@/lib/workspace";
 
 export const runtime = "nodejs";
 
@@ -15,6 +20,17 @@ export async function GET() {
 
   if (!user) {
     return NextResponse.redirect(new URL("/auth/sign-in", getAppUrl()));
+  }
+
+  try {
+    const workspace = await getOrCreateWorkspaceForSessionUser(user);
+    await assertCanCreateMeetings(workspace);
+  } catch (error) {
+    if (error instanceof SharedOnlyAccessError) {
+      return NextResponse.redirect(new URL("/dashboard", getAppUrl()));
+    }
+
+    throw error;
   }
 
   const state = randomBytes(32).toString("base64url");

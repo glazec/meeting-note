@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { z } from "zod";
 
 const oldRecallWebhookSchema = z.object({
@@ -37,6 +38,31 @@ const recallWebhookSchema = z.object({
 
 export const DEFAULT_RECALL_BOT_NAME = "IOSG Old Friend";
 
+type RecallVideoOutput = {
+  kind: "jpeg";
+  b64_data: string;
+};
+
+type RecallAutomaticVideoOutput = {
+  in_call_not_recording: RecallVideoOutput;
+  in_call_recording: RecallVideoOutput;
+};
+
+const RECALL_BOT_LOGO_JPEG_BASE64 = readFileSync(
+  new URL("../../assets/meeting-bot-logo.jpg", import.meta.url),
+).toString("base64");
+
+export const DEFAULT_RECALL_BOT_VIDEO_OUTPUT: RecallAutomaticVideoOutput = {
+  in_call_not_recording: {
+    kind: "jpeg",
+    b64_data: RECALL_BOT_LOGO_JPEG_BASE64,
+  },
+  in_call_recording: {
+    kind: "jpeg",
+    b64_data: RECALL_BOT_LOGO_JPEG_BASE64,
+  },
+};
+
 const recallBotInputSchema = z.object({
   meetingUrl: z.string().url(),
   botName: z.string().trim().min(1).max(100).default(DEFAULT_RECALL_BOT_NAME),
@@ -50,6 +76,11 @@ const recallBotUpdateInputSchema = z.object({
   meetingUrl: z.string().url(),
   startAt: z.string().datetime(),
   metadata: z.record(z.string(), z.string()).optional(),
+});
+
+const recallChatMessageInputSchema = z.object({
+  botId: z.string().trim().min(1),
+  message: z.string().trim().min(1).max(4096),
 });
 
 const recallBotDeleteInputSchema = z.object({
@@ -100,6 +131,30 @@ const recallApiEnvSchema = z.object({
 });
 
 const DEFAULT_RECALL_API_BASE_URL = "https://us-east-1.recall.ai";
+const RECALL_CHAT_WEBHOOK_PATH = "/api/recall/chat/webhook";
+const RECALL_CHAT_MESSAGE_EVENT = "participant_events.chat_message";
+
+function buildRecallChatRecordingConfig(webhookUrl: string) {
+  return {
+    realtime_endpoints: [
+      {
+        type: "webhook",
+        url: webhookUrl,
+        events: [RECALL_CHAT_MESSAGE_EVENT],
+      },
+    ],
+  };
+}
+
+function buildRecallChatWebhookUrl(sourceUrl?: string) {
+  const baseUrl = sourceUrl ?? process.env.NEXT_PUBLIC_APP_URL?.trim();
+
+  if (!baseUrl) {
+    throw new Error("NEXT_PUBLIC_APP_URL is required");
+  }
+
+  return new URL(RECALL_CHAT_WEBHOOK_PATH, baseUrl).toString();
+}
 
 export function normalizeRecallWebhook(payload: unknown) {
   const realPayload = recallWebhookSchema.safeParse(payload);
@@ -167,6 +222,10 @@ export async function scheduleRecallBot(input: {
       meeting_url: parsedInput.meetingUrl,
       bot_name: parsedInput.botName,
       join_at: parsedInput.startAt,
+      automatic_video_output: DEFAULT_RECALL_BOT_VIDEO_OUTPUT,
+      recording_config: buildRecallChatRecordingConfig(
+        buildRecallChatWebhookUrl(parsedInput.webhookUrl),
+      ),
       metadata: {
         // Recall delivers bot status webhooks to dashboard configured endpoints. This metadata only correlates the request with our app URL.
         requested_webhook_url: parsedInput.webhookUrl,
@@ -340,6 +399,10 @@ export async function scheduleRecallCalendarEventBot(input: {
         deduplication_key: parsedInput.deduplicationKey,
         bot_config: {
           bot_name: parsedInput.botName,
+          automatic_video_output: DEFAULT_RECALL_BOT_VIDEO_OUTPUT,
+          recording_config: buildRecallChatRecordingConfig(
+            buildRecallChatWebhookUrl(),
+          ),
           metadata: parsedInput.metadata,
         },
       }),
@@ -408,6 +471,10 @@ export async function updateScheduledRecallBot(input: {
       body: JSON.stringify({
         meeting_url: parsedInput.meetingUrl,
         join_at: parsedInput.startAt,
+        automatic_video_output: DEFAULT_RECALL_BOT_VIDEO_OUTPUT,
+        recording_config: buildRecallChatRecordingConfig(
+          buildRecallChatWebhookUrl(),
+        ),
         metadata: parsedInput.metadata,
       }),
     },
@@ -449,6 +516,34 @@ export async function deleteScheduledRecallBot(input: { botId: string }) {
 
   if (response.status === 204) {
     return {};
+  }
+
+  return response.json();
+}
+
+export async function sendRecallChatMessage(input: {
+  botId: string;
+  message: string;
+}) {
+  const parsedInput = recallChatMessageInputSchema.parse(input);
+  const env = recallApiEnvSchema.parse(process.env);
+
+  const response = await fetch(
+    buildRecallApiUrl(
+      env,
+      `/api/v1/bot/${encodeURIComponent(parsedInput.botId)}/send_chat_message/`,
+    ),
+    {
+      method: "POST",
+      headers: buildRecallJsonHeaders(env),
+      body: JSON.stringify({ message: parsedInput.message }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Recall chat message send failed with ${response.status} ${response.statusText}`,
+    );
   }
 
   return response.json();

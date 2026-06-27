@@ -3,12 +3,17 @@ import { z } from "zod";
 import { inngest } from "@/inngest/client";
 import { getCurrentUser } from "@/lib/auth";
 import {
+  assertCanCreateMeetings,
+  getOrCreateWorkspaceForSessionUser,
+} from "@/lib/workspace";
+import {
   buildPendingUploadObjectKey,
   getObjectMetadata,
   ObjectNotFoundError,
   UnsafeObjectKeySegmentError,
 } from "@/lib/r2";
 import { createUploadedAudioTranscription } from "@/lib/transcription-records";
+import { SharedOnlyAccessError } from "@/lib/access-errors";
 
 export const runtime = "nodejs";
 
@@ -36,6 +41,9 @@ export async function POST(request: Request) {
   }
 
   try {
+    const workspace = await getOrCreateWorkspaceForSessionUser(user);
+    await assertCanCreateMeetings(workspace);
+
     const key = buildPendingUploadObjectKey({
       userId: user.id,
       uploadId: result.data.uploadId,
@@ -69,6 +77,13 @@ export async function POST(request: Request) {
 
     if (error instanceof ObjectNotFoundError) {
       return Response.json({ error: "Uploaded audio not found" }, { status: 404 });
+    }
+
+    if (error instanceof SharedOnlyAccessError) {
+      return Response.json(
+        { error: "Shared users cannot add meetings" },
+        { status: 403 },
+      );
     }
 
     return Response.json(
