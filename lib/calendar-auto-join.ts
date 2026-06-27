@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { calendarEvents, meetingAttendees, meetings } from "@/db/schema";
@@ -62,6 +62,8 @@ type RecallBotResponse = {
 
 type ExistingMeeting = {
   id: string;
+  calendarEventId?: string | null;
+  teamMeetingKey?: string | null;
   recallBotId: string | null;
   meetingUrl: string | null;
   startedAt: Date | null;
@@ -94,6 +96,14 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
   const title = normalizeEventTitle(input.event, platform);
   const startsAt = parseEventDate(input.event.startsAt);
   const endsAt = input.event.endsAt ? parseEventDate(input.event.endsAt) : null;
+  const teamMeetingKey =
+    meetingUrl && platform
+      ? buildTeamMeetingKey({
+          teamId: input.connection.teamId,
+          startsAt,
+          meetingUrl,
+        })
+      : null;
   const [calendarEvent] = await db
     .insert(calendarEvents)
     .values({
@@ -101,6 +111,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
       connectionId: input.connection.id,
       externalEventId: input.event.externalEventId,
       title,
+      teamMeetingKey,
       meetingUrl,
       startsAt,
       endsAt,
@@ -111,6 +122,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
       target: [calendarEvents.connectionId, calendarEvents.externalEventId],
       set: {
         title,
+        teamMeetingKey,
         meetingUrl,
         startsAt,
         endsAt,
@@ -131,6 +143,8 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
   const existing = await db
     .select({
       id: meetings.id,
+      calendarEventId: meetings.calendarEventId,
+      teamMeetingKey: meetings.teamMeetingKey,
       recallBotId: meetings.recallBotId,
       meetingUrl: meetings.meetingUrl,
       startedAt: meetings.startedAt,
@@ -138,10 +152,18 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
     })
     .from(meetings)
     .where(
-      and(
-        eq(meetings.teamId, input.connection.teamId),
-        eq(meetings.calendarEventId, calendarEvent.id),
-      ),
+      teamMeetingKey
+        ? and(
+            eq(meetings.teamId, input.connection.teamId),
+            or(
+              eq(meetings.calendarEventId, calendarEvent.id),
+              eq(meetings.teamMeetingKey, teamMeetingKey),
+            ),
+          )
+        : and(
+            eq(meetings.teamId, input.connection.teamId),
+            eq(meetings.calendarEventId, calendarEvent.id),
+          ),
     )
     .limit(1);
 
@@ -218,14 +240,19 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
       meetingUrl,
       startsAt,
     });
+    const shouldLinkRecallCalendarEvent = Boolean(
+      input.event.recallCalendarEventId &&
+        existingMeeting.calendarEventId !== calendarEvent.id,
+    );
     let recallBotId = existingMeeting.recallBotId;
 
     try {
-      if (shouldUpdateBot) {
+      if (shouldUpdateBot || shouldLinkRecallCalendarEvent) {
         const bot = await scheduleBotForCalendarEvent({
           event: input.event,
           meetingUrl,
           startsAt,
+          teamMeetingKey,
           calendarEventId: calendarEvent.id,
           meetingId: existingMeeting.id,
           existingBotId: existingMeeting.recallBotId,
@@ -243,6 +270,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
         meetingUrl,
         startsAt,
         endsAt,
+        teamMeetingKey,
         recallBotId,
       });
     } catch (error) {
@@ -253,6 +281,17 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
     if (shouldUpdateBot) {
       return {
         action: "updated" as const,
+        calendarEventId: calendarEvent.id,
+        meetingId: existingMeeting.id,
+        meetingUrl,
+        platform,
+        recallBotId,
+      };
+    }
+
+    if (shouldLinkRecallCalendarEvent) {
+      return {
+        action: "scheduled" as const,
         calendarEventId: calendarEvent.id,
         meetingId: existingMeeting.id,
         meetingUrl,
@@ -279,6 +318,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
           teamId: input.connection.teamId,
           ownerUserId: input.connection.userId,
           calendarEventId: calendarEvent.id,
+          teamMeetingKey,
           title,
           platform,
           status: "scheduled",
@@ -310,6 +350,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
       event: input.event,
       meetingUrl,
       startsAt,
+      teamMeetingKey,
       calendarEventId: calendarEvent.id,
       meetingId: meeting.id,
     });
@@ -326,6 +367,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
       .update(meetings)
       .set({
         recallBotId,
+        teamMeetingKey,
         title,
         platform,
         meetingUrl,
@@ -358,6 +400,7 @@ async function updateMeetingFromCalendar(input: {
   meetingUrl: string;
   startsAt: Date;
   endsAt: Date | null;
+  teamMeetingKey?: string | null;
   recallBotId?: string | null;
 }) {
   await db
@@ -365,6 +408,7 @@ async function updateMeetingFromCalendar(input: {
     .set({
       title: input.title,
       platform: input.platform,
+      teamMeetingKey: input.teamMeetingKey,
       meetingUrl: input.meetingUrl,
       startedAt: input.startsAt,
       endedAt: input.endsAt,
@@ -418,6 +462,7 @@ async function scheduleBotForCalendarEvent(input: {
   event: SyncedCalendarEvent;
   meetingUrl: string;
   startsAt: Date;
+  teamMeetingKey?: string | null;
   calendarEventId: string;
   meetingId: string;
   existingBotId?: string;
@@ -431,6 +476,7 @@ async function scheduleBotForCalendarEvent(input: {
     return (await scheduleRecallCalendarEventBot({
       calendarEventId: input.event.recallCalendarEventId,
       deduplicationKey:
+        input.teamMeetingKey ??
         input.event.recallCalendarEventDeduplicationKey ??
         input.event.recallCalendarEventId,
       botName: DEFAULT_RECALL_BOT_NAME,
@@ -454,6 +500,32 @@ async function scheduleBotForCalendarEvent(input: {
     webhookUrl: buildAppUrl("/api/recall/webhook"),
     metadata,
   })) as RecallBotResponse;
+}
+
+function buildTeamMeetingKey(input: {
+  teamId: string;
+  startsAt: Date;
+  meetingUrl: string;
+}) {
+  return [
+    `team:${input.teamId}`,
+    `start:${input.startsAt.toISOString()}`,
+    `url:${normalizeMeetingUrlForKey(input.meetingUrl)}`,
+  ].join(":");
+}
+
+function normalizeMeetingUrlForKey(meetingUrl: string) {
+  try {
+    const url = new URL(meetingUrl);
+    url.protocol = url.protocol.toLowerCase();
+    url.hostname = url.hostname.toLowerCase();
+    url.hash = "";
+    url.pathname = url.pathname.replace(/\/$/, "");
+
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return meetingUrl.trim();
+  }
 }
 
 function getRecallBotResponseId(

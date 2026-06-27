@@ -1,13 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const {
-  autoJoinCalendarEvent,
-  createElevenLabsTranscriptJob,
-  createReadUrl,
-  scheduleRecallBot,
-  update,
-} = vi.hoisted(() => ({
-    autoJoinCalendarEvent: vi.fn(),
+const { createElevenLabsTranscriptJob, createReadUrl, scheduleRecallBot, update } =
+  vi.hoisted(() => ({
     createElevenLabsTranscriptJob: vi.fn(),
     createReadUrl: vi.fn(),
     scheduleRecallBot: vi.fn(),
@@ -18,10 +12,6 @@ vi.mock("@/db/client", () => ({
   db: {
     update,
   },
-}));
-
-vi.mock("@/lib/calendar-auto-join", () => ({
-  autoJoinCalendarEvent,
 }));
 
 vi.mock("@/lib/r2", () => ({
@@ -41,7 +31,7 @@ describe("Inngest functions", () => {
     vi.resetModules();
   });
 
-  it("registers calendar event auto join", async () => {
+  it("registers non-calendar background workers", async () => {
     const { functions } = await import("@/inngest/functions");
 
     expect(
@@ -49,9 +39,15 @@ describe("Inngest functions", () => {
         id: fn.opts.id,
         triggers: fn.opts.triggers,
       })),
-    ).toContainEqual({
-      id: "auto-join-calendar-event",
-      triggers: [{ event: "calendar/event.synced" }],
-    });
+    ).toEqual([
+      {
+        id: "schedule-meeting-bot",
+        triggers: [{ event: "meeting/schedule.bot" }],
+      },
+      {
+        id: "transcribe-audio",
+        triggers: [{ event: "meeting/transcribe.audio" }],
+      },
+    ]);
   });
 });

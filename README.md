@@ -58,15 +58,15 @@ Google Calendar OAuth setup checklist:
 3. Add every app callback above under Authorized redirect URIs. Authorized JavaScript origins are not enough.
 4. The callback URI must match exactly. Do not add a trailing slash.
 5. Store the client ID and client secret in Vercel as `GOOGLE_CALENDAR_CLIENT_ID` and `GOOGLE_CALENDAR_CLIENT_SECRET`, then redeploy production so the serverless functions receive the new values.
-6. Run database migrations before testing Calendar sync. Calendar connections store Google OAuth token columns plus the Recall Calendar V2 id on `calendar_connections`.
+6. Run database migrations before testing Calendar sync. Calendar connections store encrypted Google OAuth token columns plus the Recall Calendar V2 id in Neon on `calendar_connections`.
 
 If Google shows `Error 400: redirect_uri_mismatch`, the app has reached Google successfully but the OAuth client is missing the exact callback URI. Check the `redirect_uri` value in the Google error details and add that exact value to Authorized redirect URIs on the same OAuth client.
 
-When Google Calendar OAuth succeeds, the app stores the Google tokens locally and creates a Recall Calendar V2 calendar with the Google refresh token. Store `https://meeting-note-swart.vercel.app/api/recall/calendar/webhook` in the Recall dashboard as the Calendar V2 webhook endpoint for production, and use the local tunnel URL above for local testing.
+When Google Calendar OAuth succeeds, the app stores the encrypted Google tokens in Neon, creates or updates a Recall Calendar V2 calendar with the Google refresh token, then immediately reconciles upcoming Recall calendar events. Store `https://meeting-note-swart.vercel.app/api/recall/calendar/webhook` in the Recall dashboard as the Calendar V2 webhook endpoint for production, and use the local tunnel URL above for local testing.
 
-Recall Calendar V2 sends `calendar.sync_events` webhooks when calendar events are created, updated, or deleted. The webhook route verifies the Recall signature, deduplicates delivery, fetches changed Recall calendar events, stores the local `calendar_events` row, then applies the existing auto join policy. Supported Google Meet and Zoom events are scheduled through Recall Calendar V2 with `meetingId` plus `calendarEventId` metadata. Shared calendar events use Recall's `deduplication_key` so one bot can cover matching events.
+Recall Calendar V2 sends `calendar.sync_events` webhooks when calendar events are created, updated, or deleted. The webhook route verifies the Recall signature, deduplicates delivery, fetches changed Recall calendar events, stores the Neon `calendar_events` row, then applies the existing auto join policy. Supported Google Meet and Zoom events are scheduled through Recall Calendar V2 with `meetingId` plus `calendarEventId` metadata. Shared calendar events use a team scoped `deduplication_key` and the Neon `meetings.team_meeting_key` unique index so one team meeting gets one bot.
 
-`/api/calendar/sync` remains as a manual fallback. It retrieves a valid stored Google Calendar access token, refreshes it when needed, reads upcoming Google Calendar events, and emits `calendar/event.synced` to Inngest. The fallback still stores local event and meeting rows, then schedules Recall directly for eligible Google Meet or Zoom events.
+`/api/calendar/sync` remains as a repair action. It no longer reads Google Calendar events directly. It finds the connected Recall calendar in Neon, lists upcoming Recall Calendar V2 events, stores Neon event and meeting rows, then schedules Recall Calendar V2 bots for eligible Google Meet or Zoom events.
 
 When Recall reports a completed recording, the webhook handler retrieves the bot, reads the recording media download URL, creates a local ElevenLabs transcript job, and queues `meeting/transcribe.audio` with that URL. Meeting pages can play Recall recording audio through the authenticated meeting audio route once Recall exposes the recording media.
 
@@ -111,7 +111,7 @@ Recall bot status and Calendar V2 webhooks are delivered to endpoints configured
 
 Recall bot status webhooks update the local meeting status when metadata contains a `meetingId`. Recall Calendar V2 webhooks keep scheduled meeting rows in sync without requiring the user to click Sync calendar. Completed Recall recordings also queue ElevenLabs transcription when Recall exposes a recording media URL. ElevenLabs webhooks update the local transcript job, store transcript text as a transcript segment, and mark the meeting ready when metadata contains `meetingId` and `transcriptJobId`.
 
-Inngest events do not register functions by themselves. After deploying the app or changing `NEXT_PUBLIC_APP_URL`, run `npm run inngest:sync` to sync the public `/api/inngest` endpoint. If this sync is missing, upload rows can be created while transcript jobs stay queued with no ElevenLabs provider job id.
+Inngest events do not register functions by themselves. After deploying the app or changing `NEXT_PUBLIC_APP_URL`, run `npm run inngest:sync` to sync the public `/api/inngest` endpoint. If this sync is missing, upload rows can be created while transcript jobs stay queued with no ElevenLabs provider job id. Calendar event scheduling does not depend on Inngest; it is driven by Recall Calendar V2 reconciliation and webhooks.
 
 ## Verification
 

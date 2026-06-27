@@ -73,6 +73,8 @@ const recallCalendarUpdateInputSchema = z.object({
 const recallCalendarEventListInputSchema = z.object({
   calendarId: z.string().trim().min(1),
   updatedAtGte: z.string().datetime().optional(),
+  startTimeGte: z.string().datetime().optional(),
+  isDeleted: z.boolean().optional(),
 });
 
 const recallCalendarEventBotInputSchema = z.object({
@@ -267,6 +269,8 @@ export async function retrieveRecallCalendar(calendarId: string) {
 export async function listRecallCalendarEvents(input: {
   calendarId: string;
   updatedAtGte?: string;
+  startTimeGte?: string;
+  isDeleted?: boolean;
 }) {
   const parsedInput = recallCalendarEventListInputSchema.parse(input);
   const env = recallApiEnvSchema.parse(process.env);
@@ -275,6 +279,12 @@ export async function listRecallCalendarEvents(input: {
   initialUrl.searchParams.set("calendar_id", parsedInput.calendarId);
   if (parsedInput.updatedAtGte) {
     initialUrl.searchParams.set("updated_at__gte", parsedInput.updatedAtGte);
+  }
+  if (parsedInput.startTimeGte) {
+    initialUrl.searchParams.set("start_time__gte", parsedInput.startTimeGte);
+  }
+  if (parsedInput.isDeleted !== undefined) {
+    initialUrl.searchParams.set("is_deleted", String(parsedInput.isDeleted));
   }
 
   const events: unknown[] = [];

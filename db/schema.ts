@@ -180,6 +180,7 @@ export const calendarEvents = pgTable(
       .references(() => calendarConnections.id, { onDelete: "cascade" }),
     externalEventId: text("external_event_id").notNull(),
     title: text("title").notNull(),
+    teamMeetingKey: text("team_meeting_key"),
     meetingUrl: text("meeting_url"),
     startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
     endsAt: timestamp("ends_at", { withTimezone: true }),
@@ -213,6 +214,7 @@ export const meetings = pgTable(
         onDelete: "set null",
       },
     ),
+    teamMeetingKey: text("team_meeting_key"),
     title: text("title").notNull(),
     platform: meetingPlatform("platform").notNull(),
     status: meetingStatus("status").notNull().default("scheduled"),
@@ -224,6 +226,9 @@ export const meetings = pgTable(
     ...timestamps,
   },
   (table) => [
+    uniqueIndex("meetings_team_meeting_key_unique")
+      .on(table.teamId, table.teamMeetingKey)
+      .where(sql`${table.teamMeetingKey} is not null`),
     index("meetings_search_index").using(
       "gin",
       sql`to_tsvector('english', coalesce(${table.title}, '') || ' ' || coalesce(${table.meetingUrl}, ''))`,

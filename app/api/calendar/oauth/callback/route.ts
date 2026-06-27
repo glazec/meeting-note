@@ -8,6 +8,7 @@ import {
   GOOGLE_CALENDAR_OAUTH_STATE_COOKIE,
   storeGoogleCalendarTokens,
 } from "@/lib/google-calendar-oauth";
+import { syncRecallCalendarEventsForWorkspace } from "@/lib/recall-calendar";
 
 export const runtime = "nodejs";
 
@@ -43,6 +44,11 @@ export async function GET(request: Request) {
       accessTokenExpiresAt: tokens.accessTokenExpiresAt,
       refreshToken: tokens.refreshToken,
     });
+
+    await syncRecallCalendarEventsForWorkspace({
+      workspace,
+      autoJoinEnabled: true,
+    }).catch(() => null);
 
     return redirectToDashboard("syncCalendar=1");
   } catch {

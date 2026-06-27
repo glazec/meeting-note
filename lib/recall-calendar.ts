@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
@@ -8,6 +8,7 @@ import {
   listRecallCalendarEvents,
   retrieveRecallCalendar,
 } from "@/lib/vendors/recall";
+import type { WorkspaceContext } from "@/lib/workspace";
 
 const recallCalendarWebhookSchema = z.discriminatedUnion("event", [
   z.object({
@@ -32,7 +33,14 @@ type RecallCalendarConnection = {
   teamId: string;
   userId: string;
   autoJoinEnabled: boolean;
+  recallCalendarId?: string | null;
 };
+
+export class RecallCalendarConnectionError extends Error {
+  constructor(message = "Recall calendar is not connected") {
+    super(message);
+  }
+}
 
 export function normalizeRecallCalendarWebhook(payload: unknown) {
   const parsed = recallCalendarWebhookSchema.parse(payload);
@@ -98,6 +106,68 @@ export async function processRecallCalendarWebhook(
   return { action: "synced" as const, count };
 }
 
+export async function syncRecallCalendarEventsForWorkspace(input: {
+  workspace: WorkspaceContext;
+  autoJoinEnabled: boolean;
+  now?: Date;
+}) {
+  const connection = await findConnectionByWorkspace(input.workspace);
+
+  if (!connection?.recallCalendarId) {
+    throw new RecallCalendarConnectionError();
+  }
+
+  if (connection.autoJoinEnabled !== input.autoJoinEnabled) {
+    await db
+      .update(calendarConnections)
+      .set({
+        autoJoinEnabled: input.autoJoinEnabled,
+        updatedAt: new Date(),
+      })
+      .where(eq(calendarConnections.id, connection.id));
+  }
+
+  const activeConnection = {
+    id: connection.id,
+    teamId: connection.teamId,
+    userId: connection.userId,
+    autoJoinEnabled: input.autoJoinEnabled,
+  };
+  const events = await listRecallCalendarEvents({
+    calendarId: connection.recallCalendarId,
+    startTimeGte: (input.now ?? new Date()).toISOString(),
+    isDeleted: false,
+  });
+  let count = 0;
+
+  for (const recallEvent of events) {
+    const syncedEvent = normalizeRecallCalendarEvent(recallEvent);
+
+    if (!syncedEvent) {
+      continue;
+    }
+
+    await autoJoinCalendarEvent({
+      connection: activeConnection,
+      event: syncedEvent,
+    });
+    count += 1;
+  }
+
+  await db
+    .update(calendarConnections)
+    .set({
+      recallCalendarLastSyncedAt: input.now ?? new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(calendarConnections.id, connection.id));
+
+  return {
+    connectionId: connection.id,
+    syncedEventCount: count,
+  };
+}
+
 async function processRecallCalendarUpdate(calendarId: string) {
   const connection = await findConnectionByRecallCalendarId(calendarId);
 
@@ -128,9 +198,33 @@ async function findConnectionByRecallCalendarId(calendarId: string) {
       teamId: calendarConnections.teamId,
       userId: calendarConnections.userId,
       autoJoinEnabled: calendarConnections.autoJoinEnabled,
+      recallCalendarId: calendarConnections.recallCalendarId,
     })
     .from(calendarConnections)
     .where(eq(calendarConnections.recallCalendarId, calendarId))
+    .limit(1);
+
+  return (connection ?? null) as RecallCalendarConnection | null;
+}
+
+async function findConnectionByWorkspace(workspace: WorkspaceContext) {
+  const [connection] = await db
+    .select({
+      id: calendarConnections.id,
+      teamId: calendarConnections.teamId,
+      userId: calendarConnections.userId,
+      autoJoinEnabled: calendarConnections.autoJoinEnabled,
+      recallCalendarId: calendarConnections.recallCalendarId,
+    })
+    .from(calendarConnections)
+    .where(
+      and(
+        eq(calendarConnections.teamId, workspace.teamId),
+        eq(calendarConnections.userId, workspace.userId),
+        eq(calendarConnections.provider, "google"),
+        eq(calendarConnections.externalCalendarId, "primary"),
+      ),
+    )
     .limit(1);
 
   return (connection ?? null) as RecallCalendarConnection | null;

@@ -108,4 +108,86 @@ describe("processRecallCalendarWebhook", () => {
       }),
     });
   });
+
+  it("pulls upcoming Recall calendar events for a connected workspace", async () => {
+    select.mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: vi.fn().mockResolvedValue([
+            {
+              id: "33333333-3333-4333-8333-333333333333",
+              teamId: "22222222-2222-4222-8222-222222222222",
+              userId: "11111111-1111-4111-8111-111111111111",
+              autoJoinEnabled: true,
+              recallCalendarId: "44444444-4444-4444-8444-444444444444",
+            },
+          ]),
+        }),
+      }),
+    });
+    update.mockReturnValue({
+      set: () => ({
+        where: vi.fn().mockResolvedValue(undefined),
+      }),
+    });
+    listRecallCalendarEvents.mockResolvedValue([
+      {
+        id: "55555555-5555-4555-8555-555555555555",
+        platform_id: "google_event_123",
+        ical_uid: "shared_event_123@example.com",
+        start_time: "2026-06-30T12:00:00.000Z",
+        end_time: "2026-06-30T12:30:00.000Z",
+        meeting_url: "https://meet.google.com/abc-defg-hij",
+        is_deleted: false,
+        raw: {
+          summary: "Partner sync",
+          originalStartTime: {
+            dateTime: "2026-06-30T12:00:00.000Z",
+          },
+        },
+      },
+    ]);
+    autoJoinCalendarEvent.mockResolvedValue({
+      action: "scheduled",
+      recallBotId: "bot_123",
+    });
+
+    const { syncRecallCalendarEventsForWorkspace } = await import(
+      "@/lib/recall-calendar"
+    );
+
+    await expect(
+      syncRecallCalendarEventsForWorkspace({
+        workspace: {
+          userId: "11111111-1111-4111-8111-111111111111",
+          teamId: "22222222-2222-4222-8222-222222222222",
+          domain: "example.com",
+        },
+        autoJoinEnabled: true,
+        now: new Date("2026-06-27T04:00:00.000Z"),
+      }),
+    ).resolves.toEqual({
+      connectionId: "33333333-3333-4333-8333-333333333333",
+      syncedEventCount: 1,
+    });
+
+    expect(listRecallCalendarEvents).toHaveBeenCalledWith({
+      calendarId: "44444444-4444-4444-8444-444444444444",
+      startTimeGte: "2026-06-27T04:00:00.000Z",
+      isDeleted: false,
+    });
+    expect(autoJoinCalendarEvent).toHaveBeenCalledWith({
+      connection: {
+        id: "33333333-3333-4333-8333-333333333333",
+        teamId: "22222222-2222-4222-8222-222222222222",
+        userId: "11111111-1111-4111-8111-111111111111",
+        autoJoinEnabled: true,
+      },
+      event: expect.objectContaining({
+        externalEventId: "google_event_123",
+        recallCalendarEventId: "55555555-5555-4555-8555-555555555555",
+        meetingUrl: "https://meet.google.com/abc-defg-hij",
+      }),
+    });
+  });
 });
