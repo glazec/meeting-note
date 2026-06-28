@@ -125,29 +125,35 @@ const recallApiEnvSchema = z.object({
 });
 
 const DEFAULT_RECALL_API_BASE_URL = "https://us-east-1.recall.ai";
-const RECALL_CHAT_WEBHOOK_PATH = "/api/recall/chat/webhook";
+const RECALL_REALTIME_WEBHOOK_PATH = "/api/recall/realtime/webhook";
 const RECALL_CHAT_MESSAGE_EVENT = "participant_events.chat_message";
+const RECALL_SPEECH_ON_EVENT = "participant_events.speech_on";
+const RECALL_SPEECH_OFF_EVENT = "participant_events.speech_off";
 
-function buildRecallChatRecordingConfig(webhookUrl: string) {
+function buildRecallRealtimeRecordingConfig(webhookUrl: string) {
   return {
     realtime_endpoints: [
       {
         type: "webhook",
         url: webhookUrl,
-        events: [RECALL_CHAT_MESSAGE_EVENT],
+        events: [
+          RECALL_CHAT_MESSAGE_EVENT,
+          RECALL_SPEECH_ON_EVENT,
+          RECALL_SPEECH_OFF_EVENT,
+        ],
       },
     ],
   };
 }
 
-function buildRecallChatWebhookUrl(sourceUrl?: string) {
+function buildRecallRealtimeWebhookUrl(sourceUrl?: string) {
   const baseUrl = sourceUrl ?? process.env.NEXT_PUBLIC_APP_URL?.trim();
 
   if (!baseUrl) {
     throw new Error("NEXT_PUBLIC_APP_URL is required");
   }
 
-  return new URL(RECALL_CHAT_WEBHOOK_PATH, baseUrl).toString();
+  return new URL(RECALL_REALTIME_WEBHOOK_PATH, baseUrl).toString();
 }
 
 export function normalizeRecallWebhook(payload: unknown) {
@@ -217,8 +223,8 @@ export async function scheduleRecallBot(input: {
       bot_name: parsedInput.botName,
       join_at: parsedInput.startAt,
       automatic_video_output: getDefaultRecallBotVideoOutput(),
-      recording_config: buildRecallChatRecordingConfig(
-        buildRecallChatWebhookUrl(parsedInput.webhookUrl),
+      recording_config: buildRecallRealtimeRecordingConfig(
+        buildRecallRealtimeWebhookUrl(parsedInput.webhookUrl),
       ),
       metadata: {
         // Recall delivers bot status webhooks to dashboard configured endpoints. This metadata only correlates the request with our app URL.
@@ -403,8 +409,8 @@ export async function scheduleRecallCalendarEventBot(input: {
         bot_config: {
           bot_name: parsedInput.botName,
           automatic_video_output: getDefaultRecallBotVideoOutput(),
-          recording_config: buildRecallChatRecordingConfig(
-            buildRecallChatWebhookUrl(),
+          recording_config: buildRecallRealtimeRecordingConfig(
+            buildRecallRealtimeWebhookUrl(),
           ),
           metadata: parsedInput.metadata,
         },
@@ -475,8 +481,8 @@ export async function updateScheduledRecallBot(input: {
         meeting_url: parsedInput.meetingUrl,
         join_at: parsedInput.startAt,
         automatic_video_output: getDefaultRecallBotVideoOutput(),
-        recording_config: buildRecallChatRecordingConfig(
-          buildRecallChatWebhookUrl(),
+        recording_config: buildRecallRealtimeRecordingConfig(
+          buildRecallRealtimeWebhookUrl(),
         ),
         metadata: parsedInput.metadata,
       }),
@@ -633,6 +639,73 @@ export function findRecallRecordingMediaUrl(
   }
 
   return null;
+}
+
+export function findRecallSpeakerTimelineUrl(
+  bot: unknown,
+  recordingId?: string | null,
+) {
+  if (!bot || typeof bot !== "object") {
+    return null;
+  }
+
+  const recordings = (bot as { recordings?: unknown }).recordings;
+
+  if (!Array.isArray(recordings)) {
+    return null;
+  }
+
+  for (const recording of recordings) {
+    if (!recording || typeof recording !== "object") {
+      continue;
+    }
+
+    const candidate = recording as {
+      id?: unknown;
+      media_shortcuts?: Record<string, unknown>;
+      speaker_timeline_download_url?: unknown;
+    };
+
+    if (recordingId && candidate.id !== recordingId) {
+      continue;
+    }
+
+    if (
+      typeof candidate.speaker_timeline_download_url === "string" &&
+      candidate.speaker_timeline_download_url.trim()
+    ) {
+      return candidate.speaker_timeline_download_url.trim();
+    }
+
+    const url =
+      getSpeakerTimelineDownloadUrl(candidate.media_shortcuts?.participant_events) ??
+      getDownloadUrl(candidate.media_shortcuts?.speaker_timeline);
+
+    if (url) {
+      return url;
+    }
+  }
+
+  return null;
+}
+
+function getSpeakerTimelineDownloadUrl(mediaShortcut: unknown) {
+  if (!mediaShortcut || typeof mediaShortcut !== "object") {
+    return null;
+  }
+
+  const data = (mediaShortcut as { data?: unknown }).data;
+
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+
+  const downloadUrl = (data as { speaker_timeline_download_url?: unknown })
+    .speaker_timeline_download_url;
+
+  return typeof downloadUrl === "string" && downloadUrl.trim()
+    ? downloadUrl.trim()
+    : null;
 }
 
 function getDownloadUrl(mediaShortcut: unknown) {

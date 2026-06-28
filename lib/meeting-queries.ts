@@ -24,6 +24,11 @@ import {
   getDashboardWorkflowSummary,
   type DashboardWorkflowSummaryModel,
 } from "@/lib/dashboard-workflow-summary";
+import {
+  getEmailDomain,
+  isCommonPersonalEmailDomain,
+  normalizeEmailAddress,
+} from "@/lib/email-domains";
 import type { TranscriptJobStatus } from "@/lib/meeting-display-status";
 import {
   getOrCreateWorkspaceForSessionUser,
@@ -100,11 +105,13 @@ export async function listMeetingsForWorkspace(
         order by ${transcriptJobs.createdAt} desc
         limit 1
       )`,
+      calendarAttendeeEmails: calendarEvents.attendeeEmails,
       recallBotId: meetings.recallBotId,
       startedAt: meetings.startedAt,
       createdAt: meetings.createdAt,
     })
     .from(meetings)
+    .leftJoin(calendarEvents, eq(calendarEvents.id, meetings.calendarEventId))
     .where(where)
     .orderBy(desc(meetings.startedAt), desc(meetings.createdAt))
     .limit(50);
@@ -122,6 +129,10 @@ export async function listMeetingsForWorkspace(
     hasRecallBot: Boolean(meeting.recallBotId),
     startedAt: (meeting.startedAt ?? meeting.createdAt).toISOString(),
     accessScope: meeting.teamId === workspace.teamId ? "workspace" : "shared",
+    externalParticipantKeys: getExternalParticipantKeys(
+      meeting.calendarAttendeeEmails,
+      workspace.domain,
+    ),
     primaryEntity: primaryEntityByMeetingId.get(meeting.id) ?? null,
   }));
   const grouped = groupRelatedMeetings(items);
@@ -142,6 +153,39 @@ export async function listMeetingsForWorkspace(
       accessScope: meeting.accessScope,
       relatedMeetings: groupedById.get(meeting.id),
     }));
+}
+
+function getExternalParticipantKeys(
+  attendeeEmails: unknown,
+  workspaceDomain: string,
+) {
+  if (!Array.isArray(attendeeEmails)) {
+    return [];
+  }
+
+  const normalizedWorkspaceDomain = workspaceDomain.trim().toLowerCase();
+  const keys = new Set<string>();
+
+  for (const rawEmail of attendeeEmails) {
+    if (typeof rawEmail !== "string") {
+      continue;
+    }
+
+    const email = normalizeEmailAddress(rawEmail);
+    const domain = getEmailDomain(email);
+
+    if (!email || !domain || domain === normalizedWorkspaceDomain) {
+      continue;
+    }
+
+    keys.add(`email:${email}`);
+
+    if (!isCommonPersonalEmailDomain(domain)) {
+      keys.add(`domain:${domain}`);
+    }
+  }
+
+  return Array.from(keys);
 }
 
 export async function getMeetingDashboardSummaryForWorkspace(

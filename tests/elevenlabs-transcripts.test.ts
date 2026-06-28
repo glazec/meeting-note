@@ -242,7 +242,57 @@ describe("buildElevenLabsTranscriptPersistence", () => {
       action: "complete",
       entities: [
         {
-          aliases: ["Nascent.xyz", "nascent.xyz"],
+          aliases: ["Nascent.xyz"],
+          source: "elevenlabs",
+          type: "organization",
+          value: "Nascent",
+          normalizedValue: "nascent",
+        },
+        {
+          source: "meeting_url",
+          type: "meeting_link",
+          value: "meet.google.com",
+          normalizedValue: "meet.google.com/abc-defg-hij",
+        },
+      ],
+    });
+  });
+
+  it("uses persisted meeting context when ElevenLabs metadata only has ids", () => {
+    expect(
+      buildElevenLabsTranscriptPersistence(
+        {
+          eventType: "speech_to_text_transcription",
+          type: "speech_to_text_transcription",
+          requestId: "req_123",
+          transcriptId: null,
+          status: "completed",
+          transcriptionText: "Nascent asked about the follow up.",
+          transcriptionEntities: [
+            {
+              source: "elevenlabs",
+              type: "organization",
+              value: "Nascent.xyz",
+            },
+          ],
+          metadata: {
+            meetingId: "11111111-1111-4111-8111-111111111111",
+            transcriptJobId: "22222222-2222-4222-8222-222222222222",
+          },
+        },
+        {
+          entityContext: {
+            attendeeEmails: ["alice@iosg.vc", "founder@nascent.xyz"],
+            meetingUrl: "https://meet.google.com/abc-defg-hij",
+            workspaceDomain: "iosg.vc",
+          },
+        },
+      ),
+    ).toMatchObject({
+      action: "complete",
+      entities: [
+        {
+          aliases: ["Nascent.xyz"],
           source: "elevenlabs",
           type: "organization",
           value: "Nascent",

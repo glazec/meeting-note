@@ -58,7 +58,7 @@ The production OneSignal web app is configured for `https://meeting-note-swart.v
 
 The required service worker from the OneSignal v16 package is served from `/OneSignalSDKWorker.js`, and the SDK init points to that root worker path. Signed in app pages identify the browser to OneSignal with the local workspace user id. OneSignal controls the visible permission prompt from its dashboard, so the product can keep reminder setup out of the normal meeting UI.
 
-Location based calendar events create an in person meeting row and a reminder scheduled for two minutes before the event. Run the `meeting/send.location-reminders` worker event from a scheduler every minute, or wire the same helper to an Inngest cron, so due reminders are delivered through OneSignal.
+Location based calendar events create an in person meeting row and a reminder scheduled for two minutes before the event. Run the `meeting/send.location-reminders` worker event from a scheduler every minute, or wire the same helper to an Inngest cron, so due mobile reminders are delivered through OneSignal native iOS and Android push only.
 
 ## Dashboard
 
@@ -70,7 +70,7 @@ The authenticated dashboard is a meeting operations hub for investors and team o
 
 The Calendar automation panel shows whether Recall Calendar is connected, whether team bot coverage is on, when the calendar was last checked, and the Sync Recall calendar repair action. Normal calendar capture is driven by Recall Calendar V2 webhooks, so users should not need to click Sync calendar for every new event.
 
-The Meeting library remains the searchable recent meeting table. It is filtered by the search box and capped for browsing, while the dashboard summary is computed separately from all workspace meetings in Neon so search does not hide bot coverage or exception counts. Scheduled rows show whether a bot is linked, recording rows show that the bot is in the meeting, and failed rows are marked for review.
+The Meeting library remains the searchable recent meeting table. It is filtered by the search box and capped for browsing, while the dashboard summary is computed separately from all workspace meetings in Neon so search does not hide bot coverage or exception counts. Scheduled rows show whether a bot is linked, recording rows show that the bot is in the meeting, and failed rows are marked for review. Related rows are grouped by extracted entities first and shared external attendee emails when transcript entities are not available yet.
 
 ## Meeting Links
 
@@ -127,7 +127,7 @@ Meeting transcript pages can export transcript text, export MP3 audio through th
 
 Recall bot status and Calendar V2 webhooks are delivered to endpoints configured in the Recall dashboard. ElevenLabs speech to text webhooks are delivered to workspace configured webhooks when transcript jobs set `webhook=true`. All vendor webhook routes verify vendor signatures from the raw request body before parsing the event, store an idempotency record, and only apply side effects for newly inserted webhook events.
 
-Recall bot status webhooks update the local meeting status when metadata contains a `meetingId`. Recall Calendar V2 webhooks keep scheduled meeting rows in sync without requiring the user to click Sync calendar. Completed Recall recordings also queue ElevenLabs transcription when Recall exposes a recording media URL. ElevenLabs webhooks update the local transcript job, store transcript text as a transcript segment, and mark the meeting ready when metadata contains `meetingId` and `transcriptJobId`.
+Recall bot status webhooks update the local meeting status when metadata contains a `meetingId`. Recall Calendar V2 webhooks keep scheduled meeting rows in sync without requiring the user to click Sync calendar. Completed Recall recordings store Recall speaker timeline data when available, then queue ElevenLabs transcription when Recall exposes a recording media URL. ElevenLabs webhooks update the local transcript job, store transcript text as transcript segments, map speaker ids to Recall participant names by timestamp, and mark the meeting ready when metadata contains `meetingId` and `transcriptJobId`.
 
 Inngest events do not register functions by themselves. After deploying the app or changing `NEXT_PUBLIC_APP_URL`, run `npm run inngest:sync` to sync the public `/api/inngest` endpoint. If this sync is missing, upload rows can be created while transcript jobs stay queued with no ElevenLabs provider job id. Calendar event scheduling does not depend on Inngest; it is driven by Recall Calendar V2 reconciliation and webhooks.
 

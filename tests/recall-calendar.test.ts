@@ -183,8 +183,12 @@ describe("Recall Calendar V2 adapter", () => {
           realtime_endpoints: [
             {
               type: "webhook",
-              url: "https://app.example.com/api/recall/chat/webhook",
-              events: ["participant_events.chat_message"],
+              url: "https://app.example.com/api/recall/realtime/webhook",
+              events: [
+                "participant_events.chat_message",
+                "participant_events.speech_on",
+                "participant_events.speech_off",
+              ],
             },
           ],
         },

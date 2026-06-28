@@ -26,6 +26,16 @@ const transcriptionWordSchema = z
   })
   .passthrough();
 
+const transcriptionEntitySchema = z
+  .object({
+    text: z.string().optional().nullable(),
+    value: z.string().optional().nullable(),
+    type: z.string().optional().nullable(),
+    start: z.number().optional().nullable(),
+    end: z.number().optional().nullable(),
+  })
+  .passthrough();
+
 const elevenLabsWebhookSchema = z.object({
   type: z.string().min(1),
   data: z.object({
@@ -59,6 +69,10 @@ export function normalizeElevenLabsWebhook(payload: unknown) {
       typeof transcription === "object" && transcription !== null
         ? normalizeTranscriptionWords(transcription.words)
         : undefined;
+    const transcriptionEntities =
+      typeof transcription === "object" && transcription !== null
+        ? normalizeTranscriptionEntities(transcription.entities)
+        : undefined;
     const status =
       typeof transcription === "object" && transcription !== null
         ? (transcription.status ?? "completed")
@@ -71,6 +85,7 @@ export function normalizeElevenLabsWebhook(payload: unknown) {
       transcriptId: null,
       status,
       transcriptionText,
+      ...(transcriptionEntities ? { transcriptionEntities } : {}),
       ...(transcriptionWords ? { transcriptionWords } : {}),
       metadata: realPayload.data.data.webhook_metadata ?? {},
     };
@@ -164,4 +179,37 @@ function normalizeTranscriptionWords(words: unknown) {
     .filter((word) => word !== null);
 
   return normalizedWords.length > 0 ? normalizedWords : undefined;
+}
+
+function normalizeTranscriptionEntities(entities: unknown) {
+  if (!Array.isArray(entities)) {
+    return undefined;
+  }
+
+  const normalizedEntities = entities
+    .map((entity) => {
+      const parsed = transcriptionEntitySchema.safeParse(entity);
+
+      if (!parsed.success) {
+        return null;
+      }
+
+      const value = parsed.data.text ?? parsed.data.value;
+      const type = parsed.data.type;
+
+      if (!value || !type) {
+        return null;
+      }
+
+      return {
+        source: "elevenlabs" as const,
+        type,
+        value,
+        start: parsed.data.start ?? null,
+        end: parsed.data.end ?? null,
+      };
+    })
+    .filter((entity) => entity !== null);
+
+  return normalizedEntities.length > 0 ? normalizedEntities : undefined;
 }

@@ -1,3 +1,5 @@
+import { getEmailDomain, normalizeEmailAddress } from "@/lib/email-domains";
+
 type AutoGrantInput = {
   attendeeEmail: string;
   memberEmails: string[];
@@ -5,14 +7,11 @@ type AutoGrantInput = {
 };
 
 export function normalizeEmail(email: string) {
-  return email.trim().toLowerCase();
+  return normalizeEmailAddress(email);
 }
 
 export function normalizeEmailDomain(email: string) {
-  const normalized = normalizeEmail(email);
-  const [, domain] = normalized.split("@");
-
-  return domain ?? "";
+  return getEmailDomain(email) ?? "";
 }
 
 export function canAutoGrantAttendeeAccess(input: AutoGrantInput) {

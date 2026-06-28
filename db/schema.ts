@@ -446,6 +446,8 @@ export const meetingEntities = pgTable(
     type: text("type").notNull(),
     value: text("value").notNull(),
     normalizedValue: text("normalized_value").notNull(),
+    aliases: jsonb("aliases").$type<string[]>().notNull().default([]),
+    source: text("source").notNull().default("transcript"),
     ...timestamps,
   },
   (table) => [
@@ -455,6 +457,31 @@ export const meetingEntities = pgTable(
       table.normalizedValue,
     ),
     index("meeting_entities_normalized_value_index").on(table.normalizedValue),
+  ],
+);
+
+export const meetingParticipantTimeline = pgTable(
+  "meeting_participant_timeline",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    meetingId: uuid("meeting_id")
+      .notNull()
+      .references(() => meetings.id, { onDelete: "cascade" }),
+    recallParticipantId: text("recall_participant_id"),
+    name: text("name"),
+    email: text("email"),
+    startMs: integer("start_ms").notNull(),
+    endMs: integer("end_ms"),
+    source: text("source").notNull().default("recall"),
+    ...timestamps,
+  },
+  (table) => [
+    index("meeting_participant_timeline_meeting_index").on(table.meetingId),
+    uniqueIndex("meeting_participant_timeline_unique").on(
+      table.meetingId,
+      table.recallParticipantId,
+      table.startMs,
+    ),
   ],
 );
 

@@ -1,3 +1,5 @@
+import { getExternalOrganizationDomain } from "@/lib/email-domains";
+
 type VocabularyTerm = {
   term: string;
   hint?: string | null;
@@ -8,13 +10,33 @@ type EntitySegment = {
   text: string;
 };
 
-export type MeetingEntityType = "organization" | "product";
+export type MeetingEntityType = "meeting_link" | "organization" | "product";
+export type MeetingEntitySource =
+  | "calendar"
+  | "elevenlabs"
+  | "meeting_url"
+  | "transcript";
 
 export type ExtractedMeetingEntity = {
-  segmentId: string;
+  aliases: string[];
+  segmentId: string | null;
+  source: MeetingEntitySource;
   type: MeetingEntityType;
   value: string;
   normalizedValue: string;
+};
+
+export type TranscriptDetectedEntity = {
+  source?: MeetingEntitySource;
+  type: string;
+  value: string;
+};
+
+type EntityExtractionContext = {
+  attendeeEmails?: string[];
+  meetingUrl?: string | null;
+  transcriptEntities?: TranscriptDetectedEntity[];
+  workspaceDomain?: string | null;
 };
 
 export type SegmentEmotion = {
@@ -27,6 +49,7 @@ type MeetingForGrouping = {
   title: string;
   startedAt: string;
   primaryEntity?: string | null;
+  externalParticipantKeys?: string[];
 };
 
 const genericMeetingTitles = new Set([
@@ -38,7 +61,7 @@ const genericMeetingTitles = new Set([
   "zoom recording",
 ]);
 
-const knownProductEntities = ["Solana", "TCG"];
+const knownProductEntities = ["SAFE", "Solana", "TCG"];
 const knownOrganizationEntities = ["IOSG", "Nascent"];
 const hardSignals = [
   "blocked",
@@ -96,17 +119,17 @@ export function buildSmartMeetingTitle(input: {
 
 export function extractMeetingEntities(
   segments: EntitySegment[],
+  context: EntityExtractionContext = {},
 ): ExtractedMeetingEntity[] {
   const entities: ExtractedMeetingEntity[] = [];
-  const seen = new Set<string>();
 
-  for (const segment of segments) {
+  segments.forEach((segment) => {
     for (const value of knownOrganizationEntities) {
       if (new RegExp(`\\b${escapeRegExp(value)}\\b`, "i").test(segment.text)) {
-        addEntity({
+        addOrMergeEntity({
           entities,
-          seen,
           segmentId: segment.id,
+          source: "transcript",
           type: "organization",
           value,
         });
@@ -115,15 +138,63 @@ export function extractMeetingEntities(
 
     for (const value of knownProductEntities) {
       if (new RegExp(`\\b${escapeRegExp(value)}\\b`, "i").test(segment.text)) {
-        addEntity({
+        addOrMergeEntity({
           entities,
-          seen,
           segmentId: segment.id,
+          source: "transcript",
           type: "product",
           value,
         });
       }
     }
+  });
+
+  for (const entity of context.transcriptEntities ?? []) {
+    if (!isSupportedEntityType(entity.type)) {
+      continue;
+    }
+
+    addOrMergeEntity({
+      aliases: entity.type.toLowerCase() === "organization"
+        ? buildOrganizationAliases(entity.value)
+        : [],
+      entities,
+      segmentId: findSegmentIdForEntity(segments, entity.value),
+      source: entity.source ?? "elevenlabs",
+      type: entity.type.toLowerCase() as MeetingEntityType,
+      value: entity.value,
+    });
+  }
+
+  for (const email of context.attendeeEmails ?? []) {
+    const domain = getExternalOrganizationDomain(email, context.workspaceDomain);
+
+    if (!domain) {
+      continue;
+    }
+
+    addOrMergeEntity({
+      aliases: [domain],
+      entities,
+      segmentId: null,
+      source: "calendar",
+      type: "organization",
+      value: domain,
+    });
+  }
+
+  const meetingLinkEntity = buildMeetingLinkEntity(context.meetingUrl);
+
+  if (meetingLinkEntity) {
+    addOrMergeEntity({
+      aliases: [meetingLinkEntity.alias],
+      entities,
+      segmentId: null,
+      source: "meeting_url",
+      type: "meeting_link",
+      value: meetingLinkEntity.value,
+      normalizedValue: meetingLinkEntity.normalizedValue,
+    });
   }
 
   return entities;
@@ -162,28 +233,35 @@ export function groupRelatedMeetings(meetings: MeetingForGrouping[]) {
   const sorted = [...meetings].sort((left, right) =>
     right.startedAt.localeCompare(left.startedAt),
   );
-  const rootByEntity = new Map<string, MeetingForGrouping>();
+  const rootByKey = new Map<string, MeetingForGrouping>();
   const childrenByRoot = new Map<string, MeetingForGrouping[]>();
   const roots: MeetingForGrouping[] = [];
 
   for (const meeting of sorted) {
-    const entity = meeting.primaryEntity?.trim().toLowerCase();
+    const keys = getMeetingGroupingKeys(meeting);
 
-    if (!entity) {
+    if (keys.length === 0) {
       roots.push(meeting);
       childrenByRoot.set(meeting.id, []);
       continue;
     }
 
-    const existingRoot = rootByEntity.get(entity);
+    const existingRoot = keys
+      .map((key) => rootByKey.get(key))
+      .find((root): root is MeetingForGrouping => Boolean(root));
 
     if (!existingRoot) {
-      rootByEntity.set(entity, meeting);
+      for (const key of keys) {
+        rootByKey.set(key, meeting);
+      }
       childrenByRoot.set(meeting.id, []);
       roots.push(meeting);
       continue;
     }
 
+    for (const key of keys) {
+      rootByKey.set(key, existingRoot);
+    }
     childrenByRoot.get(existingRoot.id)?.push(meeting);
   }
 
@@ -197,25 +275,47 @@ export function groupRelatedMeetings(meetings: MeetingForGrouping[]) {
   }));
 }
 
-function addEntity(input: {
+function addOrMergeEntity(input: {
+  aliases?: string[];
   entities: ExtractedMeetingEntity[];
-  seen: Set<string>;
-  segmentId: string;
+  normalizedValue?: string;
+  segmentId: string | null;
+  source: MeetingEntitySource;
   type: MeetingEntityType;
   value: string;
 }) {
-  const normalizedValue = normalizeEntityValue(input.value);
-  const key = `${input.type}:${normalizedValue}`;
+  const value =
+    input.type === "organization"
+      ? canonicalizeOrganizationName(input.value)
+      : input.value;
+  const normalizedValue = input.normalizedValue ?? normalizeEntityValue(value);
 
-  if (!normalizedValue || input.seen.has(key)) {
+  if (!normalizedValue) {
     return;
   }
 
-  input.seen.add(key);
+  const existing = input.entities.find(
+    (entity) =>
+      entity.type === input.type && entity.normalizedValue === normalizedValue,
+  );
+
+  if (existing) {
+    existing.aliases = mergeAliases(existing.aliases, input.aliases ?? []);
+    if (input.source === "elevenlabs") {
+      existing.source = input.source;
+    }
+    if (!existing.segmentId && input.segmentId) {
+      existing.segmentId = input.segmentId;
+    }
+    return;
+  }
+
   input.entities.push({
+    aliases: mergeAliases([], input.aliases ?? []),
     segmentId: input.segmentId,
+    source: input.source,
     type: input.type,
-    value: input.value,
+    value,
     normalizedValue,
   });
 }
@@ -226,6 +326,128 @@ function normalizeEntityValue(value: string) {
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
     .replace(/\s+/g, " ");
+}
+
+function isSupportedEntityType(type: string) {
+  const normalized = type.toLowerCase();
+
+  return normalized === "organization" || normalized === "product";
+}
+
+function buildOrganizationAliases(value: string) {
+  const aliases: string[] = [];
+  const trimmed = value.trim();
+  const domain = looksLikeDomain(trimmed) ? trimmed.toLowerCase() : null;
+
+  if (trimmed && trimmed !== canonicalizeOrganizationName(trimmed)) {
+    aliases.push(trimmed);
+  }
+
+  if (domain && domain !== trimmed) {
+    aliases.push(domain);
+  }
+
+  return aliases;
+}
+
+function canonicalizeOrganizationName(value: string) {
+  const trimmed = value.trim();
+  const known = knownOrganizationEntities.find(
+    (entity) =>
+      normalizeEntityValue(entity) === normalizeEntityValue(trimmed) ||
+      normalizeEntityValue(entity) === normalizeEntityValue(trimmed.split(".")[0] ?? ""),
+  );
+
+  if (known) {
+    return known;
+  }
+
+  return formatOrganizationName(trimmed);
+}
+
+function mergeAliases(left: string[], right: string[]) {
+  const aliases: string[] = [...left];
+  const seen = new Set(left.map((alias) => alias.toLowerCase()));
+
+  for (const alias of right) {
+    const trimmed = alias.trim();
+    const key = trimmed.toLowerCase();
+
+    if (!trimmed || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    aliases.push(trimmed);
+  }
+
+  return aliases;
+}
+
+function findSegmentIdForEntity(segments: EntitySegment[], value: string) {
+  const normalizedValue = value.trim();
+
+  if (!normalizedValue) {
+    return null;
+  }
+
+  return (
+    segments.find((segment) =>
+      new RegExp(`\\b${escapeRegExp(normalizedValue)}\\b`, "i").test(
+        segment.text,
+      ),
+    )?.id ??
+    segments.find((segment) =>
+      segment.text
+        .toLowerCase()
+        .includes(canonicalizeOrganizationName(normalizedValue).toLowerCase()),
+    )?.id ??
+    null
+  );
+}
+
+function looksLikeDomain(value: string) {
+  return /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(value);
+}
+
+function buildMeetingLinkEntity(meetingUrl?: string | null) {
+  if (!meetingUrl) {
+    return null;
+  }
+
+  try {
+    const url = new URL(meetingUrl);
+    const normalizedValue = `${url.hostname.toLowerCase()}${url.pathname}`
+      .replace(/\/+$/, "")
+      .replace(/^\//, "");
+
+    return {
+      alias: meetingUrl,
+      value: url.hostname.toLowerCase(),
+      normalizedValue,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getMeetingGroupingKeys(meeting: MeetingForGrouping) {
+  const keys: string[] = [];
+  const entity = meeting.primaryEntity?.trim().toLowerCase();
+
+  if (entity) {
+    keys.push(`entity:${entity}`);
+  }
+
+  for (const participant of meeting.externalParticipantKeys ?? []) {
+    const normalized = participant.trim().toLowerCase();
+
+    if (normalized) {
+      keys.push(`participant:${normalized}`);
+    }
+  }
+
+  return keys;
 }
 
 function formatOrganizationName(domainOrName: string) {

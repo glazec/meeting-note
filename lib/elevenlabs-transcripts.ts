@@ -2,16 +2,24 @@ import { eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
+  calendarEvents,
   meetingEntities,
   meetings,
   transcriptJobs,
   transcriptSegments,
+  users,
 } from "@/db/schema";
+import { normalizeEmailDomain } from "@/lib/access";
+import {
+  listMeetingParticipantTimeline,
+  type ParticipantTimelineEntry,
+} from "@/lib/meeting-participant-timeline";
 import {
   classifySegmentEmotion,
   extractMeetingEntities,
   type ExtractedMeetingEntity,
   type SegmentEmotion,
+  type TranscriptDetectedEntity,
 } from "@/lib/meeting-intelligence";
 import type { normalizeElevenLabsWebhook } from "@/lib/vendors/elevenlabs";
 
@@ -55,8 +63,18 @@ type TranscriptPersistence =
   | FailTranscriptPersistence
   | SkipTranscriptPersistence;
 
+type EntityExtractionContext = {
+  attendeeEmails?: string[];
+  meetingUrl?: string | null;
+  workspaceDomain?: string | null;
+};
+
 export function buildElevenLabsTranscriptPersistence(
   event: ElevenLabsTranscriptEvent,
+  options: {
+    entityContext?: EntityExtractionContext;
+    participantTimeline?: ParticipantTimelineEntry[];
+  } = {},
 ): TranscriptPersistence {
   const transcriptJobId = getMetadataString(
     event.metadata,
@@ -84,7 +102,7 @@ export function buildElevenLabsTranscriptPersistence(
   }
 
   const words = "transcriptionWords" in event ? event.transcriptionWords : undefined;
-  const segments = buildTranscriptSegments(words);
+  const segments = buildTranscriptSegments(words, options.participantTimeline ?? []);
   const text =
     event.transcriptionText?.trim() ??
     segments
@@ -100,6 +118,7 @@ export function buildElevenLabsTranscriptPersistence(
     action: "complete",
     entities: extractEntitiesFromSegments(
       segments.length > 0 ? segments : buildSingleSegment(text),
+      buildEntityExtractionContext(event, options.entityContext),
     ),
     meetingId,
     providerJobId,
@@ -112,7 +131,17 @@ export function buildElevenLabsTranscriptPersistence(
 export async function applyElevenLabsTranscriptEvent(
   event: ElevenLabsTranscriptEvent,
 ) {
-  const persistence = buildElevenLabsTranscriptPersistence(event);
+  const meetingId = getMetadataString(event.metadata, "meetingId", "meeting_id");
+  const participantTimeline = meetingId
+    ? await listMeetingParticipantTimeline(meetingId)
+    : [];
+  const entityContext = meetingId
+    ? await loadMeetingEntityContext(meetingId)
+    : {};
+  const persistence = buildElevenLabsTranscriptPersistence(event, {
+    entityContext,
+    participantTimeline,
+  });
 
   if (persistence.action === "skip") {
     return persistence;
@@ -147,17 +176,23 @@ export async function applyElevenLabsTranscriptEvent(
     .delete(transcriptSegments)
     .where(eq(transcriptSegments.jobId, persistence.transcriptJobId));
 
-  await db.insert(transcriptSegments).values(
-    persistence.segments.map((segment) => ({
-      meetingId: persistence.meetingId,
-      jobId: persistence.transcriptJobId,
-      speaker: segment.speaker,
-      startMs: segment.startMs,
-      endMs: segment.endMs,
-      text: segment.text,
-      emotionLabel: segment.emotionLabel,
-      emotionReason: segment.emotionReason,
-    })),
+  const insertedSegments = await db
+    .insert(transcriptSegments)
+    .values(
+      persistence.segments.map((segment) => ({
+        meetingId: persistence.meetingId,
+        jobId: persistence.transcriptJobId,
+        speaker: segment.speaker,
+        startMs: segment.startMs,
+        endMs: segment.endMs,
+        text: segment.text,
+        emotionLabel: segment.emotionLabel,
+        emotionReason: segment.emotionReason,
+      })),
+    )
+    .returning({ id: transcriptSegments.id });
+  const segmentIdByReference = new Map(
+    insertedSegments.map((segment, index) => [`segment_${index}`, segment.id]),
   );
 
   if (persistence.entities.length > 0) {
@@ -166,6 +201,11 @@ export async function applyElevenLabsTranscriptEvent(
       .values(
         persistence.entities.map((entity) => ({
           meetingId: persistence.meetingId,
+          aliases: entity.aliases,
+          segmentId: entity.segmentId
+            ? (segmentIdByReference.get(entity.segmentId) ?? null)
+            : null,
+          source: entity.source,
           type: entity.type,
           value: entity.value,
           normalizedValue: entity.normalizedValue,
@@ -201,6 +241,58 @@ function getMetadataString(
   }
 
   return null;
+}
+
+function getMetadataList(
+  metadata: Record<string, unknown>,
+  ...keys: string[]
+) {
+  const value = getMetadataString(metadata, ...keys);
+
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(/[,\n;]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+async function loadMeetingEntityContext(
+  meetingId: string,
+): Promise<EntityExtractionContext> {
+  const [row] = await db
+    .select({
+      attendeeEmails: calendarEvents.attendeeEmails,
+      calendarMeetingUrl: calendarEvents.meetingUrl,
+      meetingUrl: meetings.meetingUrl,
+      ownerEmail: users.email,
+    })
+    .from(meetings)
+    .leftJoin(calendarEvents, eq(calendarEvents.id, meetings.calendarEventId))
+    .leftJoin(users, eq(users.id, meetings.ownerUserId))
+    .where(eq(meetings.id, meetingId))
+    .limit(1);
+
+  return {
+    attendeeEmails: normalizeAttendeeEmails(row?.attendeeEmails),
+    meetingUrl: row?.meetingUrl ?? row?.calendarMeetingUrl ?? null,
+    workspaceDomain: row?.ownerEmail
+      ? normalizeEmailDomain(row.ownerEmail)
+      : null,
+  };
+}
+
+function normalizeAttendeeEmails(attendeeEmails: unknown) {
+  if (!Array.isArray(attendeeEmails)) {
+    return [];
+  }
+
+  return attendeeEmails
+    .filter((email): email is string => typeof email === "string")
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
 }
 
 function isFailedStatus(status: string | null) {
@@ -242,6 +334,7 @@ type TranscriptWord = {
 
 function buildTranscriptSegments(
   words: TranscriptWord[] | undefined,
+  participantTimeline: ParticipantTimelineEntry[],
 ): TranscriptSegmentInput[] {
   if (!words?.length) {
     return [];
@@ -250,6 +343,7 @@ function buildTranscriptSegments(
   const segments: TranscriptSegmentInput[] = [];
   let current: TranscriptSegmentInput | null = null;
   let currentSpeakerId: string | null = null;
+  let currentSpeakerLabel: string | null = null;
 
   for (const word of words) {
     if (!word.text) {
@@ -257,16 +351,24 @@ function buildTranscriptSegments(
     }
 
     const nextSpeakerId: string | null = word.speakerId ?? currentSpeakerId;
+    const nextSpeakerLabel = formatSpeaker(
+      nextSpeakerId,
+      secondsToMs(word.start),
+      secondsToMs(word.end),
+      participantTimeline,
+    );
     const shouldStartSegment =
       !current ||
       nextSpeakerId !== currentSpeakerId ||
+      nextSpeakerLabel !== currentSpeakerLabel ||
       shouldSplitLongSegment(current, word.text);
 
     if (shouldStartSegment) {
       pushSegment(segments, current);
       currentSpeakerId = nextSpeakerId;
+      currentSpeakerLabel = nextSpeakerLabel;
       current = {
-        speaker: formatSpeaker(nextSpeakerId),
+        speaker: nextSpeakerLabel,
         startMs: secondsToMs(word.start) ?? 0,
         endMs: secondsToMs(word.end),
         text: word.text,
@@ -315,20 +417,78 @@ function pushSegment(
   });
 }
 
-function extractEntitiesFromSegments(segments: TranscriptSegmentInput[]) {
+function buildEntityExtractionContext(
+  event: ElevenLabsTranscriptEvent,
+  context: EntityExtractionContext = {},
+) {
+  const attendeeEmails = getMetadataList(
+    event.metadata,
+    "attendeeEmails",
+    "attendee_emails",
+  );
+
+  return {
+    attendeeEmails:
+      attendeeEmails.length > 0 ? attendeeEmails : context.attendeeEmails ?? [],
+    meetingUrl:
+      getMetadataString(event.metadata, "meetingUrl", "meeting_url") ??
+      context.meetingUrl ??
+      null,
+    transcriptEntities:
+      "transcriptionEntities" in event
+        ? (event.transcriptionEntities as TranscriptDetectedEntity[] | undefined)
+        : undefined,
+    workspaceDomain:
+      getMetadataString(
+        event.metadata,
+        "workspaceDomain",
+        "workspace_domain",
+      ) ??
+      context.workspaceDomain ??
+      null,
+  };
+}
+
+function extractEntitiesFromSegments(
+  segments: TranscriptSegmentInput[],
+  context: ReturnType<typeof buildEntityExtractionContext>,
+) {
   return extractMeetingEntities(
     segments.map((segment, index) => ({
       id: `segment_${index}`,
       text: segment.text,
     })),
+    context,
   );
 }
 
-function formatSpeaker(speakerId: string | null) {
+function formatSpeaker(
+  speakerId: string | null,
+  startMs: number | null,
+  endMs: number | null,
+  participantTimeline: ParticipantTimelineEntry[],
+) {
   if (!speakerId) {
     return null;
   }
 
+  const fallback = formatFallbackSpeaker(speakerId);
+  const participant = findDominantParticipant({
+    endMs,
+    participantTimeline,
+    startMs,
+  });
+
+  if (participant?.name) {
+    return isSharedMicrophoneName(participant.name)
+      ? `${participant.name} · ${fallback}`
+      : participant.name;
+  }
+
+  return fallback;
+}
+
+function formatFallbackSpeaker(speakerId: string) {
   const numericId = speakerId.match(/\d+/)?.[0];
 
   if (numericId) {
@@ -339,6 +499,43 @@ function formatSpeaker(speakerId: string | null) {
     .replace(/[_-]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function findDominantParticipant(input: {
+  startMs: number | null;
+  endMs: number | null;
+  participantTimeline: ParticipantTimelineEntry[];
+}) {
+  if (input.startMs === null || input.participantTimeline.length === 0) {
+    return null;
+  }
+
+  const startMs = input.startMs;
+  const endMs = input.endMs && input.endMs > startMs ? input.endMs : startMs + 1;
+  let best:
+    | {
+        entry: ParticipantTimelineEntry;
+        overlapMs: number;
+      }
+    | null = null;
+
+  for (const entry of input.participantTimeline) {
+    const entryEndMs = entry.endMs ?? endMs;
+    const overlapMs = Math.max(
+      0,
+      Math.min(endMs, entryEndMs) - Math.max(startMs, entry.startMs),
+    );
+
+    if (!best || overlapMs > best.overlapMs) {
+      best = { entry, overlapMs };
+    }
+  }
+
+  return best && best.overlapMs > 0 ? best.entry : null;
+}
+
+function isSharedMicrophoneName(name: string) {
+  return /\b(room|conference|speakerphone|shared)\b/i.test(name);
 }
 
 function secondsToMs(value: number | null) {

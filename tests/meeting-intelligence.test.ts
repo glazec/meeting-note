@@ -48,19 +48,25 @@ describe("meeting intelligence helpers", () => {
       ]),
     ).toEqual([
       {
+        aliases: [],
         segmentId: "segment_1",
+        source: "transcript",
         type: "organization",
         value: "Nascent",
         normalizedValue: "nascent",
       },
       {
+        aliases: [],
         segmentId: "segment_1",
+        source: "transcript",
         type: "product",
         value: "Solana",
         normalizedValue: "solana",
       },
       {
+        aliases: [],
         segmentId: "segment_1",
+        source: "transcript",
         type: "product",
         value: "TCG",
         normalizedValue: "tcg",
@@ -92,7 +98,7 @@ describe("meeting intelligence helpers", () => {
       ),
     ).toEqual([
       {
-        aliases: ["Nascent.xyz", "nascent.xyz"],
+        aliases: ["Nascent.xyz"],
         segmentId: "segment_1",
         source: "elevenlabs",
         type: "organization",
@@ -114,6 +120,24 @@ describe("meeting intelligence helpers", () => {
         type: "meeting_link",
         value: "meet.google.com",
         normalizedValue: "meet.google.com/abc-defg-hij",
+      },
+    ]);
+  });
+
+  it("skips personal email providers when adding calendar organization entities", () => {
+    expect(
+      extractMeetingEntities([], {
+        attendeeEmails: ["person@gmail.com", "partner@nascent.xyz"],
+        workspaceDomain: "iosg.vc",
+      }),
+    ).toEqual([
+      {
+        aliases: ["nascent.xyz"],
+        segmentId: null,
+        source: "calendar",
+        type: "organization",
+        value: "Nascent",
+        normalizedValue: "nascent",
       },
     ]);
   });

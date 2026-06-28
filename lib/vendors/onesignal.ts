@@ -20,6 +20,9 @@ export async function sendOneSignalLocationReminder(input: {
   const body = {
     app_id: env.NEXT_PUBLIC_ONESIGNAL_APP_ID,
     target_channel: "push",
+    isIos: true,
+    isAndroid: true,
+    isAnyWeb: false,
     include_aliases: {
       external_id: [input.externalUserId],
     },

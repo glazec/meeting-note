@@ -3,10 +3,12 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { meetings } from "@/db/schema";
 import { inngest } from "@/inngest/client";
+import { fetchAndPersistRecallParticipantTimeline } from "@/lib/meeting-participant-timeline";
 import { createRecallRecordingTranscription } from "@/lib/transcription-records";
 import type { normalizeRecallWebhook } from "@/lib/vendors/recall";
 import {
   findRecallRecordingMediaUrl,
+  findRecallSpeakerTimelineUrl,
   retrieveRecallBot,
 } from "@/lib/vendors/recall";
 
@@ -81,9 +83,24 @@ async function queueRecallRecordingTranscription(
 ) {
   const bot = await retrieveRecallBot(update.recallBotId);
   const audioUrl = findRecallRecordingMediaUrl(bot, update.recallRecordingId);
+  const speakerTimelineUrl = findRecallSpeakerTimelineUrl(
+    bot,
+    update.recallRecordingId,
+  );
 
   if (!audioUrl) {
     return;
+  }
+
+  if (speakerTimelineUrl) {
+    try {
+      await fetchAndPersistRecallParticipantTimeline({
+        meetingId: update.meetingId,
+        timelineUrl: speakerTimelineUrl,
+      });
+    } catch {
+      // Keep transcription moving when Recall has not finished speaker timeline media.
+    }
   }
 
   const transcription = await createRecallRecordingTranscription({

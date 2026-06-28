@@ -71,6 +71,27 @@ async function postRecallChatWebhook(body: unknown, signed = true) {
   );
 }
 
+async function postRecallRealtimeWebhook(body: unknown, signed = true) {
+  vi.stubEnv("RECALL_WEBHOOK_SECRET", recallWebhookSecret);
+  const { POST } = await import("@/app/api/recall/realtime/webhook/route");
+  const rawBody = JSON.stringify(body);
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
+
+  if (signed) {
+    Object.assign(headers, signRecallWebhook(rawBody));
+  }
+
+  return POST(
+    new Request("https://app.example.com/api/recall/realtime/webhook", {
+      method: "POST",
+      body: rawBody,
+      headers,
+    }),
+  );
+}
+
 const chatPayload = {
   event: "participant_events.chat_message",
   data: {
@@ -168,5 +189,39 @@ describe("POST /api/recall/chat/webhook", () => {
     });
     expect(answerRecallChatMessage).not.toHaveBeenCalled();
     expect(markVendorWebhookEventProcessed).not.toHaveBeenCalled();
+  });
+
+  it("captures signed realtime participant events without answering chat", async () => {
+    const payload = {
+      event: "participant_events.speech_on",
+      data: {
+        participant: {
+          id: 7,
+          name: "Alice",
+        },
+      },
+    };
+
+    const response = await postRecallRealtimeWebhook(payload);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      received: true,
+      result: {
+        action: "captured",
+        eventType: "participant_events.speech_on",
+      },
+    });
+    expect(recordVendorWebhookEvent).toHaveBeenCalledWith({
+      provider: "recall",
+      eventType: "participant_events.speech_on",
+      idempotencyKey: "msg_chat",
+      payload,
+    });
+    expect(answerRecallChatMessage).not.toHaveBeenCalled();
+    expect(markVendorWebhookEventProcessed).toHaveBeenCalledWith({
+      provider: "recall",
+      idempotencyKey: "msg_chat",
+    });
   });
 });

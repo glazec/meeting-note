@@ -1052,9 +1052,9 @@ describe("vendor job creation", () => {
             {
               id: "rec_123",
               media_shortcuts: {
-                speaker_timeline: {
+                participant_events: {
                   data: {
-                    download_url:
+                    speaker_timeline_download_url:
                       "https://recall.example.com/speaker-timeline.json",
                   },
                 },

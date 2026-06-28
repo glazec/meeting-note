@@ -212,7 +212,7 @@ describe("listMeetingsForWorkspace", () => {
                     createdAt: new Date("2026-06-27T09:00:00.000Z"),
                     calendarAttendeeEmails: [
                       "bob@iosg.vc",
-                      "founder@nascent.xyz",
+                      "partner@nascent.xyz",
                     ],
                   },
                 ]),
