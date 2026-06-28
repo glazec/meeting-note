@@ -156,6 +156,49 @@ describe("POST /api/uploads/complete", () => {
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
   });
 
+  it("uses a cleaned filename as the uploaded meeting title", async () => {
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({
+      userId: "user_123",
+      teamId: "team_123",
+      domain: "example.com",
+    });
+    assertCanCreateMeetings.mockResolvedValue(undefined);
+    send.mockResolvedValue({ ids: ["evt_123"] });
+    getObjectMetadata.mockResolvedValue({
+      contentLength: 1024,
+      contentType: "audio/mpeg",
+    });
+    createUploadedAudioTranscription.mockResolvedValue({
+      meetingId: "22222222-2222-4222-8222-222222222222",
+      mediaAssetId: "33333333-3333-4333-8333-333333333333",
+      transcriptJobId: "44444444-4444-4444-8444-444444444444",
+    });
+
+    const response = await postUploadComplete({
+      uploadId: "11111111-1111-4111-8111-111111111111",
+      fileName: "  IOSG_founder-follow up .mp3",
+    });
+
+    expect(response.status).toBe(202);
+    expect(createUploadedAudioTranscription).toHaveBeenCalledWith({
+      sessionUser: {
+        id: "user_123",
+        email: "user@example.com",
+        name: null,
+      },
+      objectKey:
+        "users/user_123/uploads/11111111-1111-4111-8111-111111111111.mp3",
+      title: "IOSG founder follow up",
+      fileSizeBytes: 1024,
+      mimeType: "audio/mpeg",
+    });
+  });
+
   it("rejects shared only users before reading uploaded object metadata", async () => {
     const { SharedOnlyAccessError } = await import("@/lib/access-errors");
 

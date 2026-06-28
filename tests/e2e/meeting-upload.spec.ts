@@ -68,6 +68,7 @@ test("uploads a selected MP3 through a signed upload URL", async ({ page }) => {
     expect(route.request().method()).toBe("POST");
     expect(await route.request().postDataJSON()).toEqual({
       uploadId: "upload_123",
+      fileName: "sample.mp3",
     });
     await route.fulfill({
       status: 202,

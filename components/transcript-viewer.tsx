@@ -654,6 +654,9 @@ function TranscriptAudioPlayer({
     () => buildWaveformSections(segments, timelineDuration),
     [segments, timelineDuration],
   );
+  const activeWaveformLabel =
+    sectionMarkers.find((section) => section.id === activeSegmentId)?.label ??
+    null;
   const progressPercent = timelineDuration
     ? clamp((currentTime / timelineDuration) * 100, 0, 100)
     : 0;
@@ -809,8 +812,12 @@ function TranscriptAudioPlayer({
       />
       <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-3">
         <button
-          aria-label="Audio waveform"
-          className="relative h-16 w-full overflow-hidden rounded-lg border bg-background px-2 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-14 sm:px-1"
+          aria-label={
+            activeWaveformLabel
+              ? `Audio waveform, ${activeWaveformLabel}`
+              : "Audio waveform"
+          }
+          className="relative h-20 w-full overflow-hidden rounded-lg border bg-background px-2 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:px-1"
           onPointerDown={seekFromWaveform}
           type="button"
         >
@@ -829,7 +836,24 @@ function TranscriptAudioPlayer({
           ))}
           <span
             aria-hidden="true"
-            className="absolute inset-x-2 bottom-3 top-2 flex items-center gap-[2px] sm:inset-x-1 sm:bottom-2 sm:gap-px"
+            className="absolute inset-x-2 top-1.5 h-5 sm:inset-x-1"
+          >
+            {sectionMarkers.map((section) => (
+              <span
+                className="absolute inset-y-0 box-border flex min-w-0 items-center rounded-sm bg-background/90 px-1.5 text-[0.68rem] font-medium leading-none text-foreground ring-1 ring-border/70"
+                key={`${section.id}-label`}
+                style={{
+                  left: `${section.left}%`,
+                  width: `${section.width}%`,
+                }}
+              >
+                <span className="truncate">{section.label}</span>
+              </span>
+            ))}
+          </span>
+          <span
+            aria-hidden="true"
+            className="absolute inset-x-2 bottom-3 top-7 flex items-center gap-[2px] sm:inset-x-1 sm:gap-px"
           >
             {waveformValues.map((peak, index) => {
               const barPercent =
@@ -876,9 +900,11 @@ function TranscriptAudioPlayer({
             style={{ left: `${progressPercent}%` }}
           />
           <span aria-live="polite" className="sr-only">
-            {waveformStatus === "ready"
-              ? "Audio waveform ready"
-              : "Transcript section waveform"}
+            {activeWaveformLabel
+              ? `Current section: ${activeWaveformLabel}`
+              : waveformStatus === "ready"
+                ? "Audio waveform ready"
+                : "Transcript section waveform"}
           </span>
         </button>
         <input
@@ -1084,6 +1110,10 @@ function buildWaveformSections(
       return {
         emotionLabel: segment.emotionLabel,
         id: segment.id,
+        label: formatWaveformSectionLabel(
+          segment.speaker,
+          segment.emotionLabel,
+        ),
         left,
         speaker: segment.speaker,
         width,
@@ -1116,6 +1146,19 @@ function getWaveformSectionColor(
 
 function formatEmotionLabel(label: NonNullable<TranscriptSegment["emotionLabel"]>) {
   return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function formatWaveformSectionLabel(
+  speaker: string | null,
+  emotionLabel?: TranscriptSegment["emotionLabel"],
+) {
+  const speakerLabel = speaker ?? "Unknown speaker";
+
+  if (emotionLabel && emotionLabel !== "neutral") {
+    return `${speakerLabel} · ${formatEmotionLabel(emotionLabel)}`;
+  }
+
+  return speakerLabel;
 }
 
 function getSegmentTimelineDuration(segments: TranscriptSegment[]) {

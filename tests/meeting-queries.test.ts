@@ -418,6 +418,46 @@ describe("listMeetingsForWorkspace", () => {
   });
 });
 
+describe("buildMeetingLibraryPage", () => {
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it("sorts visible library meetings by newest started time across platforms", async () => {
+    const { buildMeetingLibraryPage } = await import("@/lib/meeting-queries");
+
+    const page = buildMeetingLibraryPage(
+      [
+        libraryMeeting({
+          id: "11111111-1111-4111-8111-111111111111",
+          title: "Older upload",
+          platform: "upload",
+          startedAt: "2026-06-27T10:00:00.000Z",
+        }),
+        libraryMeeting({
+          id: "22222222-2222-4222-8222-222222222222",
+          title: "Newest meet",
+          platform: "google_meet",
+          startedAt: "2026-06-27T12:00:00.000Z",
+        }),
+        libraryMeeting({
+          id: "33333333-3333-4333-8333-333333333333",
+          title: "Middle zoom",
+          platform: "zoom",
+          startedAt: "2026-06-27T11:00:00.000Z",
+        }),
+      ],
+      { now: new Date("2026-06-28T12:00:00.000Z") },
+    );
+
+    expect(page.meetings.map((meeting) => meeting.title)).toEqual([
+      "Newest meet",
+      "Middle zoom",
+      "Older upload",
+    ]);
+  });
+});
+
 describe("getMeetingDashboardSummaryForWorkspace", () => {
   afterEach(() => {
     getWorkspace.mockReset();
@@ -506,5 +546,24 @@ function meetingRow(overrides: {
     startedAt: new Date(overrides.startedAt),
     createdAt: new Date(overrides.startedAt),
     calendarAttendeeEmails: null,
+  };
+}
+
+function libraryMeeting(overrides: {
+  id: string;
+  title: string;
+  platform: "google_meet" | "in_person" | "zoom" | "upload";
+  startedAt: string;
+}) {
+  return {
+    id: overrides.id,
+    title: overrides.title,
+    platform: overrides.platform,
+    status: "ready" as const,
+    transcriptJobStatus: null,
+    hasRecallBot: false,
+    startedAt: overrides.startedAt,
+    accessScope: "workspace" as const,
+    relatedMeetings: [],
   };
 }

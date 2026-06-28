@@ -94,7 +94,7 @@ export function UploadDropzone() {
         const completeResponse = await fetch("/api/uploads/complete", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ uploadId }),
+          body: JSON.stringify({ uploadId, fileName: selectedFile.name }),
         });
 
         if (!completeResponse.ok) {

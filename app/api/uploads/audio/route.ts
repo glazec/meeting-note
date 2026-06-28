@@ -13,6 +13,7 @@ import {
 } from "@/lib/r2";
 import { createUploadedAudioTranscription } from "@/lib/transcription-records";
 import { SharedOnlyAccessError } from "@/lib/access-errors";
+import { titleFromUploadFileName } from "@/lib/upload-titles";
 
 export const runtime = "nodejs";
 
@@ -54,7 +55,7 @@ export async function POST(request: Request) {
     const transcription = await createUploadedAudioTranscription({
       sessionUser: user,
       objectKey: key,
-      title: titleFromFileName(file.name),
+      title: titleFromUploadFileName(file.name),
       fileSizeBytes: file.size,
       mimeType: "audio/mpeg",
     });
@@ -99,14 +100,4 @@ export async function POST(request: Request) {
 
 function isMp3(file: File) {
   return file.name.toLowerCase().endsWith(".mp3");
-}
-
-function titleFromFileName(fileName: string) {
-  const title = fileName
-    .replace(/\.mp3$/i, "")
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return title || "Uploaded audio";
 }

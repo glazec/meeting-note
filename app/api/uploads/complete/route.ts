@@ -15,12 +15,14 @@ import {
 } from "@/lib/r2";
 import { createUploadedAudioTranscription } from "@/lib/transcription-records";
 import { SharedOnlyAccessError } from "@/lib/access-errors";
+import { titleFromUploadFileName } from "@/lib/upload-titles";
 
 export const runtime = "nodejs";
 
 const completeUploadSchema = z
   .object({
     uploadId: z.string().min(1),
+    fileName: z.string().optional(),
   })
   .strict();
 
@@ -52,9 +54,13 @@ export async function POST(request: Request) {
     });
 
     const objectMetadata = await getObjectMetadata({ key });
+    const title = result.data.fileName
+      ? titleFromUploadFileName(result.data.fileName)
+      : undefined;
     const transcription = await createUploadedAudioTranscription({
       sessionUser: user,
       objectKey: key,
+      ...(title ? { title } : {}),
       fileSizeBytes: objectMetadata.contentLength,
       mimeType: objectMetadata.contentType,
     });

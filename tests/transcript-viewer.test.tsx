@@ -82,4 +82,38 @@ describe("TranscriptViewer", () => {
     expect(html).toContain("Hard");
     expect(html).not.toContain("High pressure words or fast pace");
   });
+
+  it("overlays speaker and non-neutral emotion labels on the waveform", () => {
+    const html = renderToStaticMarkup(
+      <TranscriptViewer
+        audioUrl="/api/meetings/11111111-1111-4111-8111-111111111111/audio"
+        segments={[
+          {
+            ...segments[0],
+            emotionLabel: "hard",
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain("Speaker 1 · Hard");
+    expect(html).toContain('aria-label="Audio waveform, Speaker 1 · Hard"');
+  });
+
+  it("keeps neutral waveform labels to the speaker name", () => {
+    const html = renderToStaticMarkup(
+      <TranscriptViewer
+        audioUrl="/api/meetings/11111111-1111-4111-8111-111111111111/audio"
+        segments={[
+          {
+            ...segments[0],
+            emotionLabel: "neutral",
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain('aria-label="Audio waveform, Speaker 1"');
+    expect(html).not.toContain("Speaker 1 · Neutral");
+  });
 });

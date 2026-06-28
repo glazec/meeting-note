@@ -264,7 +264,9 @@ function compareMeetingLibraryItems(
     );
   }
 
-  return 0;
+  return (
+    new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime()
+  );
 }
 
 function getMeetingLibraryRank(
