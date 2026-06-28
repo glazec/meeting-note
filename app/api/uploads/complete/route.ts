@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { revalidatePath } from "next/cache";
 
 import { inngest } from "@/inngest/client";
 import { getCurrentUser } from "@/lib/auth";
@@ -62,6 +63,8 @@ export async function POST(request: Request) {
       name: "meeting/transcribe.audio",
       data: { objectKey: key, ...transcription },
     });
+
+    revalidatePath("/dashboard");
 
     return Response.json(
       { queued: true, key, meetingId: transcription.meetingId },

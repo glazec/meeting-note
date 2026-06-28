@@ -5,6 +5,7 @@ const getWorkspace = vi.fn();
 const assertCanCreateMeetings = vi.fn();
 const putObject = vi.fn();
 const createUploadedAudioTranscription = vi.fn();
+const revalidatePath = vi.fn();
 const send = vi.fn();
 
 vi.mock("@/lib/auth", () => ({
@@ -29,6 +30,10 @@ vi.mock("@/inngest/client", () => ({
   inngest: {
     send,
   },
+}));
+
+vi.mock("next/cache", () => ({
+  revalidatePath,
 }));
 
 vi.mock("@/lib/transcription-records", () => ({
@@ -56,6 +61,7 @@ describe("POST /api/uploads/audio", () => {
     getWorkspace.mockReset();
     putObject.mockReset();
     createUploadedAudioTranscription.mockReset();
+    revalidatePath.mockReset();
     send.mockReset();
     vi.resetModules();
   });
@@ -132,6 +138,7 @@ describe("POST /api/uploads/audio", () => {
         transcriptJobId: "44444444-4444-4444-8444-444444444444",
       },
     });
+    expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
   });
 
   it("rejects non-MP3 files", async () => {

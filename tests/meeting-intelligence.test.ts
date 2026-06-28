@@ -68,6 +68,56 @@ describe("meeting intelligence helpers", () => {
     ]);
   });
 
+  it("adds canonical organization aliases and meeting link context", () => {
+    expect(
+      extractMeetingEntities(
+        [
+          {
+            id: "segment_1",
+            text: "The Nascent follow up should include the shared SAFE notes.",
+          },
+        ],
+        {
+          attendeeEmails: ["alice@iosg.vc", "founder@nascent.xyz"],
+          meetingUrl: "https://meet.google.com/abc-defg-hij",
+          transcriptEntities: [
+            {
+              source: "elevenlabs",
+              type: "organization",
+              value: "Nascent.xyz",
+            },
+          ],
+          workspaceDomain: "iosg.vc",
+        },
+      ),
+    ).toEqual([
+      {
+        aliases: ["Nascent.xyz", "nascent.xyz"],
+        segmentId: "segment_1",
+        source: "elevenlabs",
+        type: "organization",
+        value: "Nascent",
+        normalizedValue: "nascent",
+      },
+      {
+        aliases: [],
+        segmentId: "segment_1",
+        source: "transcript",
+        type: "product",
+        value: "SAFE",
+        normalizedValue: "safe",
+      },
+      {
+        aliases: ["https://meet.google.com/abc-defg-hij"],
+        segmentId: null,
+        source: "meeting_url",
+        type: "meeting_link",
+        value: "meet.google.com",
+        normalizedValue: "meet.google.com/abc-defg-hij",
+      },
+    ]);
+  });
+
   it("classifies emotion from words and talk speed", () => {
     expect(
       classifySegmentEmotion({
@@ -115,6 +165,49 @@ describe("meeting intelligence helpers", () => {
           {
             id: "meeting_1",
             title: "Nascent intro",
+            startedAt: "2026-06-20T10:00:00.000Z",
+          },
+        ],
+      },
+      {
+        id: "meeting_3",
+        relatedMeetings: [],
+      },
+    ]);
+  });
+
+  it("groups related meetings by similar external participants", () => {
+    expect(
+      groupRelatedMeetings([
+        {
+          id: "meeting_1",
+          title: "Founder intro",
+          startedAt: "2026-06-20T10:00:00.000Z",
+          primaryEntity: null,
+          externalParticipantKeys: ["founder@nascent.xyz"],
+        },
+        {
+          id: "meeting_2",
+          title: "Founder follow up",
+          startedAt: "2026-06-27T10:00:00.000Z",
+          primaryEntity: null,
+          externalParticipantKeys: ["founder@nascent.xyz"],
+        },
+        {
+          id: "meeting_3",
+          title: "Other founder",
+          startedAt: "2026-06-26T10:00:00.000Z",
+          primaryEntity: null,
+          externalParticipantKeys: ["guest@other.xyz"],
+        },
+      ]),
+    ).toEqual([
+      {
+        id: "meeting_2",
+        relatedMeetings: [
+          {
+            id: "meeting_1",
+            title: "Founder intro",
             startedAt: "2026-06-20T10:00:00.000Z",
           },
         ],

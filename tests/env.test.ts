@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const baseEnv = {
@@ -111,5 +113,34 @@ describe("parseEnv", () => {
     ).toMatchObject({
       RECALL_API_BASE_URL: "https://ap-northeast-1.recall.ai/",
     });
+  });
+});
+
+describe("parseDatabaseEnv", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it("only requires the database URL", async () => {
+    vi.stubEnv("DATABASE_URL", "https://db.example.com");
+
+    const { parseDatabaseEnv } = await import("@/lib/database-env");
+
+    expect(
+      parseDatabaseEnv({
+        DATABASE_URL: "https://db.example.com",
+      }),
+    ).toEqual({
+      DATABASE_URL: "https://db.example.com",
+    });
+  });
+});
+
+describe("runtime env boundaries", () => {
+  it("keeps uploaded transcription records off the broad app env parser", () => {
+    expect(readFileSync("lib/transcription-records.ts", "utf8")).not.toContain(
+      "@/lib/env",
+    );
   });
 });

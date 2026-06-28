@@ -9,6 +9,7 @@ import {
 import {
   deleteScheduledRecallBot,
   findRecallRecordingMediaUrl,
+  findRecallSpeakerTimelineUrl,
   sendRecallChatMessage,
   normalizeRecallWebhook,
   retrieveRecallBot,
@@ -298,6 +299,14 @@ describe("vendor webhook normalization", () => {
           },
           transcription: {
             text: "Transcript text",
+            entities: [
+              {
+                text: "Nascent.xyz",
+                type: "organization",
+                start: 0,
+                end: 0.5,
+              },
+            ],
             words: [
               {
                 text: "Transcript",
@@ -317,6 +326,15 @@ describe("vendor webhook normalization", () => {
       transcriptId: null,
       status: "completed",
       transcriptionText: "Transcript text",
+      transcriptionEntities: [
+        {
+          source: "elevenlabs",
+          type: "organization",
+          value: "Nascent.xyz",
+          start: 0,
+          end: 0.5,
+        },
+      ],
       transcriptionWords: [
         {
           text: "Transcript",
@@ -769,8 +787,12 @@ describe("vendor job creation", () => {
       realtime_endpoints: [
         {
           type: "webhook",
-          url: "https://app.example.com/api/recall/chat/webhook",
-          events: ["participant_events.chat_message"],
+          url: "https://app.example.com/api/recall/realtime/webhook",
+          events: [
+            "participant_events.chat_message",
+            "participant_events.speech_on",
+            "participant_events.speech_off",
+          ],
         },
       ],
     });
@@ -850,8 +872,12 @@ describe("vendor job creation", () => {
         realtime_endpoints: [
           {
             type: "webhook",
-            url: "https://app.example.com/api/recall/chat/webhook",
-            events: ["participant_events.chat_message"],
+            url: "https://app.example.com/api/recall/realtime/webhook",
+            events: [
+              "participant_events.chat_message",
+              "participant_events.speech_on",
+              "participant_events.speech_off",
+            ],
           },
         ],
       },
@@ -1016,5 +1042,28 @@ describe("vendor job creation", () => {
         "rec_123",
       ),
     ).toBe("https://recall.example.com/recording.mp4");
+  });
+
+  it("extracts Recall speaker timeline URLs", () => {
+    expect(
+      findRecallSpeakerTimelineUrl(
+        {
+          recordings: [
+            {
+              id: "rec_123",
+              media_shortcuts: {
+                speaker_timeline: {
+                  data: {
+                    download_url:
+                      "https://recall.example.com/speaker-timeline.json",
+                  },
+                },
+              },
+            },
+          ],
+        },
+        "rec_123",
+      ),
+    ).toBe("https://recall.example.com/speaker-timeline.json");
   });
 });

@@ -170,6 +170,88 @@ describe("getWorkspaceMeetingTranscript", () => {
   });
 });
 
+describe("listMeetingsForWorkspace", () => {
+  afterEach(() => {
+    getWorkspace.mockReset();
+    select.mockReset();
+    vi.resetModules();
+  });
+
+  it("groups related meetings by shared external calendar attendees", async () => {
+    select
+      .mockReturnValueOnce({
+        from: () => ({
+          leftJoin: () => ({
+            where: () => ({
+              orderBy: () => ({
+                limit: vi.fn().mockResolvedValue([
+                  {
+                    id: "11111111-1111-4111-8111-111111111111",
+                    teamId: "team_123",
+                    title: "Founder intro",
+                    platform: "google_meet",
+                    status: "ready",
+                    transcriptJobStatus: null,
+                    recallBotId: null,
+                    startedAt: new Date("2026-06-20T10:00:00.000Z"),
+                    createdAt: new Date("2026-06-20T09:00:00.000Z"),
+                    calendarAttendeeEmails: [
+                      "alice@iosg.vc",
+                      "founder@nascent.xyz",
+                    ],
+                  },
+                  {
+                    id: "22222222-2222-4222-8222-222222222222",
+                    teamId: "team_123",
+                    title: "Founder follow up",
+                    platform: "google_meet",
+                    status: "ready",
+                    transcriptJobStatus: null,
+                    recallBotId: null,
+                    startedAt: new Date("2026-06-27T10:00:00.000Z"),
+                    createdAt: new Date("2026-06-27T09:00:00.000Z"),
+                    calendarAttendeeEmails: [
+                      "bob@iosg.vc",
+                      "founder@nascent.xyz",
+                    ],
+                  },
+                ]),
+              }),
+            }),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      });
+    const { listMeetingsForWorkspace } = await import("@/lib/meeting-queries");
+
+    await expect(
+      listMeetingsForWorkspace({
+        teamId: "team_123",
+        userId: "user_123",
+        domain: "iosg.vc",
+        canCreateMeetings: true,
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: "22222222-2222-4222-8222-222222222222",
+        relatedMeetings: [
+          {
+            id: "11111111-1111-4111-8111-111111111111",
+            title: "Founder intro",
+            startedAt: "2026-06-20T10:00:00.000Z",
+          },
+        ],
+      }),
+    ]);
+  });
+});
+
 describe("getMeetingDashboardSummaryForWorkspace", () => {
   afterEach(() => {
     getWorkspace.mockReset();

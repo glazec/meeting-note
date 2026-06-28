@@ -1,7 +1,7 @@
 import { db } from "@/db/client";
 import { mediaAssets, meetings, transcriptJobs } from "@/db/schema";
 import type { SessionUser } from "@/lib/auth";
-import { env } from "@/lib/env";
+import { parseR2Env } from "@/lib/r2";
 import {
   assertCanCreateMeetings,
   getOrCreateWorkspaceForSessionUser,
@@ -18,6 +18,7 @@ type CreateUploadedAudioTranscriptionInput = {
 export async function createUploadedAudioTranscription(
   input: CreateUploadedAudioTranscriptionInput,
 ) {
+  const env = parseR2Env(process.env);
   const workspace = await getOrCreateWorkspaceForSessionUser(input.sessionUser);
   await assertCanCreateMeetings(workspace);
 

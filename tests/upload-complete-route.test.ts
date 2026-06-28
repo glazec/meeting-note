@@ -5,6 +5,7 @@ const getWorkspace = vi.fn();
 const assertCanCreateMeetings = vi.fn();
 const getObjectMetadata = vi.fn();
 const createUploadedAudioTranscription = vi.fn();
+const revalidatePath = vi.fn();
 const send = vi.fn();
 
 vi.mock("@/lib/auth", () => ({
@@ -20,6 +21,10 @@ vi.mock("@/inngest/client", () => ({
   inngest: {
     send,
   },
+}));
+
+vi.mock("next/cache", () => ({
+  revalidatePath,
 }));
 
 vi.mock("@/lib/r2", async (importOriginal) => {
@@ -57,6 +62,7 @@ describe("POST /api/uploads/complete", () => {
     getWorkspace.mockReset();
     getObjectMetadata.mockReset();
     createUploadedAudioTranscription.mockReset();
+    revalidatePath.mockReset();
     send.mockReset();
     vi.resetModules();
   });
@@ -146,6 +152,7 @@ describe("POST /api/uploads/complete", () => {
         transcriptJobId: "44444444-4444-4444-8444-444444444444",
       },
     });
+    expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
   });
 
   it("rejects shared only users before reading uploaded object metadata", async () => {

@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "db:migrate": "drizzle-kit migrate --config=drizzle.config.ts",
     "build": "next build",
     "start": "next start",
     "inngest:sync": "node scripts/sync-inngest.mjs",

@@ -43,6 +43,9 @@ describe("OneSignal vendor", () => {
       body: JSON.stringify({
         app_id: "117c1d1c-ada4-4b49-bb2e-9f4b5cb747ef",
         target_channel: "push",
+        isIos: true,
+        isAndroid: true,
+        isAnyWeb: false,
         include_aliases: {
           external_id: ["11111111-1111-4111-8111-111111111111"],
         },

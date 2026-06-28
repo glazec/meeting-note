@@ -7,12 +7,14 @@ import {
 
 const {
   createRecallRecordingTranscription,
+  fetchAndPersistRecallParticipantTimeline,
   retrieveRecallBot,
   send,
   update,
   where,
 } = vi.hoisted(() => ({
   createRecallRecordingTranscription: vi.fn(),
+  fetchAndPersistRecallParticipantTimeline: vi.fn(),
   retrieveRecallBot: vi.fn(),
   send: vi.fn(),
   update: vi.fn(),
@@ -35,6 +37,10 @@ vi.mock("@/lib/transcription-records", () => ({
   createRecallRecordingTranscription,
 }));
 
+vi.mock("@/lib/meeting-participant-timeline", () => ({
+  fetchAndPersistRecallParticipantTimeline,
+}));
+
 vi.mock("@/lib/vendors/recall", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/vendors/recall")>();
 
@@ -46,6 +52,7 @@ vi.mock("@/lib/vendors/recall", async (importOriginal) => {
 
 afterEach(() => {
   createRecallRecordingTranscription.mockReset();
+  fetchAndPersistRecallParticipantTimeline.mockReset();
   retrieveRecallBot.mockReset();
   send.mockReset();
   update.mockReset();
@@ -129,10 +136,16 @@ describe("applyRecallMeetingEvent", () => {
     retrieveRecallBot.mockResolvedValue({
       recordings: [
         {
-          media_shortcuts: {
-            video_mixed: {
-              data: {
-                download_url: "https://recall.example.com/recording.mp4",
+              media_shortcuts: {
+                speaker_timeline: {
+                  data: {
+                    download_url:
+                      "https://recall.example.com/speaker-timeline.json",
+                  },
+                },
+                video_mixed: {
+                  data: {
+                    download_url: "https://recall.example.com/recording.mp4",
               },
             },
           },
@@ -161,6 +174,10 @@ describe("applyRecallMeetingEvent", () => {
     expect(retrieveRecallBot).toHaveBeenCalledWith("bot_123");
     expect(createRecallRecordingTranscription).toHaveBeenCalledWith({
       meetingId: "11111111-1111-4111-8111-111111111111",
+    });
+    expect(fetchAndPersistRecallParticipantTimeline).toHaveBeenCalledWith({
+      meetingId: "11111111-1111-4111-8111-111111111111",
+      timelineUrl: "https://recall.example.com/speaker-timeline.json",
     });
     expect(send).toHaveBeenCalledWith({
       name: "meeting/transcribe.audio",

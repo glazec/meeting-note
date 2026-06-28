@@ -21,6 +21,16 @@ Team meeting transcript product.
 3. Run `npm install`.
 4. Run `npm run dev`.
 
+## Database Migrations
+
+Run [Drizzle](https://orm.drizzle.team) migrations against the target [Neon](https://neon.tech) database before deploying code that uses new schema objects:
+
+```bash
+DATABASE_URL=... npm run db:migrate
+```
+
+For production, run the migration command with the production `DATABASE_URL`, then deploy the app. If code reaches a new table, column, index, or enum before the migration runs, server rendered pages can fail for signed in users.
+
 ## Local Tunnel
 
 The Cloudflare test tunnel is `meeting-note-dev.inevitable.tech`. It points to `http://localhost:3000` and is suitable for Google OAuth redirects plus Recall and ElevenLabs webhooks during local testing.
