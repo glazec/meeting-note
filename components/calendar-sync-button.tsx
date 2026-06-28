@@ -6,14 +6,12 @@ import { AlertCircle, CalendarCheck, RefreshCw } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { connectGoogleCalendar } from "@/lib/google-calendar-auth";
 
 type SyncState =
   | "idle"
   | "syncing"
   | "synced"
   | "needs_connection"
-  | "connecting"
   | "error";
 
 type CalendarSyncButtonProps = {
@@ -52,7 +50,9 @@ export function CalendarSyncButton({
       if (!response.ok) {
         if (response.status === 409 && result.reconnect) {
           setState("needs_connection");
-          setMessage("Reconnect calendar so Recall can watch events.");
+          setMessage(
+            "Connect the calendar in Recall first, then check again here.",
+          );
           return;
         }
 
@@ -86,36 +86,14 @@ export function CalendarSyncButton({
     void syncCalendar();
   }, [autoSync, syncCalendar]);
 
-  async function connectCalendar() {
-    setState("connecting");
-    setMessage(null);
-
-    try {
-      const result = await connectGoogleCalendar();
-
-      if (!result.ok) {
-        setState("needs_connection");
-        setMessage(result.message);
-        return;
-      }
-
-      window.location.href = result.url;
-    } catch {
-      setState("needs_connection");
-      setMessage("Google Calendar could not connect.");
-    }
-  }
-
   const needsConnection = state === "needs_connection" || !connected;
-  const isBusy = state === "syncing" || state === "connecting";
+  const isBusy = state === "syncing";
   const buttonLabel =
     state === "syncing"
       ? "Syncing..."
-      : state === "connecting"
-        ? "Opening Google..."
-        : needsConnection
-          ? "Connect calendar"
-          : "Sync Recall calendar";
+      : needsConnection
+        ? "Check Recall calendar"
+        : "Sync Recall calendar";
   const alertTitle =
     state === "error"
       ? "Calendar not synced"
@@ -127,7 +105,7 @@ export function CalendarSyncButton({
     <div className="flex flex-col items-start gap-3">
       <Button
         type="button"
-        onClick={needsConnection ? connectCalendar : syncCalendar}
+        onClick={syncCalendar}
         disabled={isBusy}
       >
         {needsConnection ? (
@@ -151,14 +129,9 @@ export function CalendarSyncButton({
           <AlertDescription className="flex flex-col items-start gap-3">
             <span>{message}</span>
             {needsConnection ? (
-              <Button
-                type="button"
-                onClick={connectCalendar}
-                disabled={isBusy}
-                size="sm"
-              >
-                Connect Google Calendar
-              </Button>
+              <span className="text-xs text-muted-foreground">
+                Calendar access is managed in Recall.
+              </span>
             ) : null}
           </AlertDescription>
         </Alert>

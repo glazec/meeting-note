@@ -6,8 +6,10 @@ import { calendarConnections, users } from "@/db/schema";
 import { normalizeEmailDomain } from "@/lib/access";
 import { autoJoinCalendarEvent, type SyncedCalendarEvent } from "@/lib/calendar-auto-join";
 import {
+  listRecallCalendars,
   listRecallCalendarEvents,
   retrieveRecallCalendar,
+  updateRecallCalendar,
 } from "@/lib/vendors/recall";
 import type { WorkspaceContext } from "@/lib/workspace";
 
@@ -35,7 +37,16 @@ type RecallCalendarConnection = {
   userId: string;
   autoJoinEnabled: boolean;
   recallCalendarId?: string | null;
+  recallCalendarStatus?: string | null;
   workspaceDomain?: string | null;
+};
+
+type RecallCalendarSummary = {
+  id: string;
+  platform: string | null;
+  platformEmail: string | null;
+  status: string | null;
+  metadata: Record<string, string>;
 };
 
 export class RecallCalendarConnectionError extends Error {
@@ -43,6 +54,8 @@ export class RecallCalendarConnectionError extends Error {
     super(message);
   }
 }
+
+const LEGACY_PRIMARY_CALENDAR_ID = "primary";
 
 export function normalizeRecallCalendarWebhook(payload: unknown) {
   const parsed = recallCalendarWebhookSchema.parse(payload);
@@ -60,6 +73,109 @@ export function normalizeRecallCalendarWebhook(payload: unknown) {
     calendarId: parsed.data.calendar_id,
     lastUpdatedTs: parsed.data.last_updated_ts,
   };
+}
+
+export async function ensureRecallManagedCalendarConnectionForWorkspace(
+  workspace: WorkspaceContext,
+) {
+  const existing = await findConnectionByWorkspace(workspace);
+
+  if (existing?.recallCalendarId) {
+    const calendar = normalizeRecallCalendar(
+      await retrieveRecallCalendar(existing.recallCalendarId),
+    );
+    const status = calendar?.status ?? null;
+
+    if (status) {
+      await db
+        .update(calendarConnections)
+        .set({ recallCalendarStatus: status, updatedAt: new Date() })
+        .where(eq(calendarConnections.id, existing.id));
+    }
+
+    return {
+      ...existing,
+      recallCalendarStatus: status,
+    };
+  }
+
+  const calendar = await findRecallManagedCalendarForWorkspace(workspace);
+
+  if (!calendar) {
+    return null;
+  }
+
+  const existingRecallConnection = await findConnectionByRecallCalendarId(
+    calendar.id,
+  );
+
+  if (existingRecallConnection) {
+    await db
+      .update(calendarConnections)
+      .set({
+        autoJoinEnabled: true,
+        externalCalendarId: LEGACY_PRIMARY_CALENDAR_ID,
+        teamId: workspace.teamId,
+        userId: workspace.userId,
+        recallCalendarStatus: calendar.status,
+        updatedAt: new Date(),
+      })
+      .where(eq(calendarConnections.id, existingRecallConnection.id));
+    await tagRecallCalendarForWorkspace(calendar, workspace);
+
+    return {
+      ...existingRecallConnection,
+      autoJoinEnabled: true,
+      teamId: workspace.teamId,
+      userId: workspace.userId,
+      recallCalendarStatus: calendar.status,
+    };
+  }
+
+  if (existing) {
+    await db
+      .update(calendarConnections)
+      .set({
+        autoJoinEnabled: true,
+        externalCalendarId: LEGACY_PRIMARY_CALENDAR_ID,
+        recallCalendarId: calendar.id,
+        recallCalendarStatus: calendar.status,
+        updatedAt: new Date(),
+      })
+      .where(eq(calendarConnections.id, existing.id));
+    await tagRecallCalendarForWorkspace(calendar, workspace);
+
+    return {
+      ...existing,
+      autoJoinEnabled: true,
+      recallCalendarId: calendar.id,
+      recallCalendarStatus: calendar.status,
+    };
+  }
+
+  const [connection] = await db
+    .insert(calendarConnections)
+    .values({
+      teamId: workspace.teamId,
+      userId: workspace.userId,
+      provider: "google",
+      externalCalendarId: LEGACY_PRIMARY_CALENDAR_ID,
+      autoJoinEnabled: true,
+      recallCalendarId: calendar.id,
+      recallCalendarStatus: calendar.status,
+    })
+    .returning({
+      id: calendarConnections.id,
+      teamId: calendarConnections.teamId,
+      userId: calendarConnections.userId,
+      autoJoinEnabled: calendarConnections.autoJoinEnabled,
+      recallCalendarId: calendarConnections.recallCalendarId,
+      recallCalendarStatus: calendarConnections.recallCalendarStatus,
+    });
+
+  await tagRecallCalendarForWorkspace(calendar, workspace);
+
+  return connection;
 }
 
 export async function processRecallCalendarWebhook(
@@ -113,7 +229,10 @@ export async function syncRecallCalendarEventsForWorkspace(input: {
   autoJoinEnabled: boolean;
   now?: Date;
 }) {
-  const connection = await findConnectionByWorkspace(input.workspace);
+  const existingConnection = await findConnectionByWorkspace(input.workspace);
+  const connection = existingConnection?.recallCalendarId
+    ? existingConnection
+    : await ensureRecallManagedCalendarConnectionForWorkspace(input.workspace);
 
   if (!connection?.recallCalendarId) {
     throw new RecallCalendarConnectionError();
@@ -171,6 +290,57 @@ export async function syncRecallCalendarEventsForWorkspace(input: {
   };
 }
 
+async function findRecallManagedCalendarForWorkspace(
+  workspace: WorkspaceContext,
+) {
+  const calendars = (await listRecallCalendars())
+    .map(normalizeRecallCalendar)
+    .filter((calendar): calendar is RecallCalendarSummary => Boolean(calendar))
+    .filter((calendar) => calendar.platform === "google_calendar")
+    .filter((calendar) => calendar.status === "connected");
+
+  const exactMatch = calendars.find(
+    (calendar) =>
+      calendar.metadata.teamId === workspace.teamId &&
+      calendar.metadata.userId === workspace.userId,
+  );
+
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  const teamMatch = calendars.find(
+    (calendar) => calendar.metadata.teamId === workspace.teamId,
+  );
+
+  if (teamMatch) {
+    return teamMatch;
+  }
+
+  return calendars.length === 1 ? calendars[0] : null;
+}
+
+async function tagRecallCalendarForWorkspace(
+  calendar: RecallCalendarSummary,
+  workspace: WorkspaceContext,
+) {
+  if (
+    calendar.metadata.teamId === workspace.teamId &&
+    calendar.metadata.userId === workspace.userId
+  ) {
+    return;
+  }
+
+  await updateRecallCalendar({
+    calendarId: calendar.id,
+    metadata: {
+      ...calendar.metadata,
+      teamId: workspace.teamId,
+      userId: workspace.userId,
+    },
+  }).catch(() => undefined);
+}
+
 async function processRecallCalendarUpdate(calendarId: string) {
   const connection = await findConnectionByRecallCalendarId(calendarId);
 
@@ -203,6 +373,7 @@ async function findConnectionByRecallCalendarId(calendarId: string) {
       userEmail: users.email,
       autoJoinEnabled: calendarConnections.autoJoinEnabled,
       recallCalendarId: calendarConnections.recallCalendarId,
+      recallCalendarStatus: calendarConnections.recallCalendarStatus,
     })
     .from(calendarConnections)
     .innerJoin(users, eq(users.id, calendarConnections.userId))
@@ -216,19 +387,21 @@ async function findConnectionByRecallCalendarId(calendarId: string) {
         userId: connection.userId,
         autoJoinEnabled: connection.autoJoinEnabled,
         recallCalendarId: connection.recallCalendarId,
+        recallCalendarStatus: connection.recallCalendarStatus,
         workspaceDomain: normalizeEmailDomain(connection.userEmail),
       }
     : null;
 }
 
 async function findConnectionByWorkspace(workspace: WorkspaceContext) {
-  const [connection] = await db
+  const connections = await db
     .select({
       id: calendarConnections.id,
       teamId: calendarConnections.teamId,
       userId: calendarConnections.userId,
       autoJoinEnabled: calendarConnections.autoJoinEnabled,
       recallCalendarId: calendarConnections.recallCalendarId,
+      recallCalendarStatus: calendarConnections.recallCalendarStatus,
     })
     .from(calendarConnections)
     .where(
@@ -236,10 +409,13 @@ async function findConnectionByWorkspace(workspace: WorkspaceContext) {
         eq(calendarConnections.teamId, workspace.teamId),
         eq(calendarConnections.userId, workspace.userId),
         eq(calendarConnections.provider, "google"),
-        eq(calendarConnections.externalCalendarId, "primary"),
       ),
     )
-    .limit(1);
+    .limit(10);
+
+  const connection =
+    connections.find((candidate) => candidate.recallCalendarId) ??
+    connections[0];
 
   return (connection ?? null) as RecallCalendarConnection | null;
 }
@@ -282,6 +458,24 @@ function normalizeRecallCalendarEvent(event: unknown): SyncedCalendarEvent | nul
     hangoutLink: getString(raw?.hangoutLink),
     isDeleted,
     conferenceData: normalizeConferenceData(raw?.conferenceData),
+  };
+}
+
+function normalizeRecallCalendar(calendar: unknown): RecallCalendarSummary | null {
+  const candidate = getRecord(calendar);
+  const id = getString(candidate?.id);
+
+  if (!id) {
+    return null;
+  }
+
+  return {
+    id,
+    platform: getString(candidate?.platform),
+    platformEmail:
+      getString(candidate?.platform_email) ?? getString(candidate?.oauth_email),
+    status: getString(candidate?.status),
+    metadata: getStringRecord(candidate?.metadata),
   };
 }
 
@@ -348,4 +542,18 @@ function getRecord(value: unknown) {
 
 function getString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function getStringRecord(value: unknown) {
+  const record = getRecord(value);
+
+  if (!record) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(record).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
 }

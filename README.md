@@ -66,24 +66,9 @@ The Meeting library remains the searchable recent meeting table. It is filtered 
 
 The new meeting page posts Google Meet and Zoom links to `/api/meetings/link`. The route requires an authenticated Neon Auth session, rejects unsupported meeting hosts, creates a local meeting row, and schedules a Recall bot with `/api/recall/webhook` as the callback URL. The Recall bot receives the local `meetingId` in metadata so later webhooks can update the same meeting.
 
-Google sign in identifies the user through Neon Auth, so keep the Neon Auth Google redirect URI configured for sign in. Google Calendar permission is handled by the app owned OAuth flow at `/api/calendar/oauth/start` and `/api/calendar/oauth/callback`, because calendar scopes are separate from identity sign in. Add these app callback redirect URIs to the same Google OAuth client:
+Google sign in identifies the user through Neon Auth, so keep the Neon Auth Google redirect URI configured for sign in. Calendar permission is owned by Recall Calendar V2, not by this app. Connect the Google Calendar account in Recall, then store `https://meeting-note-swart.vercel.app/api/recall/calendar/webhook` in the Recall dashboard as the Calendar V2 webhook endpoint for production. Use the local tunnel URL above for local testing.
 
-1. `https://meeting-note-swart.vercel.app/api/calendar/oauth/callback`
-2. `https://meeting-note-dev.inevitable.tech/api/calendar/oauth/callback`
-3. `http://localhost:3000/api/calendar/oauth/callback`
-
-Google Calendar OAuth setup checklist:
-
-1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), open the OAuth client whose client ID is stored in `GOOGLE_CALENDAR_CLIENT_ID`.
-2. The client type must be Web application.
-3. Add every app callback above under Authorized redirect URIs. Authorized JavaScript origins are not enough.
-4. The callback URI must match exactly. Do not add a trailing slash.
-5. Store the client ID and client secret in Vercel as `GOOGLE_CALENDAR_CLIENT_ID` and `GOOGLE_CALENDAR_CLIENT_SECRET`, then redeploy production so the serverless functions receive the new values.
-6. Run database migrations before testing Calendar sync. Calendar connections store encrypted Google OAuth token columns plus the Recall Calendar V2 id in Neon on `calendar_connections`.
-
-If Google shows `Error 400: redirect_uri_mismatch`, the app has reached Google successfully but the OAuth client is missing the exact callback URI. Check the `redirect_uri` value in the Google error details and add that exact value to Authorized redirect URIs on the same OAuth client.
-
-When Google Calendar OAuth succeeds, the app stores the encrypted Google tokens in Neon, creates or updates a Recall Calendar V2 calendar with the Google refresh token, then immediately reconciles upcoming Recall calendar events. Store `https://meeting-note-swart.vercel.app/api/recall/calendar/webhook` in the Recall dashboard as the Calendar V2 webhook endpoint for production, and use the local tunnel URL above for local testing.
+The dashboard adopts a connected Recall Calendar automatically when the Recall calendar metadata matches the workspace, or when the Recall account has exactly one connected Google Calendar. The app stores only the Recall Calendar V2 id and status in Neon on `calendar_connections`. It does not need `GOOGLE_CALENDAR_CLIENT_ID` or `GOOGLE_CALENDAR_CLIENT_SECRET`.
 
 Recall Calendar V2 sends `calendar.sync_events` webhooks when calendar events are created, updated, or deleted. The webhook route verifies the Recall signature, deduplicates delivery, fetches changed Recall calendar events, stores the Neon `calendar_events` row, then applies the existing auto join policy. Supported Google Meet and Zoom events are scheduled through Recall Calendar V2 with `meetingId` plus `calendarEventId` metadata. Shared calendar events use a team scoped `deduplication_key` and the Neon `meetings.team_meeting_key` unique index so one team meeting gets one bot.
 

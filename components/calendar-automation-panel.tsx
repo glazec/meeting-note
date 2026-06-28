@@ -30,10 +30,9 @@ export function CalendarAutomationPanel({
   return (
     <Card size="sm" className="w-full sm:max-w-sm">
       <CardHeader>
-        <CardTitle>Calendar automation</CardTitle>
+        <CardTitle>Calendar capture</CardTitle>
         <CardDescription>
-          Recall watches future calendar changes and keeps team bot coverage
-          consistent.
+          Future meetings are watched from the connected calendar.
         </CardDescription>
         <CardAction>
           <Badge variant={statusVariant}>{statusLabel}</Badge>
@@ -45,7 +44,7 @@ export function CalendarAutomationPanel({
             icon={<CalendarCheck />}
             label={
               connected
-                ? "Recall Calendar connected"
+                ? "Calendar connected"
                 : "Calendar not connected"
             }
             value={formatRecallStatus(status.recallCalendarStatus)}
@@ -54,15 +53,15 @@ export function CalendarAutomationPanel({
             icon={<Bot />}
             label={
               autoJoinActive
-                ? "Team bot coverage on"
-                : "Team bot coverage off"
+                ? "Recording coverage on"
+                : "Recording coverage off"
             }
             value={
               autoJoinActive
-                ? "One bot joins each eligible meeting"
+                ? "Eligible online meetings are recorded"
                 : connected
-                  ? "Sync calendar to enable bots"
-                  : "Connect calendar to enable bots"
+                  ? "Sync calendar to enable recording"
+                  : "Connect calendar in Recall first"
             }
           />
           <StatusRow

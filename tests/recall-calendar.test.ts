@@ -7,59 +7,48 @@ describe("Recall Calendar V2 adapter", () => {
     vi.resetModules();
   });
 
-  it("creates a Recall calendar from Google OAuth credentials", async () => {
+  it("lists Recall managed calendars", async () => {
     vi.stubEnv("RECALL_API_KEY", "recall-key\n");
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
-          id: "44444444-4444-4444-8444-444444444444",
-          status: "connecting",
+          next: null,
+          results: [
+            {
+              id: "44444444-4444-4444-8444-444444444444",
+              platform: "google_calendar",
+              platform_email: "yiping@iosg.vc",
+              status: "connected",
+            },
+          ],
         }),
         {
-          status: 201,
+          status: 200,
           headers: { "content-type": "application/json" },
         },
       ),
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const { createRecallCalendar } = await import("@/lib/vendors/recall");
+    const { listRecallCalendars } = await import("@/lib/vendors/recall");
 
-    await expect(
-      createRecallCalendar({
-        oauthClientId: "google-client-id",
-        oauthClientSecret: "google-client-secret",
-        oauthRefreshToken: "google-refresh-token",
+    await expect(listRecallCalendars()).resolves.toEqual([
+      {
+        id: "44444444-4444-4444-8444-444444444444",
         platform: "google_calendar",
-        metadata: {
-          teamId: "22222222-2222-4222-8222-222222222222",
-          userId: "11111111-1111-4111-8111-111111111111",
-        },
-      }),
-    ).resolves.toEqual({
-      id: "44444444-4444-4444-8444-444444444444",
-      status: "connecting",
-    });
+        platform_email: "yiping@iosg.vc",
+        status: "connected",
+      },
+    ]);
 
     expect(fetchMock).toHaveBeenCalledWith(
       "https://us-east-1.recall.ai/api/v2/calendars/",
       {
-        method: "POST",
+        method: "GET",
         headers: {
           Authorization: "Token recall-key",
-          "Content-Type": "application/json",
           Accept: "application/json",
         },
-        body: JSON.stringify({
-          oauth_client_id: "google-client-id",
-          oauth_client_secret: "google-client-secret",
-          oauth_refresh_token: "google-refresh-token",
-          platform: "google_calendar",
-          metadata: {
-            teamId: "22222222-2222-4222-8222-222222222222",
-            userId: "11111111-1111-4111-8111-111111111111",
-          },
-        }),
       },
     );
   });

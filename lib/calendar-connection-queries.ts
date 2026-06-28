@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { calendarConnections } from "@/db/schema";
+import { ensureRecallManagedCalendarConnectionForWorkspace } from "@/lib/recall-calendar";
 import type { SessionUser } from "@/lib/auth";
 import {
   getOrCreateWorkspaceForSessionUser,
@@ -26,7 +27,7 @@ export async function getCalendarConnectionSummary(
 export async function getCalendarConnectionSummaryForWorkspace(
   workspace: WorkspaceContext,
 ): Promise<CalendarConnectionSummary> {
-  const [connection] = await db
+  const connections = await db
     .select({
       autoJoinEnabled: calendarConnections.autoJoinEnabled,
       recallCalendarId: calendarConnections.recallCalendarId,
@@ -40,13 +41,32 @@ export async function getCalendarConnectionSummaryForWorkspace(
         eq(calendarConnections.teamId, workspace.teamId),
         eq(calendarConnections.userId, workspace.userId),
         eq(calendarConnections.provider, "google"),
-        eq(calendarConnections.externalCalendarId, "primary"),
       ),
     )
-    .limit(1);
+    .limit(10);
+  const connection =
+    connections.find((candidate) => candidate.recallCalendarId) ??
+    connections[0];
 
-  if (!connection) {
-    return disconnectedCalendarSummary();
+  if (!connection?.recallCalendarId) {
+    const linkedConnection =
+      await ensureRecallManagedCalendarConnectionForWorkspace(workspace).catch(
+        () => null,
+      );
+
+    if (!linkedConnection) {
+      return disconnectedCalendarSummary();
+    }
+
+    return {
+      connected: Boolean(linkedConnection.recallCalendarId),
+      autoJoinEnabled: linkedConnection.autoJoinEnabled,
+      recallCalendarStatus:
+        "recallCalendarStatus" in linkedConnection
+          ? (linkedConnection.recallCalendarStatus ?? null)
+          : null,
+      recallCalendarLastSyncedAt: null,
+    };
   }
 
   return {

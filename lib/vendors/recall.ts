@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { z } from "zod";
 
 const oldRecallWebhookSchema = z.object({
@@ -48,20 +49,22 @@ type RecallAutomaticVideoOutput = {
   in_call_recording: RecallVideoOutput;
 };
 
-const RECALL_BOT_LOGO_JPEG_BASE64 = readFileSync(
-  new URL("../../assets/meeting-bot-logo.jpg", import.meta.url),
-).toString("base64");
+let recallBotLogoJpegBase64: string | null = null;
 
-export const DEFAULT_RECALL_BOT_VIDEO_OUTPUT: RecallAutomaticVideoOutput = {
-  in_call_not_recording: {
-    kind: "jpeg",
-    b64_data: RECALL_BOT_LOGO_JPEG_BASE64,
-  },
-  in_call_recording: {
-    kind: "jpeg",
-    b64_data: RECALL_BOT_LOGO_JPEG_BASE64,
-  },
-};
+export function getDefaultRecallBotVideoOutput(): RecallAutomaticVideoOutput {
+  const logo = getRecallBotLogoJpegBase64();
+
+  return {
+    in_call_not_recording: {
+      kind: "jpeg",
+      b64_data: logo,
+    },
+    in_call_recording: {
+      kind: "jpeg",
+      b64_data: logo,
+    },
+  };
+}
 
 const recallBotInputSchema = z.object({
   meetingUrl: z.string().url(),
@@ -87,17 +90,8 @@ const recallBotDeleteInputSchema = z.object({
   botId: z.string().trim().min(1),
 });
 
-const recallCalendarInputSchema = z.object({
-  oauthClientId: z.string().trim().min(1),
-  oauthClientSecret: z.string().trim().min(1),
-  oauthRefreshToken: z.string().trim().min(1),
-  platform: z.enum(["google_calendar", "microsoft_outlook"]),
-  metadata: z.record(z.string(), z.string()).optional(),
-});
-
 const recallCalendarUpdateInputSchema = z.object({
   calendarId: z.string().trim().min(1),
-  oauthRefreshToken: z.string().trim().min(1).optional(),
   metadata: z.record(z.string(), z.string()).optional(),
 });
 
@@ -222,7 +216,7 @@ export async function scheduleRecallBot(input: {
       meeting_url: parsedInput.meetingUrl,
       bot_name: parsedInput.botName,
       join_at: parsedInput.startAt,
-      automatic_video_output: DEFAULT_RECALL_BOT_VIDEO_OUTPUT,
+      automatic_video_output: getDefaultRecallBotVideoOutput(),
       recording_config: buildRecallChatRecordingConfig(
         buildRecallChatWebhookUrl(parsedInput.webhookUrl),
       ),
@@ -243,40 +237,18 @@ export async function scheduleRecallBot(input: {
   return response.json();
 }
 
-export async function createRecallCalendar(input: {
-  oauthClientId: string;
-  oauthClientSecret: string;
-  oauthRefreshToken: string;
-  platform: "google_calendar" | "microsoft_outlook";
-  metadata?: Record<string, string>;
-}) {
-  const parsedInput = recallCalendarInputSchema.parse(input);
-  const env = recallApiEnvSchema.parse(process.env);
-
-  const response = await fetch(buildRecallApiUrl(env, "/api/v2/calendars/"), {
-    method: "POST",
-    headers: buildRecallJsonHeaders(env),
-    body: JSON.stringify({
-      oauth_client_id: parsedInput.oauthClientId,
-      oauth_client_secret: parsedInput.oauthClientSecret,
-      oauth_refresh_token: parsedInput.oauthRefreshToken,
-      platform: parsedInput.platform,
-      metadata: parsedInput.metadata,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      `Recall calendar creation failed with ${response.status} ${response.statusText}`,
-    );
+function getRecallBotLogoJpegBase64() {
+  if (!recallBotLogoJpegBase64) {
+    recallBotLogoJpegBase64 = readFileSync(
+      join(process.cwd(), "assets", "meeting-bot-logo.jpg"),
+    ).toString("base64");
   }
 
-  return response.json();
+  return recallBotLogoJpegBase64;
 }
 
 export async function updateRecallCalendar(input: {
   calendarId: string;
-  oauthRefreshToken?: string;
   metadata?: Record<string, string>;
 }) {
   const parsedInput = recallCalendarUpdateInputSchema.parse(input);
@@ -291,7 +263,6 @@ export async function updateRecallCalendar(input: {
       method: "PATCH",
       headers: buildRecallJsonHeaders(env),
       body: JSON.stringify({
-        oauth_refresh_token: parsedInput.oauthRefreshToken,
         metadata: parsedInput.metadata,
       }),
     },
@@ -304,6 +275,38 @@ export async function updateRecallCalendar(input: {
   }
 
   return response.json();
+}
+
+export async function listRecallCalendars() {
+  const env = recallApiEnvSchema.parse(process.env);
+  const calendars: unknown[] = [];
+  let nextUrl: string | null = buildRecallApiUrl(env, "/api/v2/calendars/");
+
+  while (nextUrl) {
+    const response = await fetch(nextUrl, {
+      method: "GET",
+      headers: buildRecallReadHeaders(env),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Recall calendar listing failed with ${response.status} ${response.statusText}`,
+      );
+    }
+
+    const page = (await response.json()) as {
+      next?: unknown;
+      results?: unknown;
+    };
+
+    if (Array.isArray(page.results)) {
+      calendars.push(...page.results);
+    }
+
+    nextUrl = typeof page.next === "string" && page.next ? page.next : null;
+  }
+
+  return calendars;
 }
 
 export async function retrieveRecallCalendar(calendarId: string) {
@@ -399,7 +402,7 @@ export async function scheduleRecallCalendarEventBot(input: {
         deduplication_key: parsedInput.deduplicationKey,
         bot_config: {
           bot_name: parsedInput.botName,
-          automatic_video_output: DEFAULT_RECALL_BOT_VIDEO_OUTPUT,
+          automatic_video_output: getDefaultRecallBotVideoOutput(),
           recording_config: buildRecallChatRecordingConfig(
             buildRecallChatWebhookUrl(),
           ),
@@ -471,7 +474,7 @@ export async function updateScheduledRecallBot(input: {
       body: JSON.stringify({
         meeting_url: parsedInput.meetingUrl,
         join_at: parsedInput.startAt,
-        automatic_video_output: DEFAULT_RECALL_BOT_VIDEO_OUTPUT,
+        automatic_video_output: getDefaultRecallBotVideoOutput(),
         recording_config: buildRecallChatRecordingConfig(
           buildRecallChatWebhookUrl(),
         ),

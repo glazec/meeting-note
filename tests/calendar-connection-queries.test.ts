@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { getWorkspace, select } = vi.hoisted(() => ({
-  getWorkspace: vi.fn(),
-  select: vi.fn(),
-}));
+const { ensureRecallManagedCalendarConnectionForWorkspace, getWorkspace, select } =
+  vi.hoisted(() => ({
+    ensureRecallManagedCalendarConnectionForWorkspace: vi.fn(),
+    getWorkspace: vi.fn(),
+    select: vi.fn(),
+  }));
 
 vi.mock("@/db/client", () => ({
   db: {
@@ -15,9 +17,14 @@ vi.mock("@/lib/workspace", () => ({
   getOrCreateWorkspaceForSessionUser: getWorkspace,
 }));
 
+vi.mock("@/lib/recall-calendar", () => ({
+  ensureRecallManagedCalendarConnectionForWorkspace,
+}));
+
 describe("getCalendarConnectionSummary", () => {
   afterEach(() => {
     getWorkspace.mockReset();
+    ensureRecallManagedCalendarConnectionForWorkspace.mockReset();
     select.mockReset();
     vi.resetModules();
   });
@@ -42,6 +49,7 @@ describe("getCalendarConnectionSummary", () => {
         }),
       }),
     });
+    ensureRecallManagedCalendarConnectionForWorkspace.mockResolvedValue(null);
 
     const { getCalendarConnectionSummary } = await import(
       "@/lib/calendar-connection-queries"
@@ -74,6 +82,7 @@ describe("getCalendarConnectionSummary", () => {
         }),
       }),
     });
+    ensureRecallManagedCalendarConnectionForWorkspace.mockResolvedValue(null);
 
     const { getCalendarConnectionSummary } = await import(
       "@/lib/calendar-connection-queries"
@@ -89,6 +98,43 @@ describe("getCalendarConnectionSummary", () => {
       connected: false,
       autoJoinEnabled: false,
       recallCalendarStatus: null,
+      recallCalendarLastSyncedAt: null,
+    });
+  });
+
+  it("returns an adopted Recall Calendar summary when Recall already owns the connection", async () => {
+    getWorkspace.mockResolvedValue({
+      teamId: "22222222-2222-4222-8222-222222222222",
+      userId: "11111111-1111-4111-8111-111111111111",
+      domain: "example.com",
+    });
+    select.mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: vi.fn().mockResolvedValue([]),
+        }),
+      }),
+    });
+    ensureRecallManagedCalendarConnectionForWorkspace.mockResolvedValue({
+      autoJoinEnabled: true,
+      recallCalendarId: "44444444-4444-4444-8444-444444444444",
+      recallCalendarStatus: "connected",
+    });
+
+    const { getCalendarConnectionSummary } = await import(
+      "@/lib/calendar-connection-queries"
+    );
+
+    await expect(
+      getCalendarConnectionSummary({
+        id: "auth_user_123",
+        email: "alice@example.com",
+        name: null,
+      }),
+    ).resolves.toEqual({
+      connected: true,
+      autoJoinEnabled: true,
+      recallCalendarStatus: "connected",
       recallCalendarLastSyncedAt: null,
     });
   });
