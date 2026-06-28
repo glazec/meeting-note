@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Plus, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Search } from "lucide-react";
 
 import { AppShell } from "@/components/app-shell";
 import { CalendarAutomationPanel } from "@/components/calendar-automation-panel";
@@ -19,7 +19,7 @@ import { requireCurrentUser } from "@/lib/auth-guards";
 import { getCalendarConnectionSummaryForWorkspace } from "@/lib/calendar-connection-queries";
 import {
   getMeetingDashboardSummaryForWorkspace,
-  listMeetingsForWorkspace,
+  listMeetingLibraryPageForWorkspace,
 } from "@/lib/meeting-queries";
 import { cn } from "@/lib/utils";
 import {
@@ -32,21 +32,31 @@ export const dynamic = "force-dynamic";
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; syncCalendar?: string }>;
+  searchParams: Promise<{
+    page?: string | string[];
+    q?: string | string[];
+    syncCalendar?: string | string[];
+  }>;
 }) {
   const user = await requireCurrentUser();
-  const { q, syncCalendar } = await searchParams;
+  const { page, q, syncCalendar } = await searchParams;
+  const currentPage = parseMeetingLibraryPage(page);
+  const query = getSearchParamValue(q);
   const workspace = await getOrCreateWorkspaceForSessionUser(user);
   const accessSummary = await getWorkspaceAccessSummary(workspace);
-  const [meetings, dashboardSummary, calendarStatus] = await Promise.all([
-    listMeetingsForWorkspace(workspace, q),
-    accessSummary.canCreateMeetings
-      ? getMeetingDashboardSummaryForWorkspace(workspace)
-      : Promise.resolve(null),
-    accessSummary.canCreateMeetings
-      ? getCalendarConnectionSummaryForWorkspace(workspace)
-      : Promise.resolve(null),
-  ]);
+  const [meetingLibraryPage, dashboardSummary, calendarStatus] =
+    await Promise.all([
+      listMeetingLibraryPageForWorkspace(workspace, {
+        page: currentPage,
+        query,
+      }),
+      accessSummary.canCreateMeetings
+        ? getMeetingDashboardSummaryForWorkspace(workspace)
+        : Promise.resolve(null),
+      accessSummary.canCreateMeetings
+        ? getCalendarConnectionSummaryForWorkspace(workspace)
+        : Promise.resolve(null),
+    ]);
 
   return (
     <AppShell
@@ -80,7 +90,7 @@ export default async function DashboardPage({
           </div>
           {calendarStatus ? (
             <CalendarAutomationPanel
-              autoSync={syncCalendar === "1"}
+              autoSync={getSearchParamValue(syncCalendar) === "1"}
               status={calendarStatus}
             />
           ) : null}
@@ -111,7 +121,7 @@ export default async function DashboardPage({
                   id="meeting-search"
                   name="q"
                   type="search"
-                  defaultValue={q ?? ""}
+                  defaultValue={query ?? ""}
                   placeholder={
                     accessSummary.isSharedOnly
                       ? "Search shared transcript"
@@ -127,11 +137,138 @@ export default async function DashboardPage({
                   ? "No transcripts have been shared with you yet"
                   : "No meetings found"
               }
-              meetings={meetings}
+              meetings={meetingLibraryPage.meetings}
+            />
+            <MeetingLibraryPagination
+              hasNextPage={meetingLibraryPage.hasNextPage}
+              hasPreviousPage={meetingLibraryPage.hasPreviousPage}
+              nextHref={buildDashboardPageHref({
+                page: meetingLibraryPage.page + 1,
+                q: query,
+                syncCalendar,
+              })}
+              page={meetingLibraryPage.page}
+              previousHref={buildDashboardPageHref({
+                page: meetingLibraryPage.page - 1,
+                q: query,
+                syncCalendar,
+              })}
             />
           </CardContent>
         </Card>
       </section>
     </AppShell>
   );
+}
+
+function MeetingLibraryPagination({
+  hasNextPage,
+  hasPreviousPage,
+  nextHref,
+  page,
+  previousHref,
+}: {
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
+  nextHref: string;
+  page: number;
+  previousHref: string;
+}) {
+  if (!hasNextPage && !hasPreviousPage) {
+    return null;
+  }
+
+  return (
+    <nav
+      aria-label="Meeting library pages"
+      className="flex flex-wrap items-center justify-between gap-3"
+    >
+      <span className="text-sm text-muted-foreground">Page {page}</span>
+      <div className="flex items-center gap-2">
+        {hasPreviousPage ? (
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href={previousHref}
+          >
+            <ChevronLeft data-icon="inline-start" />
+            Previous
+          </Link>
+        ) : (
+          <span
+            aria-disabled="true"
+            className={cn(
+              buttonVariants({ variant: "outline" }),
+              "pointer-events-none opacity-50",
+            )}
+          >
+            <ChevronLeft data-icon="inline-start" />
+            Previous
+          </span>
+        )}
+        {hasNextPage ? (
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href={nextHref}
+          >
+            Next
+            <ChevronRight data-icon="inline-end" />
+          </Link>
+        ) : (
+          <span
+            aria-disabled="true"
+            className={cn(
+              buttonVariants({ variant: "outline" }),
+              "pointer-events-none opacity-50",
+            )}
+          >
+            Next
+            <ChevronRight data-icon="inline-end" />
+          </span>
+        )}
+      </div>
+    </nav>
+  );
+}
+
+function parseMeetingLibraryPage(value: string | string[] | undefined) {
+  const numberValue = Number(getSearchParamValue(value));
+
+  if (!Number.isInteger(numberValue) || numberValue < 1) {
+    return 1;
+  }
+
+  return numberValue;
+}
+
+function buildDashboardPageHref({
+  page,
+  q,
+  syncCalendar,
+}: {
+  page: number;
+  q?: string;
+  syncCalendar?: string | string[];
+}) {
+  const params = new URLSearchParams();
+  const syncCalendarValue = getSearchParamValue(syncCalendar);
+
+  if (q) {
+    params.set("q", q);
+  }
+
+  if (syncCalendarValue) {
+    params.set("syncCalendar", syncCalendarValue);
+  }
+
+  if (page > 1) {
+    params.set("page", String(page));
+  }
+
+  const query = params.toString();
+
+  return query ? `/dashboard?${query}` : "/dashboard";
+}
+
+function getSearchParamValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
 }

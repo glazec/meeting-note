@@ -37,6 +37,7 @@ import {
 import { groupRelatedMeetings } from "@/lib/meeting-intelligence";
 
 const uuidSchema = z.string().uuid();
+export const MEETING_LIBRARY_PAGE_SIZE = 50;
 
 export type MeetingTranscript = {
   id: string;
@@ -55,6 +56,21 @@ export type ShareRecipient = {
   name: string | null;
 };
 
+export type MeetingLibraryPage = {
+  meetings: MeetingListItem[];
+  page: number;
+  pageSize: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
+};
+
+export type MeetingLibraryPageOptions = {
+  now?: Date;
+  page?: number;
+  pageSize?: number;
+  query?: string;
+};
+
 export async function listWorkspaceMeetings(
   sessionUser: SessionUser,
   query?: string,
@@ -67,8 +83,21 @@ export async function listWorkspaceMeetings(
 export async function listMeetingsForWorkspace(
   workspace: WorkspaceContext,
   query?: string,
+  options: Omit<MeetingLibraryPageOptions, "query"> = {},
 ): Promise<MeetingListItem[]> {
-  const search = query?.trim();
+  const page = await listMeetingLibraryPageForWorkspace(workspace, {
+    ...options,
+    query,
+  });
+
+  return page.meetings;
+}
+
+export async function listMeetingLibraryPageForWorkspace(
+  workspace: WorkspaceContext,
+  options: MeetingLibraryPageOptions = {},
+): Promise<MeetingLibraryPage> {
+  const search = options.query?.trim();
   const hasMeetingAccess = sql`exists (
     select 1
     from ${meetingAccess}
@@ -90,6 +119,10 @@ export async function listMeetingsForWorkspace(
         ),
       )
     : or(eq(meetings.teamId, workspace.teamId), hasMeetingAccess);
+  const activeWorkRank = sql<number>`case
+    when ${meetings.status} in ('recording', 'processing') then 0
+    else 1
+  end`;
 
   const rows = await db
     .select({
@@ -113,34 +146,37 @@ export async function listMeetingsForWorkspace(
     .from(meetings)
     .leftJoin(calendarEvents, eq(calendarEvents.id, meetings.calendarEventId))
     .where(where)
-    .orderBy(desc(meetings.startedAt), desc(meetings.createdAt))
-    .limit(50);
+    .orderBy(
+      asc(activeWorkRank),
+      desc(meetings.startedAt),
+      desc(meetings.createdAt),
+    );
 
   const primaryEntityByMeetingId = await getPrimaryEntitiesForMeetings(
     rows.map((meeting) => meeting.id),
   );
   const items: Array<MeetingListItem & { primaryEntity: string | null }> =
     rows.map((meeting) => ({
-    id: meeting.id,
-    title: meeting.title,
-    platform: meeting.platform,
-    status: meeting.status,
-    transcriptJobStatus: meeting.transcriptJobStatus,
-    hasRecallBot: Boolean(meeting.recallBotId),
-    startedAt: (meeting.startedAt ?? meeting.createdAt).toISOString(),
-    accessScope: meeting.teamId === workspace.teamId ? "workspace" : "shared",
-    externalParticipantKeys: getExternalParticipantKeys(
-      meeting.calendarAttendeeEmails,
-      workspace.domain,
-    ),
-    primaryEntity: primaryEntityByMeetingId.get(meeting.id) ?? null,
-  }));
+      id: meeting.id,
+      title: meeting.title,
+      platform: meeting.platform,
+      status: meeting.status,
+      transcriptJobStatus: meeting.transcriptJobStatus,
+      hasRecallBot: Boolean(meeting.recallBotId),
+      startedAt: (meeting.startedAt ?? meeting.createdAt).toISOString(),
+      accessScope: meeting.teamId === workspace.teamId ? "workspace" : "shared",
+      externalParticipantKeys: getExternalParticipantKeys(
+        meeting.calendarAttendeeEmails,
+        workspace.domain,
+      ),
+      primaryEntity: primaryEntityByMeetingId.get(meeting.id) ?? null,
+    }));
   const grouped = groupRelatedMeetings(items);
   const groupedById = new Map(
     grouped.map((meeting) => [meeting.id, meeting.relatedMeetings]),
   );
 
-  return items
+  const meetingsForLibrary = items
     .filter((meeting) => groupedById.has(meeting.id))
     .map((meeting) => ({
       id: meeting.id,
@@ -153,6 +189,113 @@ export async function listMeetingsForWorkspace(
       accessScope: meeting.accessScope,
       relatedMeetings: groupedById.get(meeting.id),
     }));
+
+  return buildMeetingLibraryPage(meetingsForLibrary, options);
+}
+
+export function buildMeetingLibraryPage(
+  meetingsForLibrary: MeetingListItem[],
+  options: MeetingLibraryPageOptions = {},
+): MeetingLibraryPage {
+  const nowTime = (options.now ?? new Date()).getTime();
+  const scheduledBotMeetingIds = new Set(
+    meetingsForLibrary
+      .filter((meeting) => isFutureScheduledBotMeeting(meeting, nowTime))
+      .sort(
+        (left, right) =>
+          new Date(left.startedAt).getTime() -
+          new Date(right.startedAt).getTime(),
+      )
+      .slice(0, 3)
+      .map((meeting) => meeting.id),
+  );
+  const visibleMeetings = meetingsForLibrary
+    .filter(
+      (meeting) =>
+        meeting.status !== "scheduled" ||
+        scheduledBotMeetingIds.has(meeting.id),
+    )
+    .toSorted((left, right) =>
+      compareMeetingLibraryItems(left, right, scheduledBotMeetingIds),
+    );
+  const page = normalizePage(options.page);
+  const pageSize = normalizePageSize(options.pageSize);
+  const start = (page - 1) * pageSize;
+
+  return {
+    meetings: visibleMeetings.slice(start, start + pageSize),
+    page,
+    pageSize,
+    hasNextPage: start + pageSize < visibleMeetings.length,
+    hasPreviousPage: page > 1,
+  };
+}
+
+function isFutureScheduledBotMeeting(
+  meeting: MeetingListItem,
+  nowTime: number,
+) {
+  return (
+    meeting.status === "scheduled" &&
+    Boolean(meeting.hasRecallBot) &&
+    new Date(meeting.startedAt).getTime() >= nowTime
+  );
+}
+
+function compareMeetingLibraryItems(
+  left: MeetingListItem,
+  right: MeetingListItem,
+  scheduledBotMeetingIds: Set<string>,
+) {
+  const rankDifference =
+    getMeetingLibraryRank(left, scheduledBotMeetingIds) -
+    getMeetingLibraryRank(right, scheduledBotMeetingIds);
+
+  if (rankDifference !== 0) {
+    return rankDifference;
+  }
+
+  if (
+    scheduledBotMeetingIds.has(left.id) &&
+    scheduledBotMeetingIds.has(right.id)
+  ) {
+    return (
+      new Date(left.startedAt).getTime() - new Date(right.startedAt).getTime()
+    );
+  }
+
+  return 0;
+}
+
+function getMeetingLibraryRank(
+  meeting: MeetingListItem,
+  scheduledBotMeetingIds: Set<string>,
+) {
+  if (meeting.status === "recording" || meeting.status === "processing") {
+    return 0;
+  }
+
+  if (scheduledBotMeetingIds.has(meeting.id)) {
+    return 1;
+  }
+
+  return 2;
+}
+
+function normalizePage(page: number | undefined) {
+  if (!page || !Number.isFinite(page)) {
+    return 1;
+  }
+
+  return Math.max(1, Math.floor(page));
+}
+
+function normalizePageSize(pageSize: number | undefined) {
+  if (!pageSize || !Number.isFinite(pageSize)) {
+    return MEETING_LIBRARY_PAGE_SIZE;
+  }
+
+  return Math.max(1, Math.min(100, Math.floor(pageSize)));
 }
 
 function getExternalParticipantKeys(

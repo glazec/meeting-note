@@ -177,46 +177,212 @@ describe("listMeetingsForWorkspace", () => {
     vi.resetModules();
   });
 
+  it("keeps newly uploaded MP3 meetings in the library even without calendar attendees", async () => {
+    select
+      .mockReturnValueOnce({
+        from: () => ({
+          leftJoin: () => ({
+            where: () => ({
+              orderBy: vi.fn().mockResolvedValue([
+                {
+                  id: "33333333-3333-4333-8333-333333333333",
+                  teamId: "team_123",
+                  title: "Investment review",
+                  platform: "upload",
+                  status: "processing",
+                  transcriptJobStatus: "queued",
+                  recallBotId: null,
+                  startedAt: new Date("2026-06-27T12:00:00.000Z"),
+                  createdAt: new Date("2026-06-27T11:59:00.000Z"),
+                  calendarAttendeeEmails: null,
+                },
+              ]),
+            }),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      });
+    const { listMeetingsForWorkspace } = await import("@/lib/meeting-queries");
+
+    await expect(
+      listMeetingsForWorkspace({
+        teamId: "team_123",
+        userId: "user_123",
+        domain: "iosg.vc",
+        canCreateMeetings: true,
+      }),
+    ).resolves.toEqual([
+      {
+        id: "33333333-3333-4333-8333-333333333333",
+        title: "Investment review",
+        platform: "upload",
+        status: "processing",
+        transcriptJobStatus: "queued",
+        hasRecallBot: false,
+        startedAt: "2026-06-27T12:00:00.000Z",
+        accessScope: "workspace",
+        relatedMeetings: [],
+      },
+    ]);
+  });
+
+  it("prioritizes active work before paging the meeting library", async () => {
+    const orderBy = vi.fn().mockResolvedValue([]);
+
+    select
+      .mockReturnValueOnce({
+        from: () => ({
+          leftJoin: () => ({
+            where: () => ({
+              orderBy,
+            }),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      });
+    const { listMeetingsForWorkspace } = await import("@/lib/meeting-queries");
+
+    await listMeetingsForWorkspace({
+      teamId: "team_123",
+      userId: "user_123",
+      domain: "iosg.vc",
+      canCreateMeetings: true,
+    });
+
+    expect(orderBy.mock.calls[0]).toHaveLength(3);
+  });
+
+  it("shows only the next 3 scheduled meetings that have a bot", async () => {
+    select
+      .mockReturnValueOnce({
+        from: () => ({
+          leftJoin: () => ({
+            where: () => ({
+              orderBy: vi.fn().mockResolvedValue([
+                meetingRow({
+                  id: "11111111-1111-4111-8111-111111111111",
+                  title: "Ready transcript",
+                  status: "ready",
+                  startedAt: "2026-06-26T12:00:00.000Z",
+                }),
+                meetingRow({
+                  id: "22222222-2222-4222-8222-222222222222",
+                  title: "Next bot join",
+                  status: "scheduled",
+                  recallBotId: "bot_1",
+                  startedAt: "2026-06-28T14:00:00.000Z",
+                }),
+                meetingRow({
+                  id: "33333333-3333-4333-8333-333333333333",
+                  title: "Second bot join",
+                  status: "scheduled",
+                  recallBotId: "bot_2",
+                  startedAt: "2026-06-28T15:00:00.000Z",
+                }),
+                meetingRow({
+                  id: "44444444-4444-4444-8444-444444444444",
+                  title: "Third bot join",
+                  status: "scheduled",
+                  recallBotId: "bot_3",
+                  startedAt: "2026-06-28T16:00:00.000Z",
+                }),
+                meetingRow({
+                  id: "55555555-5555-4555-8555-555555555555",
+                  title: "Fourth bot join",
+                  status: "scheduled",
+                  recallBotId: "bot_4",
+                  startedAt: "2026-06-28T17:00:00.000Z",
+                }),
+                meetingRow({
+                  id: "66666666-6666-4666-8666-666666666666",
+                  title: "No bot scheduled",
+                  status: "scheduled",
+                  recallBotId: null,
+                  startedAt: "2026-06-28T13:00:00.000Z",
+                }),
+              ]),
+            }),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      });
+    const { listMeetingsForWorkspace } = await import("@/lib/meeting-queries");
+
+    await expect(
+      listMeetingsForWorkspace(
+        {
+          teamId: "team_123",
+          userId: "user_123",
+          domain: "iosg.vc",
+          canCreateMeetings: true,
+        },
+        undefined,
+        { now: new Date("2026-06-28T12:00:00.000Z") },
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({ title: "Next bot join" }),
+      expect.objectContaining({ title: "Second bot join" }),
+      expect.objectContaining({ title: "Third bot join" }),
+      expect.objectContaining({ title: "Ready transcript" }),
+    ]);
+  });
+
   it("groups related meetings by shared external calendar attendees", async () => {
     select
       .mockReturnValueOnce({
         from: () => ({
           leftJoin: () => ({
             where: () => ({
-              orderBy: () => ({
-                limit: vi.fn().mockResolvedValue([
-                  {
-                    id: "11111111-1111-4111-8111-111111111111",
-                    teamId: "team_123",
-                    title: "Founder intro",
-                    platform: "google_meet",
-                    status: "ready",
-                    transcriptJobStatus: null,
-                    recallBotId: null,
-                    startedAt: new Date("2026-06-20T10:00:00.000Z"),
-                    createdAt: new Date("2026-06-20T09:00:00.000Z"),
-                    calendarAttendeeEmails: [
-                      "alice@iosg.vc",
-                      "founder@nascent.xyz",
-                    ],
-                  },
-                  {
-                    id: "22222222-2222-4222-8222-222222222222",
-                    teamId: "team_123",
-                    title: "Founder follow up",
-                    platform: "google_meet",
-                    status: "ready",
-                    transcriptJobStatus: null,
-                    recallBotId: null,
-                    startedAt: new Date("2026-06-27T10:00:00.000Z"),
-                    createdAt: new Date("2026-06-27T09:00:00.000Z"),
-                    calendarAttendeeEmails: [
-                      "bob@iosg.vc",
-                      "partner@nascent.xyz",
-                    ],
-                  },
-                ]),
-              }),
+              orderBy: vi.fn().mockResolvedValue([
+                {
+                  id: "11111111-1111-4111-8111-111111111111",
+                  teamId: "team_123",
+                  title: "Founder intro",
+                  platform: "google_meet",
+                  status: "ready",
+                  transcriptJobStatus: null,
+                  recallBotId: null,
+                  startedAt: new Date("2026-06-20T10:00:00.000Z"),
+                  createdAt: new Date("2026-06-20T09:00:00.000Z"),
+                  calendarAttendeeEmails: [
+                    "alice@iosg.vc",
+                    "founder@nascent.xyz",
+                  ],
+                },
+                {
+                  id: "22222222-2222-4222-8222-222222222222",
+                  teamId: "team_123",
+                  title: "Founder follow up",
+                  platform: "google_meet",
+                  status: "ready",
+                  transcriptJobStatus: null,
+                  recallBotId: null,
+                  startedAt: new Date("2026-06-27T10:00:00.000Z"),
+                  createdAt: new Date("2026-06-27T09:00:00.000Z"),
+                  calendarAttendeeEmails: [
+                    "bob@iosg.vc",
+                    "partner@nascent.xyz",
+                  ],
+                },
+              ]),
             }),
           }),
         }),
@@ -321,3 +487,24 @@ describe("getMeetingDashboardSummaryForWorkspace", () => {
     });
   });
 });
+
+function meetingRow(overrides: {
+  id: string;
+  title: string;
+  status: "scheduled" | "recording" | "processing" | "ready" | "failed";
+  recallBotId?: string | null;
+  startedAt: string;
+}) {
+  return {
+    id: overrides.id,
+    teamId: "team_123",
+    title: overrides.title,
+    platform: "google_meet",
+    status: overrides.status,
+    transcriptJobStatus: null,
+    recallBotId: overrides.recallBotId ?? null,
+    startedAt: new Date(overrides.startedAt),
+    createdAt: new Date(overrides.startedAt),
+    calendarAttendeeEmails: null,
+  };
+}

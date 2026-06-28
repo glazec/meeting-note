@@ -23,6 +23,7 @@ vi.mock("@/lib/team-vocabulary", () => ({
 vi.mock("@/lib/meeting-queries", () => ({
   getMeetingTranscriptForWorkspace: vi.fn(),
   getWorkspaceMeetingTranscript: vi.fn(),
+  listMeetingLibraryPageForWorkspace: vi.fn(),
   listMeetingsForWorkspace: vi.fn(),
   listWorkspaceShareRecipients: vi.fn(),
   listWorkspaceMeetings: vi.fn(),
