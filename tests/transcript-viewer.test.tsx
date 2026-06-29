@@ -2,8 +2,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  applySpeakerUpdateToSegments,
   getWaveformHoverSnapshot,
   TranscriptViewer,
+  type EditingSpeaker,
+  type TranscriptSegment,
 } from "@/components/transcript-viewer";
 
 vi.mock("next/navigation", () => ({
@@ -24,6 +27,16 @@ const segments = [
 const pacedText = Array.from({ length: 60 }, (_, index) => `word${index}`).join(
   " ",
 );
+
+function makeSegment(id: string, speaker: string): TranscriptSegment {
+  return {
+    id,
+    speaker,
+    startMs: 0,
+    endMs: 1000,
+    text: "Hello",
+  };
+}
 
 describe("TranscriptViewer", () => {
   it("hides speaker editing when no meeting id is provided", () => {
@@ -77,6 +90,118 @@ describe("TranscriptViewer", () => {
     );
 
     expect(html).toContain('aria-label="Rename Speaker 1 everywhere"');
+  });
+
+  it("merges obvious speaker aliases in the speaker list and transcript rows", () => {
+    const html = renderToStaticMarkup(
+      <TranscriptViewer
+        audioUrl="/audio.mp3"
+        meetingId="11111111-1111-4111-8111-111111111111"
+        segments={[
+          {
+            id: "segment_yiping",
+            speaker: "Yiping Lu",
+            startMs: 0,
+            endMs: 1000,
+            text: "Hello",
+          },
+          {
+            id: "segment_yiping_alias",
+            speaker: "YiPing Lu",
+            startMs: 1000,
+            endMs: 2000,
+            text: "Hi",
+          },
+          {
+            id: "segment_siddharth",
+            speaker: "Siddharth Singh",
+            startMs: 2000,
+            endMs: 3000,
+            text: "Good morning",
+          },
+          {
+            id: "segment_siddharth_handle",
+            speaker: "Siddharth77work",
+            startMs: 3000,
+            endMs: 3001,
+            text: "Yes",
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain("Yiping Lu");
+    expect(html).not.toContain("YiPing Lu");
+    expect(html).toContain("Siddharth Singh");
+    expect(html).not.toContain("Siddharth77work");
+  });
+
+  it("offers speaker voice previews when meeting audio is available", () => {
+    const html = renderToStaticMarkup(
+      <TranscriptViewer
+        audioUrl="/audio.mp3"
+        meetingId="11111111-1111-4111-8111-111111111111"
+        segments={segments}
+      />,
+    );
+
+    expect(html).toContain('aria-label="Preview Speaker 1"');
+  });
+
+  it("merges speaker aliases when applying to the same speaker", () => {
+    const editingSpeaker: EditingSpeaker = {
+      allowSegmentScope: false,
+      currentSpeaker: "Speaker 2",
+      segmentId: "segment_alias",
+      speakerAliases: ["YiPing Lu"],
+      speakerKey: "Speaker 2",
+    };
+
+    expect(
+      applySpeakerUpdateToSegments(
+        [
+          makeSegment("segment_alias", "Speaker 2"),
+          makeSegment("segment_case", "YiPing Lu"),
+          makeSegment("segment_existing", "Yiping Lu"),
+          makeSegment("segment_other", "Siddharth Singh"),
+        ],
+        editingSpeaker,
+        "matching_speaker",
+        "Yiping Lu",
+      ).map((segment) => [segment.id, segment.speaker]),
+    ).toEqual([
+      ["segment_alias", "Yiping Lu"],
+      ["segment_case", "Yiping Lu"],
+      ["segment_existing", "Yiping Lu"],
+      ["segment_other", "Siddharth Singh"],
+    ]);
+  });
+
+  it("keeps line scoped speaker corrections limited to one segment", () => {
+    const editingSpeaker: EditingSpeaker = {
+      allowSegmentScope: true,
+      currentSpeaker: "Speaker 2",
+      segmentId: "segment_alias",
+      speakerAliases: ["YiPing Lu"],
+      speakerKey: "Speaker 2",
+    };
+
+    expect(
+      applySpeakerUpdateToSegments(
+        [
+          makeSegment("segment_alias", "Speaker 2"),
+          makeSegment("segment_case", "YiPing Lu"),
+          makeSegment("segment_existing", "Yiping Lu"),
+        ],
+        editingSpeaker,
+        "segment",
+        "Yiping Lu",
+      ).map((segment) => [segment.id, segment.speaker]),
+    ).toEqual([
+      ["segment_alias", "Yiping Lu"],
+      ["segment_case", "YiPing Lu"],
+      ["segment_existing", "Yiping Lu"],
+    ]);
   });
 
   it("shows Chinese translation first with original text on hover", () => {

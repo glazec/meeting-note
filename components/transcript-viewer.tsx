@@ -47,14 +47,15 @@ export type SpeakerSuggestion = {
   name: string;
 };
 
-type EditingSpeaker = {
+export type EditingSpeaker = {
   allowSegmentScope: boolean;
   currentSpeaker: string | null;
+  speakerAliases: string[];
   segmentId: string;
   speakerKey: string;
 };
 
-type SpeakerApplyScope = "matching_speaker" | "segment";
+export type SpeakerApplyScope = "matching_speaker" | "segment";
 
 const WAVEFORM_DESKTOP_BAR_COUNT = 120;
 const WAVEFORM_MOBILE_BAR_COUNT = 56;
@@ -97,6 +98,25 @@ type WpmSample = {
   endSecond: number;
   startSecond: number;
   wordCount: number;
+};
+
+type SpeakerStat = {
+  aliases: string[];
+  lineCount: number;
+  percent: number;
+  previewStartMs: number;
+  speaker: string | null;
+  speakerKey: string;
+  totalMs: number;
+};
+
+type SpeakerStatDraft = {
+  aliases: Map<string, { index: number; lineCount: number; totalMs: number }>;
+  lineCount: number;
+  previewStartMs: number;
+  speaker: string | null;
+  speakerKey: string;
+  totalMs: number;
 };
 
 type TranscriptTextToken = {
@@ -232,43 +252,41 @@ export function TranscriptViewer({
       })?.id ?? null
     );
   }, [currentTime, segments]);
-  const speakerStats = useMemo(() => {
-    const speakerDurations = new Map<
-      string,
-      { speaker: string | null; totalMs: number }
-    >();
-    let totalMs = 0;
+  const speakerStats = useMemo(() => buildSpeakerStats(segments), [segments]);
+  const speakerStatByRawKey = useMemo(() => {
+    const statsByRawKey = new Map<string, SpeakerStat>();
 
-    for (const segment of segments) {
-      const durationMs = Math.max(
-        1,
-        (segment.endMs ?? segment.startMs) - segment.startMs,
-      );
-      const speakerKey = getSpeakerKey(segment.speaker);
-      const current = speakerDurations.get(speakerKey) ?? {
-        speaker: segment.speaker,
-        totalMs: 0,
-      };
+    for (const speaker of speakerStats) {
+      statsByRawKey.set(getSpeakerKey(speaker.speaker), speaker);
 
-      current.totalMs += durationMs;
-      totalMs += durationMs;
-      speakerDurations.set(speakerKey, current);
+      for (const alias of speaker.aliases) {
+        statsByRawKey.set(getSpeakerKey(alias), speaker);
+      }
     }
 
-    return Array.from(speakerDurations.values())
-      .map((speaker) => ({
-        ...speaker,
-        percent: totalMs ? Math.round((speaker.totalMs / totalMs) * 100) : 0,
-      }))
-      .sort((left, right) => right.totalMs - left.totalMs);
-  }, [segments]);
+    return statsByRawKey;
+  }, [speakerStats]);
+  const displaySegments = useMemo(
+    () =>
+      segments.map((segment) => ({
+        ...segment,
+        speaker:
+          speakerStatByRawKey.get(getSpeakerKey(segment.speaker))?.speaker ??
+          segment.speaker,
+      })),
+    [segments, speakerStatByRawKey],
+  );
 
   function startEditing(speaker: string | null, segmentId?: string) {
-    const speakerKey = getSpeakerKey(speaker);
+    const speakerStat = speakerStatByRawKey.get(getSpeakerKey(speaker));
+    const speakerKey = speakerStat?.speakerKey ?? getSpeakerKey(speaker);
     const targetSegmentId =
       segmentId ??
-      segments.find((segment) => getSpeakerKey(segment.speaker) === speakerKey)
-        ?.id;
+      segments.find((segment) =>
+        speakerStat
+          ? isSpeakerInStat(segment.speaker, speakerStat)
+          : getSpeakerKey(segment.speaker) === speakerKey,
+      )?.id;
 
     if (!targetSegmentId) {
       return;
@@ -277,10 +295,11 @@ export function TranscriptViewer({
     setEditingSpeaker({
       allowSegmentScope: Boolean(segmentId),
       currentSpeaker: speaker,
+      speakerAliases: speakerStat?.aliases ?? [],
       segmentId: targetSegmentId,
       speakerKey,
     });
-    setDraftSpeaker(speaker ?? "");
+    setDraftSpeaker(speakerStat?.speaker ?? speaker ?? "");
     setSpeakerApplyScope("matching_speaker");
     setErrorSpeakerKey(null);
   }
@@ -312,6 +331,7 @@ export function TranscriptViewer({
         },
         body: JSON.stringify({
           applyTo: speakerApplyScope,
+          currentSpeakerAliases: editingSpeaker.speakerAliases,
           currentSpeaker: editingSpeaker.currentSpeaker,
           segmentId: editingSpeaker.segmentId,
           speaker,
@@ -327,14 +347,11 @@ export function TranscriptViewer({
     }
 
     setSegments((currentSegments) =>
-      currentSegments.map((segment) =>
-        speakerApplyScope === "segment"
-          ? segment.id === editingSpeaker.segmentId
-            ? { ...segment, speaker }
-            : segment
-          : getSpeakerKey(segment.speaker) === speakerKey
-          ? { ...segment, speaker }
-          : segment,
+      applySpeakerUpdateToSegments(
+        currentSegments,
+        editingSpeaker,
+        speakerApplyScope,
+        speaker,
       ),
     );
     setEditingSpeaker(null);
@@ -371,10 +388,12 @@ export function TranscriptViewer({
   function renderSpeakerEditor({
     hasError,
     isSaving,
+    previewStartMs,
     showScope,
   }: {
     hasError: boolean;
     isSaving: boolean;
+    previewStartMs?: number | null;
     showScope: boolean;
   }) {
     return (
@@ -398,6 +417,20 @@ export function TranscriptViewer({
               />
             ))}
           </datalist>
+          {typeof previewStartMs === "number" && canSeekTranscript ? (
+            <Button
+              aria-label="Preview speaker voice"
+              disabled={isSaving}
+              onClick={() => seekTo(previewStartMs)}
+              size="sm"
+              title="Preview speaker voice"
+              type="button"
+              variant="outline"
+            >
+              <Play className="size-3.5" />
+              Preview
+            </Button>
+          ) : null}
           <Button
             aria-label="Save speaker"
             disabled={isSaving}
@@ -418,7 +451,10 @@ export function TranscriptViewer({
           </Button>
         </div>
         {speakerSuggestions.length > 0 ? (
-          <div aria-label="Speaker suggestions" className="flex flex-wrap gap-1.5">
+          <div
+            aria-label="Speaker suggestions"
+            className="flex flex-wrap gap-1.5"
+          >
             {speakerSuggestions.slice(0, 8).map((suggestion) => (
               <button
                 className="inline-flex h-7 max-w-full items-center rounded-md border px-2 text-xs font-medium text-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
@@ -444,7 +480,7 @@ export function TranscriptViewer({
               onClick={() => setSpeakerApplyScope("matching_speaker")}
               type="button"
             >
-              All matching
+              Same speaker
             </button>
             <button
               aria-pressed={speakerApplyScope === "segment"}
@@ -609,72 +645,95 @@ export function TranscriptViewer({
             ) : null}
             <div className="mb-5 border-t py-4">
               <h3 className="text-sm font-semibold">Speakers</h3>
-              <div className="mt-3 flex min-w-0 flex-wrap gap-2">
+              <div className="mt-3 grid min-w-0 gap-2 sm:grid-cols-2">
                 {speakerStats.map((speaker) => {
                   const speakerLabel = speaker.speaker ?? "Unknown speaker";
-                  const speakerKey = getSpeakerKey(speaker.speaker);
+                  const speakerKey = speaker.speakerKey;
                   const isSummaryEditing =
                     editingSpeaker?.speakerKey === speakerKey &&
                     !editingSpeaker.allowSegmentScope;
                   const isSaving = savingSpeakerKey === speakerKey;
                   const hasError = errorSpeakerKey === speakerKey;
-                  const content = (
-                    <>
-                      <span
-                        aria-hidden="true"
-                        className="size-2.5 rounded-full"
-                        style={{
-                          backgroundColor: getWaveformSpeakerColor(
-                            speaker.speaker,
-                          ),
-                        }}
-                      />
-                      <span>{speakerLabel}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {speaker.percent}%
-                      </span>
-                    </>
-                  );
 
                   if (canEditSpeakers && isSummaryEditing) {
                     return (
-                      <div className="w-full" key={speakerKey}>
+                      <div className="sm:col-span-2" key={speakerKey}>
                         {renderSpeakerEditor({
                           hasError,
                           isSaving,
+                          previewStartMs: speaker.previewStartMs,
                           showScope: false,
                         })}
                       </div>
                     );
                   }
 
-                  return canEditSpeakers ? (
-                    <button
-                      aria-label={`Rename ${speakerLabel} everywhere`}
-                      className="inline-flex h-8 items-center gap-2 rounded-md border px-2 text-sm font-medium outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
+                  return (
+                    <div
+                      className="flex min-w-0 items-center justify-between gap-2 rounded-lg border bg-background p-2.5"
                       key={speakerKey}
-                      onClick={() => startEditing(speaker.speaker)}
                       title={`Rename ${speakerLabel} everywhere`}
-                      type="button"
                     >
-                      {content}
-                    </button>
-                  ) : (
-                    <span
-                      className="inline-flex h-8 items-center gap-2 rounded-md border px-2 text-sm font-medium"
-                      key={speakerKey}
-                      title={speakerLabel}
-                    >
-                      {content}
-                    </span>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span
+                          aria-hidden="true"
+                          className="size-2.5 rounded-full"
+                          style={{
+                            backgroundColor: getWaveformSpeakerColor(
+                              speaker.speaker,
+                            ),
+                          }}
+                        />
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold">
+                            {speakerLabel}
+                          </p>
+                          <p className="text-xs font-medium text-muted-foreground">
+                            {speaker.percent}% ·{" "}
+                            {formatLineCount(speaker.lineCount)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        {canSeekTranscript ? (
+                          <Button
+                            aria-label={`Preview ${speakerLabel}`}
+                            onClick={() => seekTo(speaker.previewStartMs)}
+                            size="icon-sm"
+                            title={`Preview ${speakerLabel}`}
+                            type="button"
+                            variant="outline"
+                          >
+                            <Play className="size-3.5" />
+                          </Button>
+                        ) : null}
+                        {canEditSpeakers ? (
+                          <Button
+                            aria-label={`Rename ${speakerLabel} everywhere`}
+                            onClick={() => startEditing(speaker.speaker)}
+                            size="icon-sm"
+                            title={`Rename ${speakerLabel} everywhere`}
+                            type="button"
+                            variant="outline"
+                          >
+                            <Pencil className="size-3.5" />
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
                   );
                 })}
               </div>
             </div>
             <ol className="border-t">
               {segments.map((segment, index) => {
-                const speakerLabel = segment.speaker ?? "Unknown speaker";
-                const speakerKey = getSpeakerKey(segment.speaker);
+                const speakerStat = speakerStatByRawKey.get(
+                  getSpeakerKey(segment.speaker),
+                );
+                const displaySpeaker = speakerStat?.speaker ?? segment.speaker;
+                const speakerLabel = displaySpeaker ?? "Unknown speaker";
+                const speakerKey =
+                  speakerStat?.speakerKey ?? getSpeakerKey(segment.speaker);
                 const isEditing =
                   editingSpeaker?.allowSegmentScope &&
                   editingSpeaker.segmentId === segment.id;
@@ -722,7 +781,7 @@ export function TranscriptViewer({
                       className="mt-1 flex size-7 items-center justify-center rounded-full text-xs font-semibold text-white shadow-sm"
                       style={{
                         backgroundColor: getWaveformSpeakerColor(
-                          segment.speaker,
+                          displaySpeaker,
                         ),
                       }}
                     >
@@ -734,13 +793,16 @@ export function TranscriptViewer({
                           renderSpeakerEditor({
                             hasError,
                             isSaving,
+                            previewStartMs: segment.startMs,
                             showScope: true,
                           })
                         ) : canEditSpeakers ? (
                           <button
                             aria-label={`Edit speaker ${speakerLabel}`}
                             className="group inline-flex min-h-8 items-center gap-2 rounded-lg px-0 text-left text-sm font-semibold text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-                            onClick={() => startEditing(segment.speaker, segment.id)}
+                            onClick={() =>
+                              startEditing(segment.speaker, segment.id)
+                            }
                             type="button"
                           >
                             <span>
@@ -845,7 +907,7 @@ export function TranscriptViewer({
           duration={duration}
           isPlaying={isPlaying}
           playbackRate={playbackRate}
-          segments={segments}
+          segments={displaySegments}
           onTimelineSeek={scrollTranscriptToTime}
           setCurrentTime={setCurrentTime}
           setDuration={setDuration}
@@ -2015,6 +2077,235 @@ function getSegmentTimelineDuration(segments: TranscriptSegment[]) {
   return Math.max(lastSegment.endMs ?? lastSegment.startMs, 0) / 1000;
 }
 
+function buildSpeakerStats(segments: TranscriptSegment[]): SpeakerStat[] {
+  const drafts: SpeakerStatDraft[] = [];
+  let allSpeakerMs = 0;
+
+  segments.forEach((segment, index) => {
+    const durationMs = Math.max(
+      1,
+      (segment.endMs ?? segment.startMs) - segment.startMs,
+    );
+    const matchingDraft = drafts.find((draft) =>
+      shouldMergeSpeakerLabels(draft.speaker, segment.speaker),
+    );
+    const draft =
+      matchingDraft ??
+      createSpeakerStatDraft(segment.speaker, segment.startMs, index);
+
+    if (!matchingDraft) {
+      drafts.push(draft);
+    }
+
+    draft.totalMs += durationMs;
+    draft.lineCount += 1;
+    draft.previewStartMs = Math.min(draft.previewStartMs, segment.startMs);
+    allSpeakerMs += durationMs;
+
+    if (segment.speaker) {
+      const alias = segment.speaker.trim();
+      const currentAlias = draft.aliases.get(alias) ?? {
+        index,
+        lineCount: 0,
+        totalMs: 0,
+      };
+
+      currentAlias.lineCount += 1;
+      currentAlias.totalMs += durationMs;
+      draft.aliases.set(alias, currentAlias);
+      draft.speaker = chooseSpeakerDisplay(draft);
+      draft.speakerKey = getSpeakerKey(draft.speaker);
+    }
+  });
+
+  return drafts
+    .map((draft) => ({
+      aliases: Array.from(draft.aliases.keys()).filter(
+        (alias) => alias !== draft.speaker,
+      ),
+      lineCount: draft.lineCount,
+      percent: allSpeakerMs
+        ? Math.round((draft.totalMs / allSpeakerMs) * 100)
+        : 0,
+      previewStartMs: draft.previewStartMs,
+      speaker: draft.speaker,
+      speakerKey: draft.speakerKey,
+      totalMs: draft.totalMs,
+    }))
+    .sort((left, right) => right.totalMs - left.totalMs);
+}
+
+function createSpeakerStatDraft(
+  speaker: string | null,
+  previewStartMs: number,
+  index: number,
+): SpeakerStatDraft {
+  const aliases = new Map<
+    string,
+    { index: number; lineCount: number; totalMs: number }
+  >();
+  const trimmedSpeaker = speaker?.trim() || null;
+
+  if (trimmedSpeaker) {
+    aliases.set(trimmedSpeaker, { index, lineCount: 0, totalMs: 0 });
+  }
+
+  return {
+    aliases,
+    lineCount: 0,
+    previewStartMs,
+    speaker: trimmedSpeaker,
+    speakerKey: getSpeakerKey(trimmedSpeaker),
+    totalMs: 0,
+  };
+}
+
+function chooseSpeakerDisplay(draft: SpeakerStatDraft) {
+  const candidates = Array.from(draft.aliases.entries());
+
+  if (candidates.length === 0) {
+    return draft.speaker;
+  }
+
+  return candidates
+    .toSorted(([leftLabel, left], [rightLabel, right]) => {
+      const qualityDifference =
+        getSpeakerLabelQuality(rightLabel) - getSpeakerLabelQuality(leftLabel);
+
+      if (qualityDifference !== 0) {
+        return qualityDifference;
+      }
+
+      if (right.totalMs !== left.totalMs) {
+        return right.totalMs - left.totalMs;
+      }
+
+      if (right.lineCount !== left.lineCount) {
+        return right.lineCount - left.lineCount;
+      }
+
+      return left.index - right.index;
+    })[0]?.[0] ?? draft.speaker;
+}
+
+function getSpeakerLabelQuality(label: string) {
+  if (isCleanFullName(label)) {
+    return 2;
+  }
+
+  if (isNoisySpeakerHandle(label)) {
+    return 0;
+  }
+
+  return 1;
+}
+
+function isSpeakerInStat(speaker: string | null, stat: SpeakerStat) {
+  if (getSpeakerKey(speaker) === stat.speakerKey) {
+    return true;
+  }
+
+  return Boolean(speaker && stat.aliases.includes(speaker));
+}
+
+export function applySpeakerUpdateToSegments(
+  segments: TranscriptSegment[],
+  editingSpeaker: EditingSpeaker,
+  speakerApplyScope: SpeakerApplyScope,
+  speaker: string,
+) {
+  return segments.map((segment) =>
+    shouldApplySpeakerUpdate(segment, editingSpeaker, speakerApplyScope, speaker)
+      ? { ...segment, speaker }
+      : segment,
+  );
+}
+
+function shouldApplySpeakerUpdate(
+  segment: TranscriptSegment,
+  editingSpeaker: EditingSpeaker,
+  speakerApplyScope: SpeakerApplyScope,
+  nextSpeaker: string,
+) {
+  const normalizedNextSpeaker = getNormalizedSpeakerKey(nextSpeaker);
+
+  if (speakerApplyScope === "segment") {
+    return segment.id === editingSpeaker.segmentId;
+  }
+
+  if (getNormalizedSpeakerKey(segment.speaker) === normalizedNextSpeaker) {
+    return true;
+  }
+
+  return (
+    getSpeakerKey(segment.speaker) ===
+      getSpeakerKey(editingSpeaker.currentSpeaker) ||
+    Boolean(
+      segment.speaker && editingSpeaker.speakerAliases.includes(segment.speaker),
+    )
+  );
+}
+
+function shouldMergeSpeakerLabels(
+  left: string | null,
+  right: string | null,
+) {
+  if (getNormalizedSpeakerKey(left) === getNormalizedSpeakerKey(right)) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return (
+    isLikelyNoisyAliasForFullName(left, right) ||
+    isLikelyNoisyAliasForFullName(right, left)
+  );
+}
+
+function isLikelyNoisyAliasForFullName(fullName: string, alias: string) {
+  return (
+    isCleanFullName(fullName) &&
+    isNoisySpeakerHandle(alias) &&
+    getSpeakerFirstName(fullName) === getSpeakerHandlePrefix(alias)
+  );
+}
+
+function isCleanFullName(label: string) {
+  return getSpeakerNameWords(label).length >= 2 && !/\d/.test(label);
+}
+
+function isNoisySpeakerHandle(label: string) {
+  const trimmed = label.trim();
+
+  return (
+    !/\s/.test(trimmed) &&
+    (/\d/.test(trimmed) ||
+      /(desktop|home|ipad|iphone|macbook|phone|work)$/i.test(trimmed))
+  );
+}
+
+function getSpeakerFirstName(label: string) {
+  return getSpeakerNameWords(label)[0]?.toLowerCase() ?? "";
+}
+
+function getSpeakerHandlePrefix(label: string) {
+  return label.trim().match(/^[A-Za-z]+/)?.[0].toLowerCase() ?? "";
+}
+
+function getSpeakerNameWords(label: string) {
+  return label
+    .trim()
+    .split(/\s+/)
+    .map((word) => word.replace(/[^A-Za-z]/g, ""))
+    .filter(Boolean);
+}
+
+function formatLineCount(count: number) {
+  return count === 1 ? "1 line" : `${count} lines`;
+}
+
 function findSegmentAtTime(segments: TranscriptSegment[], currentMs: number) {
   return (
     segments.find((segment, index) => {
@@ -2064,6 +2355,16 @@ function clamp(value: number, min: number, max: number) {
 
 function getSpeakerKey(speaker: string | null) {
   return speaker ?? "__unknown__";
+}
+
+function getNormalizedSpeakerKey(speaker: string | null) {
+  return (
+    speaker
+      ?.trim()
+      .toLowerCase()
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ") || "__unknown__"
+  );
 }
 
 function getSpeakerInitial(speaker: string) {

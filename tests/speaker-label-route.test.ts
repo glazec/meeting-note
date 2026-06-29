@@ -123,6 +123,38 @@ describe("PATCH /api/meetings/[meetingId]/speakers", () => {
     });
   });
 
+  it("accepts speaker aliases so one save can merge existing name variants", async () => {
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({ teamId: "team_123" });
+    limit.mockResolvedValue([{ id: "11111111-1111-4111-8111-111111111111" }]);
+    set.mockReturnValue({ where });
+    where.mockResolvedValue(undefined);
+
+    const response = await patchSpeakerLabel({
+      applyTo: "matching_speaker",
+      currentSpeaker: "Speaker 2",
+      currentSpeakerAliases: ["YiPing Lu"],
+      speaker: "Yiping Lu",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      applyTo: "matching_speaker",
+      segmentId: null,
+      updated: true,
+      speaker: "Yiping Lu",
+    });
+    expect(set).toHaveBeenCalledWith({
+      speaker: "Yiping Lu",
+      updatedAt: expect.any(Date),
+    });
+    expect(where).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects segment scoped updates without a segment id", async () => {
     getCurrentUser.mockResolvedValue({
       id: "user_123",

@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
@@ -16,6 +16,10 @@ const speakerUpdateSchema = z
         typeof value === "string" && value.trim() === "" ? null : value,
       z.string().trim().min(1).nullable(),
     ),
+    currentSpeakerAliases: z
+      .array(z.string().trim().min(1).max(80))
+      .max(20)
+      .default([]),
     segmentId: z.string().uuid().optional(),
     speaker: z.string().trim().min(1).max(80),
   })
@@ -70,12 +74,7 @@ export async function PATCH(
     return Response.json({ error: "Meeting not found" }, { status: 404 });
   }
 
-  const targetFilter =
-    result.data.applyTo === "segment"
-      ? eq(transcriptSegments.id, result.data.segmentId!)
-      : result.data.currentSpeaker
-        ? eq(transcriptSegments.speaker, result.data.currentSpeaker)
-        : isNull(transcriptSegments.speaker);
+  const targetFilter = getSpeakerUpdateFilter(result.data);
 
   await db
     .update(transcriptSegments)
@@ -93,4 +92,33 @@ export async function PATCH(
     updated: true,
     speaker: result.data.speaker,
   });
+}
+
+function getSpeakerUpdateFilter(input: z.infer<typeof speakerUpdateSchema>) {
+  const normalizedSpeaker = input.speaker.trim().toLowerCase();
+  const matchingTargetSpeaker = sql`${transcriptSegments.speaker} is not null and lower(btrim(${transcriptSegments.speaker})) = ${normalizedSpeaker}`;
+
+  if (input.applyTo === "segment") {
+    return eq(transcriptSegments.id, input.segmentId!);
+  }
+
+  const filters: SQL[] = [
+    input.currentSpeaker
+      ? eq(transcriptSegments.speaker, input.currentSpeaker)
+      : isNull(transcriptSegments.speaker),
+    matchingTargetSpeaker,
+  ];
+  const aliases = Array.from(new Set(input.currentSpeakerAliases));
+
+  if (aliases.length > 0) {
+    filters.push(inArray(transcriptSegments.speaker, aliases));
+  }
+
+  return combineFilters(filters);
+}
+
+function combineFilters(filters: SQL[]) {
+  const [first, ...rest] = filters;
+
+  return rest.length > 0 ? or(first, ...rest)! : first;
 }
