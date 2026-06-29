@@ -46,9 +46,18 @@ describe("AppShell", () => {
     const newMeetingLink =
       html.match(/<a[^>]+href="\/meetings\/new"[^>]*>New meeting<\/a>/)?.[0] ??
       "";
+    const primaryNav = html.slice(
+      html.indexOf("<nav"),
+      html.indexOf("</nav>"),
+    );
+    const dashboardLinkIndex = primaryNav.indexOf('href="/dashboard"');
+    const newMeetingLinkIndex = primaryNav.indexOf('href="/meetings/new"');
 
     expect(newMeetingLink).toContain("bg-primary");
     expect(newMeetingLink).toContain("text-primary-foreground");
+    expect(newMeetingLinkIndex).toBeGreaterThan(-1);
+    expect(dashboardLinkIndex).toBeGreaterThan(-1);
+    expect(newMeetingLinkIndex).toBeLessThan(dashboardLinkIndex);
   });
 
   it("hides creator navigation for read only users", () => {

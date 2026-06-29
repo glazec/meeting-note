@@ -209,7 +209,6 @@ function MeetingTableRow({
   return (
     <TableRow
       aria-expanded={relatedCount > 0 ? isExpanded : undefined}
-      className={isChild ? "bg-muted/20 hover:bg-muted/40" : undefined}
     >
       <TableCell className="min-w-56">
         <MeetingTitleCell
@@ -264,12 +263,14 @@ function MeetingTitleCell({
   });
 
   return (
-    <div className="flex min-w-0 items-start gap-1">
+    <div
+      className={`flex min-w-0 items-start gap-1${isChild ? " pl-5" : ""}`}
+    >
       {relatedCount > 0 ? (
         <Button
           aria-expanded={isExpanded}
           aria-label={`${isExpanded ? "Collapse" : "Expand"} ${meeting.title}`}
-          className="mt-0.5 size-5 rounded-md"
+          className="mt-0.5 size-5 shrink-0 rounded-md"
           onClick={onToggle}
           size="icon-xs"
           type="button"
@@ -284,11 +285,11 @@ function MeetingTitleCell({
       ) : isChild ? (
         <span
           aria-hidden="true"
-          className="mt-0.5 flex size-5 items-center justify-center"
-        >
-          <span className="block h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
-        </span>
-      ) : null}
+          className="mt-0.5 flex size-5 shrink-0 items-center justify-center"
+        />
+      ) : (
+        <span aria-hidden="true" className="mt-0.5 flex size-5 shrink-0" />
+      )}
       <div className="min-w-0">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <Link

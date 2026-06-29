@@ -139,6 +139,8 @@ describe("DashboardWorkflowSummary", () => {
 
     expect(html).toContain("Upcoming joins");
     expect(html).toContain("Founder follow up");
+    expect(html).toContain("Auto join");
+    expect(html).toContain("bg-secondary");
     expect(html).not.toContain("Ready for review");
     expect(html).not.toContain("Needs attention");
   });

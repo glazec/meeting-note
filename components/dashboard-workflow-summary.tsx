@@ -26,7 +26,7 @@ export function DashboardWorkflowSummary({
         label="Upcoming joins"
         value={summary.upcomingBotJoins}
         badge="Auto join"
-        badgeVariant={summary.scheduledWithoutBot ? "destructive" : "secondary"}
+        badgeVariant="secondary"
         detail={<UpcomingJoinDetail summary={summary} />}
       />
       <UserStatsTile stats={summary.userStats} />
