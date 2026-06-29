@@ -28,6 +28,7 @@ import {
 } from "@/lib/meeting-display-status";
 import { LocalDateTime } from "@/components/local-date-time";
 import type { MeetingLibrarySort } from "@/lib/meeting-library-view-options";
+import { cn } from "@/lib/utils";
 
 type MeetingListBaseItem = {
   id: string;
@@ -105,10 +106,10 @@ export function MeetingList({
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border bg-card">
+    <div className="bg-card">
       <Table>
-        <TableHeader className="bg-muted/45">
-          <TableRow className="hover:bg-muted/45">
+        <TableHeader className="bg-muted/30">
+          <TableRow className="hover:bg-muted/30">
             <TableHead aria-sort={getHeaderAriaSort("title", sort)}>
               <SortableHeader
                 activeDirection={getSortDirection("title", sort)}
@@ -210,11 +211,11 @@ function RelatedHistoryRow({
   months?: number;
 }) {
   return (
-    <TableRow className="hover:bg-muted/25">
-      <TableCell colSpan={6} className="py-3 pl-14">
+    <TableRow className="bg-muted/15 hover:bg-muted/25">
+      <TableCell colSpan={6} className="py-3 pl-16">
         <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
           <Link
-            className="inline-flex h-8 items-center gap-2 rounded-lg border bg-background px-3 text-sm font-medium text-foreground hover:bg-muted"
+            className="inline-flex h-8 items-center gap-2 rounded-lg px-3 text-sm font-medium text-foreground hover:bg-muted"
             href={href}
           >
             <History aria-hidden="true" className="size-4" />
@@ -256,7 +257,7 @@ function MeetingTableRow({
   return (
     <TableRow
       aria-expanded={relatedCount > 0 ? isExpanded : undefined}
-      className={isChild ? "hover:bg-muted/35" : undefined}
+      className={cn(isChild && "bg-muted/15 hover:bg-muted/30")}
     >
       <TableCell className="min-w-56 py-3">
         <MeetingTitleCell
@@ -312,7 +313,11 @@ function MeetingTitleCell({
 
   return (
     <div
-      className={`flex min-w-0 items-start gap-1${isChild ? " pl-5" : ""}`}
+      className={cn(
+        "flex min-w-0 items-start gap-1",
+        isChild &&
+          "relative pl-8 before:absolute before:bottom-1 before:left-3 before:top-1 before:w-px before:bg-border",
+      )}
     >
       {relatedCount > 0 ? (
         <Button

@@ -157,7 +157,7 @@ describe("MeetingList", () => {
     expect(html).toContain("Ready");
     expect(html).toContain("David &lt;&gt; YP");
     expect(html).toContain("size-5 shrink-0");
-    expect(html).toContain("items-start gap-1 pl-5");
+    expect(html).toContain("items-start gap-1 relative pl-8");
     expect(html).not.toContain("rounded-full bg-muted-foreground/40");
     expect(html).not.toContain("bg-muted/20");
     expect(html).not.toContain("has-aria-expanded:bg-muted/50");

@@ -150,8 +150,8 @@ export default async function DashboardPage({
           ) : null}
         </div>
 
-        <Card className="shadow-sm">
-          <CardHeader className="border-b bg-muted/35">
+        <Card className="gap-0 py-0 shadow-sm">
+          <CardHeader className="border-b bg-muted/25 px-4 py-4 sm:px-5">
             <CardTitle>Meeting library</CardTitle>
             <CardDescription>
               {accessSummary.isSharedOnly
@@ -159,23 +159,23 @@ export default async function DashboardPage({
                 : "Recent transcripts, scheduled joins, and recordings that need review."}
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col gap-5">
-            <MeetingLibraryViewBar
-              activeViewConfig={activeViewConfig}
-              historyMonths={meetingLibraryPage.historyMonths}
-              hasSavedView={Boolean(savedViewConfig)}
-              relatedHistoryMonths={meetingLibraryPage.relatedHistoryMonths}
-              syncCalendar={syncCalendar}
-            />
-            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-              <MeetingLibraryControls
+          <CardContent className="flex flex-col px-0">
+            <div className="border-b px-4 py-3 sm:px-5">
+              <MeetingLibraryViewBar
                 activeViewConfig={activeViewConfig}
                 historyMonths={meetingLibraryPage.historyMonths}
-                isSharedOnly={accessSummary.isSharedOnly}
+                hasSavedView={Boolean(savedViewConfig)}
                 relatedHistoryMonths={meetingLibraryPage.relatedHistoryMonths}
                 syncCalendar={syncCalendar}
               />
             </div>
+            <MeetingLibraryControls
+              activeViewConfig={activeViewConfig}
+              historyMonths={meetingLibraryPage.historyMonths}
+              isSharedOnly={accessSummary.isSharedOnly}
+              relatedHistoryMonths={meetingLibraryPage.relatedHistoryMonths}
+              syncCalendar={syncCalendar}
+            />
 
             <MeetingList
               emptyMessage={
@@ -198,6 +198,7 @@ export default async function DashboardPage({
               })}
             />
             <MeetingLibraryPagination
+              className="border-t px-4 py-3 sm:px-5"
               hasNextPage={meetingLibraryPage.hasNextPage}
               hasOlderMeetings={meetingLibraryPage.hasOlderMeetings}
               hasPreviousPage={meetingLibraryPage.hasPreviousPage}
@@ -355,7 +356,7 @@ function MeetingLibraryControls({
   const syncCalendarValue = getSearchParamValue(syncCalendar);
 
   return (
-    <form className="grid gap-3 rounded-lg border bg-muted/35 p-3 md:grid-cols-[minmax(12rem,1fr)_10rem_10rem_12rem_auto] md:items-end">
+    <form className="grid gap-3 border-b bg-muted/20 px-4 py-3 sm:px-5 md:grid-cols-[minmax(12rem,1fr)_10rem_10rem_12rem_auto] md:items-end">
       {syncCalendarValue ? (
         <input name="syncCalendar" type="hidden" value={syncCalendarValue} />
       ) : null}
@@ -462,6 +463,7 @@ function SelectField({
 }
 
 function MeetingLibraryPagination({
+  className,
   hasNextPage,
   hasOlderMeetings,
   hasPreviousPage,
@@ -472,6 +474,7 @@ function MeetingLibraryPagination({
   previousHref,
   resetHistoryHref,
 }: {
+  className?: string;
   hasNextPage: boolean;
   hasOlderMeetings: boolean;
   hasPreviousPage: boolean;
@@ -494,7 +497,7 @@ function MeetingLibraryPagination({
   return (
     <nav
       aria-label="Meeting library pages"
-      className="flex flex-wrap items-center justify-between gap-3"
+      className={cn("flex flex-wrap items-center justify-between gap-3", className)}
     >
       <span className="text-sm text-muted-foreground">
         Showing last {historyMonths} months{page > 1 ? `, page ${page}` : ""}
