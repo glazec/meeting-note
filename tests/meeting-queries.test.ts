@@ -114,6 +114,19 @@ describe("getWorkspaceMeetingTranscript", () => {
             ]),
           }),
         }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: vi.fn().mockResolvedValue([
+              {
+                id: "55555555-5555-4555-8555-555555555555",
+                capturedAt: new Date("2026-06-29T14:01:05.000Z"),
+                timestampMs: 65000,
+              },
+            ]),
+          }),
+        }),
       });
     const { getWorkspaceMeetingTranscript } = await import(
       "@/lib/meeting-queries"
@@ -151,6 +164,14 @@ describe("getWorkspaceMeetingTranscript", () => {
           normalizedValue: "nascent",
           type: "organization",
           value: "Nascent",
+        },
+      ],
+      visualAssets: [
+        {
+          id: "55555555-5555-4555-8555-555555555555",
+          capturedAt: "2026-06-29T14:01:05.000Z",
+          timestampMs: 65000,
+          url: "/api/meetings/11111111-1111-4111-8111-111111111111/images/55555555-5555-4555-8555-555555555555",
         },
       ],
       transcriptJobStatus: "running",
@@ -207,6 +228,13 @@ describe("getWorkspaceMeetingTranscript", () => {
                 ]),
               }),
             }),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: vi.fn().mockResolvedValue([]),
           }),
         }),
       })

@@ -121,6 +121,7 @@ export default async function MeetingPage({
                 segments={meeting.segments}
                 speakerSuggestions={meeting.speakerSuggestions}
                 translationSummary={meeting.translationSummary}
+                visualAssets={meeting.visualAssets}
               />
             </div>
           </div>

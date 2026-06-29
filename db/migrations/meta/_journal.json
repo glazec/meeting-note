@@ -99,6 +99,13 @@
       "when": 1783600000000,
       "tag": "0013_meeting_bot_profiles",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1783700000000,
+      "tag": "0014_meeting_visual_assets",
+      "breakpoints": true
     }
   ]
 }

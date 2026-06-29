@@ -47,6 +47,13 @@ export type SpeakerSuggestion = {
   name: string;
 };
 
+export type MeetingVisualAsset = {
+  id: string;
+  capturedAt: string | null;
+  timestampMs: number | null;
+  url: string;
+};
+
 export type EditingSpeaker = {
   allowSegmentScope: boolean;
   currentSpeaker: string | null;
@@ -81,6 +88,7 @@ type TranscriptViewerProps = {
   segments: TranscriptSegment[];
   speakerSuggestions?: SpeakerSuggestion[];
   translationSummary?: MeetingTranslationSummary;
+  visualAssets?: MeetingVisualAsset[];
 };
 
 type WaveformSection = {
@@ -192,12 +200,28 @@ function getTranslationStatusBody(summary: MeetingTranslationSummary) {
   return " Start Chinese translation when you need it.";
 }
 
+function formatVisualAssetTimestamp(asset: MeetingVisualAsset) {
+  if (asset.timestampMs !== null) {
+    return formatTimestamp(asset.timestampMs);
+  }
+
+  if (asset.capturedAt) {
+    return new Date(asset.capturedAt).toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+
+  return "unknown time";
+}
+
 export function TranscriptViewer({
   audioUrl,
   meetingId,
   segments: initialSegments,
   speakerSuggestions = [],
   translationSummary,
+  visualAssets = [],
 }: TranscriptViewerProps) {
   const router = useRouter();
   const [segments, setSegments] = useState(initialSegments);
@@ -652,6 +676,12 @@ export function TranscriptViewer({
                 </div>
               </div>
             ) : null}
+            <MeetingVisualTimeline
+              onJumpToTranscript={(timestampMs) =>
+                scrollTranscriptToTime(timestampMs / 1000)
+              }
+              visualAssets={visualAssets}
+            />
             <div className="mb-6">
               <h3 className="text-sm font-semibold">Speakers</h3>
               <div className="mt-3 grid min-w-0 gap-2 sm:grid-cols-2">
@@ -771,6 +801,7 @@ export function TranscriptViewer({
                   : null;
                 return (
                   <li
+                    id={segment.id}
                     key={segment.id}
                     ref={(node) => {
                       if (node) {
@@ -996,6 +1027,109 @@ function getDisplayedEmotionKey(label: TranscriptSegment["emotionLabel"]) {
 
 function normalizeTranscriptDisplayText(text: string) {
   return text.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function MeetingVisualTimeline({
+  onJumpToTranscript,
+  visualAssets,
+}: {
+  onJumpToTranscript: (timestampMs: number) => void;
+  visualAssets: MeetingVisualAsset[];
+}) {
+  const [selectedAsset, setSelectedAsset] = useState<MeetingVisualAsset | null>(
+    null,
+  );
+
+  if (visualAssets.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="mb-5 border-t py-4">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold">Meeting images</h3>
+        <span className="text-xs font-medium text-muted-foreground">
+          {visualAssets.length} captured
+        </span>
+      </div>
+      <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
+        {visualAssets.map((asset) => {
+          const timestampLabel = formatVisualAssetTimestamp(asset);
+          const canJump = asset.timestampMs !== null;
+
+          return (
+            <div
+              className="w-44 shrink-0 overflow-hidden rounded-md border bg-background"
+              key={asset.id}
+            >
+              <button
+                aria-label={`Open image from ${timestampLabel}`}
+                className="block aspect-video w-full overflow-hidden bg-muted outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                onClick={() => setSelectedAsset(asset)}
+                type="button"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element -- protected image routes need browser auth cookies */}
+                <img
+                  alt=""
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                  src={asset.url}
+                />
+              </button>
+              <div className="flex items-center justify-between gap-2 px-2 py-2">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {timestampLabel}
+                </span>
+                <button
+                  className="text-xs font-medium text-primary outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 disabled:text-muted-foreground disabled:no-underline"
+                  disabled={!canJump}
+                  onClick={() => {
+                    if (asset.timestampMs !== null) {
+                      onJumpToTranscript(asset.timestampMs);
+                    }
+                  }}
+                  type="button"
+                >
+                  Jump to transcript
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {selectedAsset ? (
+        <div
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 p-4 backdrop-blur"
+          role="dialog"
+        >
+          <div className="flex max-h-full w-full max-w-5xl flex-col gap-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-semibold">
+                Image from {formatVisualAssetTimestamp(selectedAsset)}
+              </p>
+              <Button
+                onClick={() => setSelectedAsset(null)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Close image
+              </Button>
+            </div>
+            <div className="min-h-0 overflow-hidden rounded-lg border bg-muted">
+              {/* eslint-disable-next-line @next/next/no-img-element -- protected image routes need browser auth cookies */}
+              <img
+                alt=""
+                className="max-h-[80vh] w-full object-contain"
+                src={selectedAsset.url}
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
 }
 
 function TranscriptText({
