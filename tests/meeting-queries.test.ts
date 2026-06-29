@@ -745,6 +745,113 @@ describe("buildMeetingLibraryPage", () => {
     ]);
   });
 
+  it("shows the last six months by default and reports older history", async () => {
+    const { buildMeetingLibraryPage } = await import("@/lib/meeting-queries");
+
+    const page = buildMeetingLibraryPage(
+      [
+        libraryMeeting({
+          id: "11111111-1111-4111-8111-111111111111",
+          title: "Recent founder call",
+          platform: "google_meet",
+          startedAt: "2026-06-27T12:00:00.000Z",
+        }),
+        libraryMeeting({
+          id: "22222222-2222-4222-8222-222222222222",
+          title: "Older board prep",
+          platform: "zoom",
+          startedAt: "2025-11-27T12:00:00.000Z",
+        }),
+      ],
+      { now: new Date("2026-06-28T12:00:00.000Z") },
+    );
+
+    expect(page.historyMonths).toBe(6);
+    expect(page.hasOlderMeetings).toBe(true);
+    expect(page.meetings.map((meeting) => meeting.title)).toEqual([
+      "Recent founder call",
+    ]);
+  });
+
+  it("loads older meetings when the history window expands", async () => {
+    const { buildMeetingLibraryPage } = await import("@/lib/meeting-queries");
+
+    const page = buildMeetingLibraryPage(
+      [
+        libraryMeeting({
+          id: "11111111-1111-4111-8111-111111111111",
+          title: "Recent founder call",
+          platform: "google_meet",
+          startedAt: "2026-06-27T12:00:00.000Z",
+        }),
+        libraryMeeting({
+          id: "22222222-2222-4222-8222-222222222222",
+          title: "Older board prep",
+          platform: "zoom",
+          startedAt: "2025-11-27T12:00:00.000Z",
+        }),
+      ],
+      {
+        historyMonths: 12,
+        now: new Date("2026-06-28T12:00:00.000Z"),
+      },
+    );
+
+    expect(page.historyMonths).toBe(12);
+    expect(page.meetings.map((meeting) => meeting.title)).toEqual([
+      "Recent founder call",
+      "Older board prep",
+    ]);
+  });
+
+  it("keeps older related meetings hidden until the related window expands", async () => {
+    const { buildMeetingLibraryPage } = await import("@/lib/meeting-queries");
+    const meetings = [
+      libraryMeeting({
+        id: "11111111-1111-4111-8111-111111111111",
+        title: "Nascent follow up",
+        platform: "google_meet",
+        primaryEntity: "nascent",
+        startedAt: "2026-06-27T12:00:00.000Z",
+      }),
+      libraryMeeting({
+        id: "22222222-2222-4222-8222-222222222222",
+        title: "Nascent intro",
+        platform: "google_meet",
+        primaryEntity: "nascent",
+        startedAt: "2025-11-27T12:00:00.000Z",
+      }),
+      libraryMeeting({
+        id: "33333333-3333-4333-8333-333333333333",
+        title: "Old unrelated call",
+        platform: "zoom",
+        startedAt: "2025-11-27T12:00:00.000Z",
+      }),
+    ];
+
+    const page = buildMeetingLibraryPage(meetings, {
+      now: new Date("2026-06-28T12:00:00.000Z"),
+    });
+
+    expect(page.meetings).toHaveLength(1);
+    expect(page.meetings[0]).toMatchObject({
+      title: "Nascent follow up",
+      hasMoreRelatedMeetings: true,
+      relatedMeetings: [],
+    });
+
+    const expandedPage = buildMeetingLibraryPage(meetings, {
+      now: new Date("2026-06-28T12:00:00.000Z"),
+      relatedHistoryMonths: 12,
+    });
+
+    expect(expandedPage.meetings).toHaveLength(1);
+    expect(expandedPage.meetings[0]).toMatchObject({
+      title: "Nascent follow up",
+      relatedMeetings: [expect.objectContaining({ title: "Nascent intro" })],
+    });
+  });
+
   it("folds duplicate meeting titles into one tree in smart order", async () => {
     const { buildMeetingLibraryPage } = await import("@/lib/meeting-queries");
 
@@ -932,6 +1039,38 @@ describe("buildMeetingLibraryPage", () => {
       "Failed recording",
     ]);
   });
+
+  it("filters visible library meetings by missed bot joins", async () => {
+    const { buildMeetingLibraryPage } = await import("@/lib/meeting-queries");
+
+    const page = buildMeetingLibraryPage(
+      [
+        {
+          ...libraryMeeting({
+            id: "11111111-1111-4111-8111-111111111111",
+            title: "Missed bot join",
+            platform: "zoom",
+            startedAt: "2026-06-27T12:00:00.000Z",
+          }),
+          status: "missed" as const,
+        },
+        libraryMeeting({
+          id: "22222222-2222-4222-8222-222222222222",
+          title: "Ready transcript",
+          platform: "google_meet",
+          startedAt: "2026-06-27T11:00:00.000Z",
+        }),
+      ],
+      {
+        now: new Date("2026-06-28T12:00:00.000Z"),
+        status: "missed",
+      },
+    );
+
+    expect(page.meetings.map((meeting) => meeting.title)).toEqual([
+      "Missed bot join",
+    ]);
+  });
 });
 
 describe("getMeetingDashboardSummaryForWorkspace", () => {
@@ -1107,7 +1246,13 @@ describe("getMeetingDashboardSummaryForWorkspace", () => {
 function meetingRow(overrides: {
   id: string;
   title: string;
-  status: "scheduled" | "recording" | "processing" | "ready" | "failed";
+  status:
+    | "scheduled"
+    | "recording"
+    | "processing"
+    | "ready"
+    | "failed"
+    | "missed";
   recallBotId?: string | null;
   startedAt: string;
 }) {
@@ -1132,7 +1277,9 @@ function libraryMeeting(overrides: {
   startedAt: string;
   endedAt?: string;
   durationMs?: number;
+  externalParticipantKeys?: string[];
   participantCount?: number;
+  primaryEntity?: string;
 }) {
   return {
     id: overrides.id,
@@ -1144,7 +1291,9 @@ function libraryMeeting(overrides: {
     startedAt: overrides.startedAt,
     endedAt: overrides.endedAt ?? null,
     durationMs: overrides.durationMs,
+    externalParticipantKeys: overrides.externalParticipantKeys ?? [],
     participantCount: overrides.participantCount,
+    primaryEntity: overrides.primaryEntity ?? null,
     accessScope: "workspace" as const,
     relatedMeetings: [],
   };

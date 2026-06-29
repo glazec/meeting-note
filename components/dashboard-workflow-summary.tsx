@@ -54,13 +54,13 @@ function SummaryTile({
   return (
     <div
       className={cn(
-        "min-h-32 rounded-lg border bg-card p-4 text-card-foreground",
+        "min-h-32 rounded-lg border bg-card p-4 text-card-foreground shadow-sm",
         urgent ? "border-destructive/30" : "border-border",
       )}
     >
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="shrink-0 text-muted-foreground [&>svg]:size-4">
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary [&>svg]:size-4">
             {icon}
           </span>
           <span className="truncate text-sm font-medium">{label}</span>
@@ -103,10 +103,10 @@ function UpcomingJoinDetail({
 
 function UserStatsTile({ stats }: { stats: DashboardUserStats }) {
   return (
-    <div className="min-h-32 rounded-lg border border-border bg-card p-4 text-card-foreground">
+    <div className="min-h-32 rounded-lg border border-border bg-card p-4 text-card-foreground shadow-sm">
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="shrink-0 text-muted-foreground [&>svg]:size-4">
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary [&>svg]:size-4">
             <Mic2 />
           </span>
           <span className="truncate text-sm font-medium">Your 7 days</span>

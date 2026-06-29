@@ -4,6 +4,10 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 import {
+  isTranslationActive,
+  type MeetingTranslationStatus,
+} from "@/lib/meeting-translation-status";
+import {
   getMeetingDisplayStatus,
   type MeetingRecordStatus,
   type TranscriptJobStatus,
@@ -15,6 +19,7 @@ type MeetingAutoRefreshProps = {
   meetingStatus: MeetingRecordStatus;
   segmentCount: number;
   transcriptJobStatus?: TranscriptJobStatus | null;
+  translationStatus?: MeetingTranslationStatus | null;
 };
 
 export function MeetingAutoRefresh(props: MeetingAutoRefreshProps) {
@@ -40,7 +45,12 @@ export function shouldAutoRefreshMeeting({
   meetingStatus,
   segmentCount,
   transcriptJobStatus,
+  translationStatus,
 }: MeetingAutoRefreshProps) {
+  if (translationStatus && isTranslationActive(translationStatus)) {
+    return true;
+  }
+
   if (segmentCount > 0) {
     return false;
   }
@@ -50,5 +60,5 @@ export function shouldAutoRefreshMeeting({
     transcriptJobStatus,
   });
 
-  return !["ready", "failed"].includes(displayStatus);
+  return !["ready", "failed", "missed"].includes(displayStatus);
 }

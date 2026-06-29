@@ -32,6 +32,9 @@ import {
 import { getDefaultMeetingLibraryView } from "@/lib/meeting-library-views";
 import {
   getMeetingDashboardSummaryForWorkspace,
+  DEFAULT_MEETING_LIBRARY_HISTORY_MONTHS,
+  MAX_MEETING_LIBRARY_HISTORY_MONTHS,
+  MEETING_LIBRARY_HISTORY_MONTH_STEP,
   listMeetingLibraryPageForWorkspace,
 } from "@/lib/meeting-queries";
 import { cn } from "@/lib/utils";
@@ -47,7 +50,9 @@ export default async function DashboardPage({
 }: {
   searchParams: Promise<{
     page?: string | string[];
+    historyMonths?: string | string[];
     q?: string | string[];
+    relatedMonths?: string | string[];
     scope?: string | string[];
     sort?: string | string[];
     status?: string | string[];
@@ -56,9 +61,24 @@ export default async function DashboardPage({
   }>;
 }) {
   const user = await requireCurrentUser();
-  const { page, q, scope, sort, status, syncCalendar, view } =
+  const {
+    page,
+    historyMonths: historyMonthsParam,
+    q,
+    relatedMonths,
+    scope,
+    sort,
+    status,
+    syncCalendar,
+    view,
+  } =
     await searchParams;
   const currentPage = parseMeetingLibraryPage(page);
+  const historyMonths = parseMeetingLibraryHistoryMonths(historyMonthsParam);
+  const relatedHistoryMonths = Math.max(
+    historyMonths,
+    parseMeetingLibraryHistoryMonths(relatedMonths),
+  );
   const requestedViewConfig = normalizeMeetingLibraryViewConfig({
     q,
     scope,
@@ -77,8 +97,10 @@ export default async function DashboardPage({
   const [meetingLibraryPage, dashboardSummary, calendarStatus] =
     await Promise.all([
       listMeetingLibraryPageForWorkspace(workspace, {
+        historyMonths,
         page: currentPage,
         query,
+        relatedHistoryMonths,
         searchScope: activeViewConfig.searchScope,
         sort: activeViewConfig.sort,
         status: activeViewConfig.status,
@@ -128,8 +150,8 @@ export default async function DashboardPage({
           ) : null}
         </div>
 
-        <Card>
-          <CardHeader>
+        <Card className="shadow-sm">
+          <CardHeader className="border-b bg-muted/35">
             <CardTitle>Meeting library</CardTitle>
             <CardDescription>
               {accessSummary.isSharedOnly
@@ -137,16 +159,20 @@ export default async function DashboardPage({
                 : "Recent transcripts, scheduled joins, and recordings that need review."}
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col gap-4">
+          <CardContent className="flex flex-col gap-5">
             <MeetingLibraryViewBar
               activeViewConfig={activeViewConfig}
+              historyMonths={meetingLibraryPage.historyMonths}
               hasSavedView={Boolean(savedViewConfig)}
+              relatedHistoryMonths={meetingLibraryPage.relatedHistoryMonths}
               syncCalendar={syncCalendar}
             />
             <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
               <MeetingLibraryControls
                 activeViewConfig={activeViewConfig}
+                historyMonths={meetingLibraryPage.historyMonths}
                 isSharedOnly={accessSummary.isSharedOnly}
+                relatedHistoryMonths={meetingLibraryPage.relatedHistoryMonths}
                 syncCalendar={syncCalendar}
               />
             </div>
@@ -157,25 +183,53 @@ export default async function DashboardPage({
                   ? "No transcripts have been shared with you yet"
                   : "No meetings found"
               }
-              meetings={meetingLibraryPage.meetings}
+              meetings={withRelatedHistoryLinks(meetingLibraryPage.meetings, {
+                activeViewConfig,
+                historyMonths: meetingLibraryPage.historyMonths,
+                relatedHistoryMonths: meetingLibraryPage.relatedHistoryMonths,
+                syncCalendar,
+              })}
               sort={activeViewConfig.sort}
               sortLinks={getMeetingLibrarySortLinks({
                 activeViewConfig,
+                historyMonths: meetingLibraryPage.historyMonths,
+                relatedHistoryMonths: meetingLibraryPage.relatedHistoryMonths,
                 syncCalendar,
               })}
             />
             <MeetingLibraryPagination
               hasNextPage={meetingLibraryPage.hasNextPage}
+              hasOlderMeetings={meetingLibraryPage.hasOlderMeetings}
               hasPreviousPage={meetingLibraryPage.hasPreviousPage}
+              historyHref={buildDashboardPageHref({
+                ...activeViewConfig,
+                historyMonths: getNextHistoryMonths(
+                  meetingLibraryPage.historyMonths,
+                ),
+                relatedHistoryMonths: Math.max(
+                  meetingLibraryPage.relatedHistoryMonths,
+                  getNextHistoryMonths(meetingLibraryPage.historyMonths),
+                ),
+                syncCalendar,
+              })}
+              historyMonths={meetingLibraryPage.historyMonths}
               nextHref={buildDashboardPageHref({
                 ...activeViewConfig,
+                historyMonths: meetingLibraryPage.historyMonths,
                 page: meetingLibraryPage.page + 1,
+                relatedHistoryMonths: meetingLibraryPage.relatedHistoryMonths,
                 syncCalendar,
               })}
               page={meetingLibraryPage.page}
               previousHref={buildDashboardPageHref({
                 ...activeViewConfig,
+                historyMonths: meetingLibraryPage.historyMonths,
                 page: meetingLibraryPage.page - 1,
+                relatedHistoryMonths: meetingLibraryPage.relatedHistoryMonths,
+                syncCalendar,
+              })}
+              resetHistoryHref={buildDashboardPageHref({
+                ...activeViewConfig,
                 syncCalendar,
               })}
             />
@@ -188,11 +242,15 @@ export default async function DashboardPage({
 
 function MeetingLibraryViewBar({
   activeViewConfig,
+  historyMonths,
   hasSavedView,
+  relatedHistoryMonths,
   syncCalendar,
 }: {
   activeViewConfig: MeetingLibraryViewConfig;
+  historyMonths: number;
   hasSavedView: boolean;
+  relatedHistoryMonths: number;
   syncCalendar?: string | string[];
 }) {
   const presets: Array<{
@@ -202,6 +260,8 @@ function MeetingLibraryViewBar({
     {
       href: buildDashboardPageHref({
         ...defaultMeetingLibraryViewConfig,
+        historyMonths,
+        relatedHistoryMonths,
         syncCalendar,
         view: "all",
       }),
@@ -210,6 +270,8 @@ function MeetingLibraryViewBar({
     {
       href: buildDashboardPageHref({
         ...defaultMeetingLibraryViewConfig,
+        historyMonths,
+        relatedHistoryMonths,
         status: "ready",
         syncCalendar,
       }),
@@ -218,6 +280,8 @@ function MeetingLibraryViewBar({
     {
       href: buildDashboardPageHref({
         ...defaultMeetingLibraryViewConfig,
+        historyMonths,
+        relatedHistoryMonths,
         status: "in_progress",
         syncCalendar,
       }),
@@ -226,6 +290,8 @@ function MeetingLibraryViewBar({
     {
       href: buildDashboardPageHref({
         ...activeViewConfig,
+        historyMonths,
+        relatedHistoryMonths,
         sort: "duration_desc",
         syncCalendar,
       }),
@@ -234,6 +300,8 @@ function MeetingLibraryViewBar({
     {
       href: buildDashboardPageHref({
         ...activeViewConfig,
+        historyMonths,
+        relatedHistoryMonths,
         sort: "participants_desc",
         syncCalendar,
       }),
@@ -248,6 +316,8 @@ function MeetingLibraryViewBar({
           className={cn(buttonVariants({ variant: "secondary", size: "sm" }))}
           href={buildDashboardPageHref({
             ...defaultMeetingLibraryViewConfig,
+            historyMonths,
+            relatedHistoryMonths,
             syncCalendar,
             view: "my",
           })}
@@ -271,31 +341,49 @@ function MeetingLibraryViewBar({
 
 function MeetingLibraryControls({
   activeViewConfig,
+  historyMonths,
   isSharedOnly,
+  relatedHistoryMonths,
   syncCalendar,
 }: {
   activeViewConfig: MeetingLibraryViewConfig;
+  historyMonths: number;
   isSharedOnly: boolean;
+  relatedHistoryMonths: number;
   syncCalendar?: string | string[];
 }) {
   const syncCalendarValue = getSearchParamValue(syncCalendar);
 
   return (
-    <form className="grid gap-3 md:grid-cols-[minmax(12rem,1fr)_10rem_10rem_12rem_auto] md:items-end">
+    <form className="grid gap-3 rounded-lg border bg-muted/35 p-3 md:grid-cols-[minmax(12rem,1fr)_10rem_10rem_12rem_auto] md:items-end">
       {syncCalendarValue ? (
         <input name="syncCalendar" type="hidden" value={syncCalendarValue} />
+      ) : null}
+      {historyMonths > DEFAULT_MEETING_LIBRARY_HISTORY_MONTHS ? (
+        <input name="historyMonths" type="hidden" value={historyMonths} />
+      ) : null}
+      {relatedHistoryMonths > historyMonths ? (
+        <input
+          name="relatedMonths"
+          type="hidden"
+          value={relatedHistoryMonths}
+        />
       ) : null}
       <div className="space-y-2">
         <Label htmlFor="meeting-search" className="sr-only">
           Search meetings
         </Label>
-        <div className="flex items-center gap-2">
-          <Search className="text-muted-foreground" data-icon="inline-start" />
+        <div className="relative">
+          <Search
+            aria-hidden="true"
+            className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+          />
           <Input
             id="meeting-search"
             name="q"
             type="search"
             defaultValue={activeViewConfig.query ?? ""}
+            className="bg-background pl-8"
             placeholder={
               isSharedOnly
                 ? "Search shared transcript"
@@ -358,7 +446,7 @@ function SelectField({
     <div className="space-y-2">
       <Label htmlFor={id}>{label}</Label>
       <select
-        className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="h-8 w-full rounded-lg border border-input bg-background px-2.5 py-1 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
         defaultValue={value}
         id={id}
         name={name}
@@ -375,18 +463,31 @@ function SelectField({
 
 function MeetingLibraryPagination({
   hasNextPage,
+  hasOlderMeetings,
   hasPreviousPage,
+  historyHref,
+  historyMonths,
   nextHref,
   page,
   previousHref,
+  resetHistoryHref,
 }: {
   hasNextPage: boolean;
+  hasOlderMeetings: boolean;
   hasPreviousPage: boolean;
+  historyHref: string;
+  historyMonths: number;
   nextHref: string;
   page: number;
   previousHref: string;
+  resetHistoryHref: string;
 }) {
-  if (!hasNextPage && !hasPreviousPage) {
+  if (
+    !hasNextPage &&
+    !hasPreviousPage &&
+    !hasOlderMeetings &&
+    historyMonths === DEFAULT_MEETING_LIBRARY_HISTORY_MONTHS
+  ) {
     return null;
   }
 
@@ -395,7 +496,9 @@ function MeetingLibraryPagination({
       aria-label="Meeting library pages"
       className="flex flex-wrap items-center justify-between gap-3"
     >
-      <span className="text-sm text-muted-foreground">Page {page}</span>
+      <span className="text-sm text-muted-foreground">
+        Showing last {historyMonths} months{page > 1 ? `, page ${page}` : ""}
+      </span>
       <div className="flex items-center gap-2">
         {hasPreviousPage ? (
           <Link
@@ -404,6 +507,14 @@ function MeetingLibraryPagination({
           >
             <ChevronLeft data-icon="inline-start" />
             Previous
+          </Link>
+        ) : historyMonths > DEFAULT_MEETING_LIBRARY_HISTORY_MONTHS ? (
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href={resetHistoryHref}
+          >
+            <ChevronLeft data-icon="inline-start" />
+            Last 6 months
           </Link>
         ) : (
           <span
@@ -422,7 +533,15 @@ function MeetingLibraryPagination({
             className={cn(buttonVariants({ variant: "outline" }))}
             href={nextHref}
           >
-            Next
+            Load more meetings
+            <ChevronRight data-icon="inline-end" />
+          </Link>
+        ) : hasOlderMeetings ? (
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href={historyHref}
+          >
+            Load older history
             <ChevronRight data-icon="inline-end" />
           </Link>
         ) : (
@@ -433,7 +552,7 @@ function MeetingLibraryPagination({
               "pointer-events-none opacity-50",
             )}
           >
-            Next
+            No more in this view
             <ChevronRight data-icon="inline-end" />
           </span>
         )}
@@ -452,9 +571,24 @@ function parseMeetingLibraryPage(value: string | string[] | undefined) {
   return numberValue;
 }
 
+function parseMeetingLibraryHistoryMonths(value: string | string[] | undefined) {
+  const numberValue = Number(getSearchParamValue(value));
+
+  if (!Number.isInteger(numberValue)) {
+    return DEFAULT_MEETING_LIBRARY_HISTORY_MONTHS;
+  }
+
+  return Math.max(
+    DEFAULT_MEETING_LIBRARY_HISTORY_MONTHS,
+    Math.min(MAX_MEETING_LIBRARY_HISTORY_MONTHS, numberValue),
+  );
+}
+
 function buildDashboardPageHref({
   page,
   query,
+  historyMonths,
+  relatedHistoryMonths,
   searchScope,
   sort,
   status,
@@ -463,6 +597,8 @@ function buildDashboardPageHref({
 }: {
   page?: number;
   query?: string | null;
+  historyMonths?: number;
+  relatedHistoryMonths?: number;
   searchScope?: MeetingLibraryViewConfig["searchScope"];
   sort?: MeetingLibrarySort;
   status?: MeetingLibraryViewConfig["status"];
@@ -495,6 +631,17 @@ function buildDashboardPageHref({
     params.set("syncCalendar", syncCalendarValue);
   }
 
+  if (
+    historyMonths &&
+    historyMonths > DEFAULT_MEETING_LIBRARY_HISTORY_MONTHS
+  ) {
+    params.set("historyMonths", String(historyMonths));
+  }
+
+  if (relatedHistoryMonths && relatedHistoryMonths > (historyMonths ?? DEFAULT_MEETING_LIBRARY_HISTORY_MONTHS)) {
+    params.set("relatedMonths", String(relatedHistoryMonths));
+  }
+
   if (view) {
     params.set("view", view);
   }
@@ -510,19 +657,27 @@ function buildDashboardPageHref({
 
 function getMeetingLibrarySortLinks({
   activeViewConfig,
+  historyMonths,
+  relatedHistoryMonths,
   syncCalendar,
 }: {
   activeViewConfig: MeetingLibraryViewConfig;
+  historyMonths: number;
+  relatedHistoryMonths: number;
   syncCalendar?: string | string[];
 }) {
   return {
     title: buildDashboardPageHref({
       ...activeViewConfig,
+      historyMonths,
+      relatedHistoryMonths,
       sort: getNextSort(activeViewConfig.sort, "title_asc", "title_desc"),
       syncCalendar,
     }),
     participantCount: buildDashboardPageHref({
       ...activeViewConfig,
+      historyMonths,
+      relatedHistoryMonths,
       sort: getNextSort(
         activeViewConfig.sort,
         "participants_desc",
@@ -532,6 +687,8 @@ function getMeetingLibrarySortLinks({
     }),
     duration: buildDashboardPageHref({
       ...activeViewConfig,
+      historyMonths,
+      relatedHistoryMonths,
       sort: getNextSort(
         activeViewConfig.sort,
         "duration_desc",
@@ -541,10 +698,54 @@ function getMeetingLibrarySortLinks({
     }),
     startedAt: buildDashboardPageHref({
       ...activeViewConfig,
+      historyMonths,
+      relatedHistoryMonths,
       sort: getNextSort(activeViewConfig.sort, "time_desc", "time_asc"),
       syncCalendar,
     }),
   };
+}
+
+function getNextHistoryMonths(currentMonths: number) {
+  return Math.min(
+    MAX_MEETING_LIBRARY_HISTORY_MONTHS,
+    currentMonths + MEETING_LIBRARY_HISTORY_MONTH_STEP,
+  );
+}
+
+function withRelatedHistoryLinks(
+  meetings: Parameters<typeof MeetingList>[0]["meetings"],
+  input: {
+    activeViewConfig: MeetingLibraryViewConfig;
+    historyMonths: number;
+    relatedHistoryMonths: number;
+    syncCalendar?: string | string[];
+  },
+) {
+  return meetings.map((meeting) => {
+    if (!meeting.hasMoreRelatedMeetings) {
+      return meeting;
+    }
+
+    const nextRelatedHistoryMonths = getNextHistoryMonths(
+      input.relatedHistoryMonths,
+    );
+
+    if (nextRelatedHistoryMonths <= input.relatedHistoryMonths) {
+      return meeting;
+    }
+
+    return {
+      ...meeting,
+      relatedHistoryHref: buildDashboardPageHref({
+        ...input.activeViewConfig,
+        historyMonths: input.historyMonths,
+        relatedHistoryMonths: nextRelatedHistoryMonths,
+        syncCalendar: input.syncCalendar,
+      }),
+      relatedHistoryMonths: input.relatedHistoryMonths,
+    };
+  });
 }
 
 function getNextSort(

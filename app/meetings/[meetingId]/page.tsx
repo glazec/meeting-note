@@ -41,9 +41,7 @@ export default async function MeetingPage({
     meetingStatus: meeting.status,
     transcriptJobStatus: meeting.transcriptJobStatus,
   });
-  const hasTranslations = meeting.segments.some((segment) =>
-    Boolean(segment.translatedText?.trim()),
-  );
+  const hasTranslations = meeting.translationSummary.hasTranslations;
 
   return (
     <AppShell
@@ -57,6 +55,7 @@ export default async function MeetingPage({
             meetingStatus={meeting.status}
             segmentCount={meeting.segments.length}
             transcriptJobStatus={meeting.transcriptJobStatus}
+            translationStatus={meeting.translationSummary.status}
           />
           <p className="text-sm font-medium uppercase tracking-normal text-primary">
             Meeting
@@ -122,6 +121,7 @@ export default async function MeetingPage({
               }
               segments={meeting.segments}
               speakerSuggestions={meeting.speakerSuggestions}
+              translationSummary={meeting.translationSummary}
             />
           </div>
         </section>
@@ -180,5 +180,9 @@ function formatPlatform(platform: string) {
 }
 
 function formatStatus(status: string) {
+  if (status === "missed") {
+    return "No recording";
+  }
+
   return status.charAt(0).toUpperCase() + status.slice(1);
 }

@@ -5,12 +5,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 const {
   getWorkspace,
   getWorkspaceAccessSummary,
+  getMeetingBotProfile,
   listTeamVocabularyTerms,
   redirect,
   requireCurrentUser,
 } = vi.hoisted(() => ({
   getWorkspace: vi.fn(),
   getWorkspaceAccessSummary: vi.fn(),
+  getMeetingBotProfile: vi.fn(),
   listTeamVocabularyTerms: vi.fn(),
   redirect: vi.fn((url: string) => {
     throw new Error(`NEXT_REDIRECT:${url}`);
@@ -39,10 +41,15 @@ vi.mock("@/lib/team-vocabulary", () => ({
   listTeamVocabularyTerms,
 }));
 
+vi.mock("@/lib/meeting-bot-profile", () => ({
+  getMeetingBotProfile,
+}));
+
 describe("TeamSettingsPage", () => {
   afterEach(() => {
     getWorkspace.mockReset();
     getWorkspaceAccessSummary.mockReset();
+    getMeetingBotProfile.mockReset();
     listTeamVocabularyTerms.mockReset();
     redirect.mockClear();
     requireCurrentUser.mockReset();
@@ -102,6 +109,10 @@ describe("TeamSettingsPage", () => {
         enabled: true,
       },
     ]);
+    getMeetingBotProfile.mockResolvedValue({
+      botName: "Deal Scribe",
+      avatarJpegBase64: "custom-avatar",
+    });
 
     const { default: TeamSettingsPage } = await import(
       "@/app/settings/team/page"
@@ -111,5 +122,8 @@ describe("TeamSettingsPage", () => {
     expect(html).toContain("Team vocabulary");
     expect(html).toContain("TCG platform");
     expect(html).toContain("Before transcription");
+    expect(html).toContain("Meeting bot");
+    expect(html).toContain("Deal Scribe");
+    expect(html).toContain("Custom avatar saved");
   });
 });

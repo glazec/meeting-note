@@ -95,6 +95,39 @@ describe("MeetingList", () => {
     expect(html).toContain('aria-label="Collapse Nascent follow up"');
   });
 
+  it("shows a clear button to search older related meetings", () => {
+    const html = renderToStaticMarkup(
+      <MeetingList
+        meetings={[
+          {
+            id: "22222222-2222-4222-8222-222222222222",
+            title: "Nascent follow up",
+            platform: "google_meet",
+            primaryEntity: "nascent",
+            startedAt: "2026-06-27T12:00:00.000Z",
+            status: "ready",
+            hasMoreRelatedMeetings: true,
+            relatedHistoryHref: "/dashboard?relatedMonths=12",
+            relatedHistoryMonths: 6,
+            relatedMeetings: [
+              {
+                id: "11111111-1111-4111-8111-111111111111",
+                title: "Nascent intro",
+                platform: "google_meet",
+                startedAt: "2026-06-20T12:00:00.000Z",
+                status: "ready",
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain("Load older related");
+    expect(html).toContain("Search before last 6 months");
+    expect(html).toContain('href="/dashboard?relatedMonths=12"');
+  });
+
   it("shows grouped row status and collapsed related count", () => {
     const html = renderToStaticMarkup(
       <MeetingList
@@ -149,6 +182,29 @@ describe("MeetingList", () => {
     expect(html).toContain("Investment review");
     expect(html).toContain("In progress");
     expect(html).not.toContain("Queued");
+  });
+
+  it("shows a missed bot join as no recording without review copy", () => {
+    const html = renderToStaticMarkup(
+      <MeetingList
+        meetings={[
+          {
+            id: "44444444-4444-4444-8444-444444444444",
+            title: "Partner sync",
+            platform: "zoom",
+            startedAt: "2026-06-27T12:00:00.000Z",
+            status: "missed",
+            hasRecallBot: true,
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain("Partner sync");
+    expect(html).toContain("No recording");
+    expect(html).toContain("Bot did not join");
+    expect(html).not.toContain("Needs review");
+    expect(html).not.toContain("Failed");
   });
 
   it("renders sortable headers for meeting name, participants, duration, and time", () => {

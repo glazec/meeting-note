@@ -16,7 +16,7 @@ describe("meeting translation", () => {
       {
         role: "system",
         content:
-          "Translate meeting transcript segments into concise Chinese. Preserve product names, company names, numbers, and tickers. Return only JSON.",
+          "Translate meeting transcript segments into concise Chinese. Preserve product names, company names, numbers, and tickers. Return only JSON. Do not wrap the JSON in markdown fences.",
       },
       {
         role: "user",
@@ -34,5 +34,24 @@ describe("meeting translation", () => {
         segmentIds: ["segment_1"],
       }),
     ).toEqual([{ id: "segment_1", text: "大家好" }]);
+  });
+
+  it("parses JSON translations wrapped in a markdown code fence", () => {
+    expect(
+      parseChineseTranslationResponse({
+        content:
+          '```json\n{"translations":[{"id":"segment_1","text":"你好。"}]}\n```',
+        segmentIds: ["segment_1"],
+      }),
+    ).toEqual([{ id: "segment_1", text: "你好。" }]);
+  });
+
+  it("accepts translated rows returned under the input segments key", () => {
+    expect(
+      parseChineseTranslationResponse({
+        content: '{"segments":[{"id":"segment_1","text":"你好。"}]}',
+        segmentIds: ["segment_1"],
+      }),
+    ).toEqual([{ id: "segment_1", text: "你好。" }]);
   });
 });

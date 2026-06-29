@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull, lt, or } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { vendorWebhookEvents } from "@/db/schema";
@@ -11,6 +11,8 @@ type RecordVendorWebhookEventInput = {
   idempotencyKey: string;
   payload: unknown;
 };
+
+const PROCESSING_CLAIM_TIMEOUT_MS = 10 * 60 * 1000;
 
 export class MissingWebhookIdempotencyKeyError extends Error {
   constructor(provider: Provider) {
@@ -26,6 +28,10 @@ export async function recordVendorWebhookEvent(
     throw new MissingWebhookIdempotencyKeyError(input.provider);
   }
 
+  const now = new Date();
+  const staleProcessingClaim = new Date(
+    now.getTime() - PROCESSING_CLAIM_TIMEOUT_MS,
+  );
   const rows = await db
     .insert(vendorWebhookEvents)
     .values({
@@ -34,6 +40,7 @@ export async function recordVendorWebhookEvent(
       idempotencyKey: input.idempotencyKey,
       payload: input.payload,
       processedAt: null,
+      processingStartedAt: now,
     })
     .onConflictDoNothing({
       target: [
@@ -44,6 +51,7 @@ export async function recordVendorWebhookEvent(
     .returning({
       id: vendorWebhookEvents.id,
       processedAt: vendorWebhookEvents.processedAt,
+      processingStartedAt: vendorWebhookEvents.processingStartedAt,
     });
 
   if (rows[0]) {
@@ -55,10 +63,43 @@ export async function recordVendorWebhookEvent(
     };
   }
 
+  const claimedRows = await db
+    .update(vendorWebhookEvents)
+    .set({
+      processingStartedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(vendorWebhookEvents.provider, input.provider),
+        eq(vendorWebhookEvents.idempotencyKey, input.idempotencyKey),
+        isNull(vendorWebhookEvents.processedAt),
+        or(
+          isNull(vendorWebhookEvents.processingStartedAt),
+          lt(vendorWebhookEvents.processingStartedAt, staleProcessingClaim),
+        ),
+      ),
+    )
+    .returning({
+      id: vendorWebhookEvents.id,
+      processedAt: vendorWebhookEvents.processedAt,
+      processingStartedAt: vendorWebhookEvents.processingStartedAt,
+    });
+
+  if (claimedRows[0]) {
+    return {
+      id: claimedRows[0].id,
+      inserted: false,
+      processed: false,
+      shouldProcess: true,
+    };
+  }
+
   const [existing] = await db
     .select({
       id: vendorWebhookEvents.id,
       processedAt: vendorWebhookEvents.processedAt,
+      processingStartedAt: vendorWebhookEvents.processingStartedAt,
     })
     .from(vendorWebhookEvents)
     .where(
@@ -75,7 +116,7 @@ export async function recordVendorWebhookEvent(
     id: existing?.id ?? null,
     inserted: false,
     processed,
-    shouldProcess: !processed && Boolean(existing),
+    shouldProcess: false,
   };
 }
 
@@ -91,6 +132,7 @@ export async function markVendorWebhookEventProcessed(input: {
     .update(vendorWebhookEvents)
     .set({
       processedAt: new Date(),
+      processingStartedAt: null,
       updatedAt: new Date(),
     })
     .where(

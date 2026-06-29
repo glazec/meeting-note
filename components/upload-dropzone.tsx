@@ -116,11 +116,21 @@ export function UploadDropzone() {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Upload MP3</CardTitle>
-        <CardDescription>
-          Add an existing recording and queue transcription.
-        </CardDescription>
+      <CardHeader className="border-b bg-muted/35">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <CardTitle>Upload MP3</CardTitle>
+            <CardDescription>
+              Add an existing recording and queue transcription.
+            </CardDescription>
+          </div>
+          <span
+            aria-hidden="true"
+            className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary"
+          >
+            <UploadCloud className="size-4" />
+          </span>
+        </div>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -132,11 +142,12 @@ export function UploadDropzone() {
               type="file"
               accept="audio/mpeg,.mp3"
               onChange={handleFileChange}
+              className="bg-background"
               aria-invalid={state === "error"}
             />
           </div>
           {selectedFile ? (
-            <p className="break-all text-sm text-muted-foreground">
+            <p className="w-fit break-all rounded-md border bg-muted/45 px-2.5 py-1.5 text-sm text-muted-foreground">
               Selected file: {selectedFile.name}
             </p>
           ) : null}

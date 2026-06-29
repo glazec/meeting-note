@@ -37,6 +37,9 @@ vi.mock("@/lib/calendar-connection-queries", () => ({
 }));
 
 vi.mock("@/lib/meeting-queries", () => ({
+  DEFAULT_MEETING_LIBRARY_HISTORY_MONTHS: 6,
+  MAX_MEETING_LIBRARY_HISTORY_MONTHS: 60,
+  MEETING_LIBRARY_HISTORY_MONTH_STEP: 6,
   getMeetingDashboardSummaryForWorkspace,
   listMeetingLibraryPageForWorkspace,
 }));
@@ -116,14 +119,19 @@ describe("DashboardPage", () => {
       pageSize: 50,
       hasPreviousPage: true,
       hasNextPage: true,
+      hasOlderMeetings: true,
+      historyMonths: 12,
+      relatedHistoryMonths: 18,
     });
 
     const { default: DashboardPage } = await import("@/app/dashboard/page");
     const html = renderToStaticMarkup(
       await DashboardPage({
         searchParams: Promise.resolve({
+          historyMonths: "12",
           page: "2",
           q: "founder",
+          relatedMonths: "18",
           scope: "participants",
           sort: "duration_desc",
           status: "ready",
@@ -133,8 +141,10 @@ describe("DashboardPage", () => {
     );
 
     expect(listMeetingLibraryPageForWorkspace).toHaveBeenCalledWith(workspace, {
+      historyMonths: 12,
       page: 2,
       query: "founder",
+      relatedHistoryMonths: 18,
       searchScope: "participants",
       sort: "duration_desc",
       status: "ready",
@@ -151,13 +161,15 @@ describe("DashboardPage", () => {
     expect(html).toContain('name="sort"');
     expect(html).toContain('value="duration_desc" selected="">Longest first</option>');
     expect(html).not.toContain("Save as my view");
-    expect(html).toContain("Page 2");
+    expect(html).toContain("Showing last 12 months, page 2");
     expect(html).toContain(
-      "/dashboard?q=founder&amp;scope=participants&amp;status=ready&amp;sort=duration_desc&amp;syncCalendar=1",
+      "/dashboard?q=founder&amp;scope=participants&amp;status=ready&amp;sort=duration_desc&amp;syncCalendar=1&amp;historyMonths=12&amp;relatedMonths=18",
     );
     expect(html).toContain(
-      "/dashboard?q=founder&amp;scope=participants&amp;status=ready&amp;sort=duration_desc&amp;syncCalendar=1&amp;page=3",
+      "/dashboard?q=founder&amp;scope=participants&amp;status=ready&amp;sort=duration_desc&amp;syncCalendar=1&amp;historyMonths=12&amp;relatedMonths=18&amp;page=3",
     );
+    expect(html).toContain("Showing last 12 months");
+    expect(html).toContain("Load more meetings");
   });
 
   it("uses a saved default meeting view when the dashboard opens without filters", async () => {
@@ -211,6 +223,9 @@ describe("DashboardPage", () => {
       pageSize: 50,
       hasPreviousPage: false,
       hasNextPage: false,
+      hasOlderMeetings: false,
+      historyMonths: 6,
+      relatedHistoryMonths: 6,
     });
 
     const { default: DashboardPage } = await import("@/app/dashboard/page");
@@ -221,8 +236,10 @@ describe("DashboardPage", () => {
     );
 
     expect(listMeetingLibraryPageForWorkspace).toHaveBeenCalledWith(workspace, {
+      historyMonths: 6,
       page: 1,
       query: "alice",
+      relatedHistoryMonths: 6,
       searchScope: "participants",
       sort: "participants_desc",
       status: "all",

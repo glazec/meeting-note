@@ -12,6 +12,7 @@ export class WebhookVerificationError extends Error {
 }
 
 const elevenLabsClient = new ElevenLabsClient();
+const RECALL_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS = 5 * 60;
 
 export async function verifyElevenLabsWebhook(
   rawBody: string,
@@ -53,6 +54,16 @@ export function verifyRecallWebhook(rawBody: string, headers: Headers) {
     headers.get("webhook-signature") ?? headers.get("svix-signature");
 
   if (!messageId || !timestamp || !signature) {
+    throw new WebhookVerificationError("Invalid webhook signature", 401);
+  }
+
+  const timestampSeconds = Number(timestamp);
+
+  if (
+    !Number.isSafeInteger(timestampSeconds) ||
+    Math.abs(Math.floor(Date.now() / 1000) - timestampSeconds) >
+      RECALL_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS
+  ) {
     throw new WebhookVerificationError("Invalid webhook signature", 401);
   }
 

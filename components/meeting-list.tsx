@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { Fragment, useState } from "react";
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronDown,
+  ChevronRight,
+  History,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,6 +45,9 @@ type MeetingListBaseItem = {
 };
 
 export type MeetingListItem = MeetingListBaseItem & {
+  hasMoreRelatedMeetings?: boolean;
+  relatedHistoryHref?: string;
+  relatedHistoryMonths?: number;
   relatedMeetings?: MeetingListRelatedItem[];
 };
 
@@ -68,6 +77,7 @@ const statusLabels: Record<MeetingDisplayStatus, string> = {
   processing: "In progress",
   ready: "Ready",
   failed: "Failed",
+  missed: "No recording",
 };
 
 export function MeetingList({
@@ -95,88 +105,125 @@ export function MeetingList({
   }
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead aria-sort={getHeaderAriaSort("title", sort)}>
-            <SortableHeader
-              activeDirection={getSortDirection("title", sort)}
-              href={sortLinks?.title}
-              label="Meeting"
-            />
-          </TableHead>
-          <TableHead className="hidden sm:table-cell">Platform</TableHead>
-          <TableHead
-            aria-sort={getHeaderAriaSort("participantCount", sort)}
-            className="hidden md:table-cell"
-          >
-            <SortableHeader
-              activeDirection={getSortDirection("participantCount", sort)}
-              href={sortLinks?.participantCount}
-              label="Participants"
-            />
-          </TableHead>
-          <TableHead
-            aria-sort={getHeaderAriaSort("duration", sort)}
-            className="hidden md:table-cell"
-          >
-            <SortableHeader
-              activeDirection={getSortDirection("duration", sort)}
-              href={sortLinks?.duration}
-              label="Duration"
-            />
-          </TableHead>
-          <TableHead
-            aria-sort={getHeaderAriaSort("startedAt", sort)}
-            className="hidden md:table-cell"
-          >
-            <SortableHeader
-              activeDirection={getSortDirection("startedAt", sort)}
-              href={sortLinks?.startedAt}
-              label="Started"
-            />
-          </TableHead>
-          <TableHead className="text-right">Status</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {meetings.length === 0 ? (
-          <TableRow>
-            <TableCell
-              colSpan={6}
-              className="h-24 text-center text-muted-foreground"
+    <div className="overflow-hidden rounded-lg border bg-card">
+      <Table>
+        <TableHeader className="bg-muted/45">
+          <TableRow className="hover:bg-muted/45">
+            <TableHead aria-sort={getHeaderAriaSort("title", sort)}>
+              <SortableHeader
+                activeDirection={getSortDirection("title", sort)}
+                href={sortLinks?.title}
+                label="Meeting"
+              />
+            </TableHead>
+            <TableHead className="hidden sm:table-cell">Platform</TableHead>
+            <TableHead
+              aria-sort={getHeaderAriaSort("participantCount", sort)}
+              className="hidden md:table-cell"
             >
-              {emptyMessage}
-            </TableCell>
+              <SortableHeader
+                activeDirection={getSortDirection("participantCount", sort)}
+                href={sortLinks?.participantCount}
+                label="Participants"
+              />
+            </TableHead>
+            <TableHead
+              aria-sort={getHeaderAriaSort("duration", sort)}
+              className="hidden md:table-cell"
+            >
+              <SortableHeader
+                activeDirection={getSortDirection("duration", sort)}
+                href={sortLinks?.duration}
+                label="Duration"
+              />
+            </TableHead>
+            <TableHead
+              aria-sort={getHeaderAriaSort("startedAt", sort)}
+              className="hidden md:table-cell"
+            >
+              <SortableHeader
+                activeDirection={getSortDirection("startedAt", sort)}
+                href={sortLinks?.startedAt}
+                label="Started"
+              />
+            </TableHead>
+            <TableHead className="text-right">Status</TableHead>
           </TableRow>
-        ) : (
-          meetings.map((meeting) => {
-            const relatedMeetings = meeting.relatedMeetings ?? [];
-            const isExpanded = expandedMeetingIds.has(meeting.id);
+        </TableHeader>
+        <TableBody>
+          {meetings.length === 0 ? (
+            <TableRow>
+              <TableCell
+                colSpan={6}
+                className="h-24 text-center text-muted-foreground"
+              >
+                {emptyMessage}
+              </TableCell>
+            </TableRow>
+          ) : (
+            meetings.map((meeting) => {
+              const relatedMeetings = meeting.relatedMeetings ?? [];
+              const isExpanded = expandedMeetingIds.has(meeting.id);
 
-            return (
-              <Fragment key={meeting.id}>
-                <MeetingTableRow
-                  isExpanded={isExpanded}
-                  meeting={meeting}
-                  onToggle={() => toggleMeeting(meeting.id)}
-                  relatedCount={relatedMeetings.length}
-                />
-                {isExpanded
-                  ? relatedMeetings.map((relatedMeeting) => (
-                      <MeetingTableRow
-                        isChild
-                        key={relatedMeeting.id}
-                        meeting={relatedMeeting}
-                      />
-                    ))
-                  : null}
-              </Fragment>
-            );
-          })
-        )}
-      </TableBody>
-    </Table>
+              return (
+                <Fragment key={meeting.id}>
+                  <MeetingTableRow
+                    isExpanded={isExpanded}
+                    meeting={meeting}
+                    onToggle={() => toggleMeeting(meeting.id)}
+                    relatedCount={relatedMeetings.length}
+                  />
+                  {isExpanded
+                    ? [
+                        ...relatedMeetings.map((relatedMeeting) => (
+                          <MeetingTableRow
+                            isChild
+                            key={relatedMeeting.id}
+                            meeting={relatedMeeting}
+                          />
+                        )),
+                        meeting.hasMoreRelatedMeetings &&
+                        meeting.relatedHistoryHref ? (
+                          <RelatedHistoryRow
+                            href={meeting.relatedHistoryHref}
+                            key={`${meeting.id}:related-history`}
+                            months={meeting.relatedHistoryMonths}
+                          />
+                        ) : null,
+                      ]
+                    : null}
+                </Fragment>
+              );
+            })
+          )}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+function RelatedHistoryRow({
+  href,
+  months,
+}: {
+  href: string;
+  months?: number;
+}) {
+  return (
+    <TableRow className="hover:bg-muted/25">
+      <TableCell colSpan={6} className="py-3 pl-14">
+        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+          <Link
+            className="inline-flex h-8 items-center gap-2 rounded-lg border bg-background px-3 text-sm font-medium text-foreground hover:bg-muted"
+            href={href}
+          >
+            <History aria-hidden="true" className="size-4" />
+            Load older related
+          </Link>
+          <span>Search before last {months ?? 6} months</span>
+        </div>
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -209,8 +256,9 @@ function MeetingTableRow({
   return (
     <TableRow
       aria-expanded={relatedCount > 0 ? isExpanded : undefined}
+      className={isChild ? "hover:bg-muted/35" : undefined}
     >
-      <TableCell className="min-w-56">
+      <TableCell className="min-w-56 py-3">
         <MeetingTitleCell
           isChild={isChild}
           isExpanded={isExpanded}
@@ -452,6 +500,14 @@ function MeetingCoverageNote({
     );
   }
 
+  if (displayStatus === "missed") {
+    return (
+      <span className="mt-1 block text-xs text-muted-foreground">
+        Bot did not join
+      </span>
+    );
+  }
+
   return null;
 }
 
@@ -460,7 +516,7 @@ function getStatusVariant(status: MeetingDisplayStatus) {
     return "destructive";
   }
 
-  if (status === "scheduled" || status === "queued") {
+  if (status === "scheduled" || status === "queued" || status === "missed") {
     return "outline";
   }
 

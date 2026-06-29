@@ -64,6 +64,41 @@
       "when": 1783100000000,
       "tag": "0008_equal_sway",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1783200000000,
+      "tag": "0009_vendor_webhook_processing_claim",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783300000000,
+      "tag": "0010_missed_meeting_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1783400000000,
+      "tag": "0011_missed_meeting_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1783500000000,
+      "tag": "0012_meeting_translation_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1783600000000,
+      "tag": "0013_meeting_bot_profiles",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getCurrentUser = vi.fn();
+const getMeetingBotProfile = vi.fn();
 const scheduleRecallBot = vi.fn();
 const createScheduledMeetingBot = vi.fn();
 const markMeetingBotFailed = vi.fn();
@@ -13,6 +14,23 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/lib/vendors/recall", () => ({
   DEFAULT_RECALL_BOT_NAME: "IOSG Old Friend",
   scheduleRecallBot,
+}));
+
+vi.mock("@/lib/meeting-bot-profile", () => ({
+  getMeetingBotProfile,
+  getMeetingBotMetadata: (profile: {
+    botName: string;
+    avatarJpegBase64: string | null;
+  }) => (profile.botName === "IOSG Old Friend" ? {} : { botName: profile.botName }),
+  getMeetingBotRecallCreateInput: (profile: {
+    botName: string;
+    avatarJpegBase64: string | null;
+  }) => ({
+    botName: profile.botName,
+    ...(profile.avatarJpegBase64
+      ? { avatarJpegBase64: profile.avatarJpegBase64 }
+      : {}),
+  }),
 }));
 
 vi.mock("@/lib/meeting-bot-records", () => ({
@@ -36,8 +54,16 @@ async function postMeetingLink(body: unknown) {
 }
 
 describe("POST /api/meetings/link", () => {
+  beforeEach(() => {
+    getMeetingBotProfile.mockResolvedValue({
+      botName: "IOSG Old Friend",
+      avatarJpegBase64: null,
+    });
+  });
+
   afterEach(() => {
     getCurrentUser.mockReset();
+    getMeetingBotProfile.mockReset();
     scheduleRecallBot.mockReset();
     createScheduledMeetingBot.mockReset();
     markMeetingBotFailed.mockReset();
@@ -67,6 +93,11 @@ describe("POST /api/meetings/link", () => {
     });
     createScheduledMeetingBot.mockResolvedValue({
       meetingId: "11111111-1111-4111-8111-111111111111",
+      teamId: "22222222-2222-4222-8222-222222222222",
+    });
+    getMeetingBotProfile.mockResolvedValue({
+      botName: "Deal Scribe",
+      avatarJpegBase64: "custom-avatar",
     });
     scheduleRecallBot.mockResolvedValue({ id: "bot_123" });
     markMeetingBotScheduled.mockResolvedValue(undefined);
@@ -94,9 +125,11 @@ describe("POST /api/meetings/link", () => {
     });
     expect(scheduleRecallBot).toHaveBeenCalledWith({
       meetingUrl: "https://meet.google.com/abc-defg-hij",
-      botName: "IOSG Old Friend",
+      botName: "Deal Scribe",
+      avatarJpegBase64: "custom-avatar",
       webhookUrl: "https://app.example.com/api/recall/webhook",
       metadata: {
+        botName: "Deal Scribe",
         meetingId: "11111111-1111-4111-8111-111111111111",
       },
     });
@@ -115,6 +148,7 @@ describe("POST /api/meetings/link", () => {
     });
     createScheduledMeetingBot.mockResolvedValue({
       meetingId: "22222222-2222-4222-8222-222222222222",
+      teamId: "22222222-2222-4222-8222-222222222222",
     });
     scheduleRecallBot.mockResolvedValue({ id: "bot_456" });
     markMeetingBotScheduled.mockResolvedValue(undefined);
@@ -160,6 +194,7 @@ describe("POST /api/meetings/link", () => {
     });
     createScheduledMeetingBot.mockResolvedValue({
       meetingId: "11111111-1111-4111-8111-111111111111",
+      teamId: "22222222-2222-4222-8222-222222222222",
     });
     scheduleRecallBot.mockRejectedValue(new Error("Recall unavailable"));
     markMeetingBotFailed.mockResolvedValue(undefined);

@@ -33,6 +33,7 @@ export const meetingStatus = pgEnum("meeting_status", [
   "processing",
   "ready",
   "failed",
+  "missed",
 ]);
 export const accessRole = pgEnum("access_role", [
   "owner",
@@ -99,6 +100,22 @@ export const teamVocabularyTerms = pgTable(
       table.teamId,
       table.term,
     ),
+  ],
+);
+
+export const teamMeetingBotProfiles = pgTable(
+  "team_meeting_bot_profiles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    botName: text("bot_name").notNull().default("IOSG Old Friend"),
+    avatarJpegBase64: text("avatar_jpeg_base64"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("team_meeting_bot_profiles_team_unique").on(table.teamId),
   ],
 );
 
@@ -246,6 +263,14 @@ export const meetings = pgTable(
     endedAt: timestamp("ended_at", { withTimezone: true }),
     recallBotId: text("recall_bot_id"),
     recallRecordingId: text("recall_recording_id"),
+    translationStatus: jobStatus("translation_status"),
+    translationErrorMessage: text("translation_error_message"),
+    translationStartedAt: timestamp("translation_started_at", {
+      withTimezone: true,
+    }),
+    translationCompletedAt: timestamp("translation_completed_at", {
+      withTimezone: true,
+    }),
     ...timestamps,
   },
   (table) => [
@@ -545,6 +570,9 @@ export const vendorWebhookEvents = pgTable(
     eventType: text("event_type").notNull(),
     idempotencyKey: text("idempotency_key").notNull(),
     payload: jsonb("payload").notNull(),
+    processingStartedAt: timestamp("processing_started_at", {
+      withTimezone: true,
+    }),
     processedAt: timestamp("processed_at", { withTimezone: true }),
     ...timestamps,
   },

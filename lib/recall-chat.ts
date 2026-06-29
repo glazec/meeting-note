@@ -64,7 +64,9 @@ export function shouldAnswerRecallChatMessage(event: RecallChatMessage):
     return { shouldAnswer: false, reason: "empty_message" };
   }
 
-  if (event.participant.name === DEFAULT_RECALL_BOT_NAME) {
+  const botName = getEventBotName(event);
+
+  if (event.participant.name === botName) {
     return { shouldAnswer: false, reason: "authored_by_bot" };
   }
 
@@ -72,8 +74,8 @@ export function shouldAnswerRecallChatMessage(event: RecallChatMessage):
     return { shouldAnswer: true, question: text };
   }
 
-  if (includesBotMention(text)) {
-    return { shouldAnswer: true, question: stripBotMention(text) };
+  if (includesBotMention(text, botName)) {
+    return { shouldAnswer: true, question: stripBotMention(text, botName) };
   }
 
   return { shouldAnswer: false, reason: "not_addressed_to_bot" };
@@ -99,15 +101,20 @@ export async function answerRecallChatMessage(event: RecallChatMessage) {
   return { action: "replied" as const, reply };
 }
 
-function includesBotMention(text: string) {
-  return text.toLowerCase().includes(DEFAULT_RECALL_BOT_NAME.toLowerCase());
+function getEventBotName(event: RecallChatMessage) {
+  const metadataName = event.metadata.botName;
+
+  return typeof metadataName === "string" && metadataName.trim()
+    ? metadataName.trim()
+    : DEFAULT_RECALL_BOT_NAME;
 }
 
-function stripBotMention(text: string) {
-  const mentionPattern = new RegExp(
-    `@?${escapeRegex(DEFAULT_RECALL_BOT_NAME)}`,
-    "gi",
-  );
+function includesBotMention(text: string, botName: string) {
+  return text.toLowerCase().includes(botName.toLowerCase());
+}
+
+function stripBotMention(text: string, botName: string) {
+  const mentionPattern = new RegExp(`@?${escapeRegex(botName)}`, "gi");
   const stripped = text.replace(mentionPattern, "").trim();
 
   return stripped || text.trim();

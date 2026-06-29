@@ -33,7 +33,7 @@ export async function createScheduledMeetingBot(
     })
     .returning({ id: meetings.id });
 
-  return { meetingId: meeting.id };
+  return { meetingId: meeting.id, teamId: workspace.teamId };
 }
 
 export async function markMeetingBotScheduled(input: {

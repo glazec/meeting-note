@@ -29,6 +29,8 @@ const openRouterResponseSchema = z.object({
     }),
   ),
 });
+export const TRANSLATION_BATCH_SIZE = 10;
+const TRANSLATION_BATCH_CHARACTER_LIMIT = 1800;
 
 export async function generateOpenRouterChatReply(input: {
   question: string;
@@ -83,21 +85,69 @@ export async function generateOpenRouterChatReply(input: {
 
 export async function translateTranscriptSegmentsToChinese(
   segments: Array<{ id: string; text: string }>,
+  options: { batchSize?: number } = {},
 ) {
   if (segments.length === 0) {
     return [];
   }
 
-  const content = await createOpenRouterChatCompletion({
-    messages: buildChineseTranslationMessages(segments),
-    maxTokens: 2000,
-    temperature: 0.1,
-  });
+  const batchSize = Math.max(
+    1,
+    Math.min(options.batchSize ?? TRANSLATION_BATCH_SIZE, 50),
+  );
+  const translations: Array<{ id: string; text: string }> = [];
 
-  return parseChineseTranslationResponse({
-    content,
-    segmentIds: segments.map((segment) => segment.id),
-  });
+  for (const batch of buildTranslationBatches(segments, {
+    batchSize,
+    maxCharacters: TRANSLATION_BATCH_CHARACTER_LIMIT,
+  })) {
+    const content = await createOpenRouterChatCompletion({
+      messages: buildChineseTranslationMessages(batch),
+      maxTokens: 3000,
+      temperature: 0.1,
+    });
+
+    translations.push(
+      ...parseChineseTranslationResponse({
+        content,
+        segmentIds: batch.map((segment) => segment.id),
+      }),
+    );
+  }
+
+  return translations;
+}
+
+function buildTranslationBatches(
+  segments: Array<{ id: string; text: string }>,
+  options: { batchSize: number; maxCharacters: number },
+) {
+  const batches: Array<Array<{ id: string; text: string }>> = [];
+  let batch: Array<{ id: string; text: string }> = [];
+  let batchCharacters = 0;
+
+  for (const segment of segments) {
+    const segmentCharacters = segment.text.length;
+    const wouldExceedSize =
+      batch.length > 0 &&
+      batchCharacters + segmentCharacters > options.maxCharacters;
+    const wouldExceedCount = batch.length >= options.batchSize;
+
+    if (wouldExceedSize || wouldExceedCount) {
+      batches.push(batch);
+      batch = [];
+      batchCharacters = 0;
+    }
+
+    batch.push(segment);
+    batchCharacters += segmentCharacters;
+  }
+
+  if (batch.length > 0) {
+    batches.push(batch);
+  }
+
+  return batches;
 }
 
 async function createOpenRouterChatCompletion(input: {
@@ -122,6 +172,7 @@ async function createOpenRouterChatCompletion(input: {
       messages: input.messages,
       temperature: input.temperature,
       max_tokens: input.maxTokens,
+      response_format: { type: "json_object" },
     }),
   });
 

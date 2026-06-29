@@ -20,6 +20,10 @@ vi.mock("@/lib/team-vocabulary", () => ({
   listTeamVocabularyTerms: vi.fn(),
 }));
 
+vi.mock("@/lib/meeting-bot-profile", () => ({
+  getMeetingBotProfile: vi.fn(),
+}));
+
 vi.mock("@/lib/meeting-queries", () => ({
   getMeetingTranscriptForWorkspace: vi.fn(),
   getWorkspaceMeetingTranscript: vi.fn(),

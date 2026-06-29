@@ -11,8 +11,10 @@ import {
   useRef,
   useState,
 } from "react";
+import { useRouter } from "next/navigation";
 import {
   Check,
+  Languages,
   Pause,
   Pencil,
   Play,
@@ -23,6 +25,10 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  getTranslationProgressLabel,
+  type MeetingTranslationSummary,
+} from "@/lib/meeting-translation-status";
 import { cn } from "@/lib/utils";
 
 export type TranscriptSegment = {
@@ -74,6 +80,7 @@ type TranscriptViewerProps = {
   meetingId?: string | null;
   segments: TranscriptSegment[];
   speakerSuggestions?: SpeakerSuggestion[];
+  translationSummary?: MeetingTranslationSummary;
 };
 
 type WaveformSection = {
@@ -106,12 +113,74 @@ function formatTimestamp(startMs: number) {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+function shouldShowTranslationPanel(summary: MeetingTranslationSummary) {
+  return summary.totalSegments > 0 && summary.status !== "completed";
+}
+
+function shouldShowTranslationAction(summary: MeetingTranslationSummary) {
+  return (
+    summary.status === "not_started" ||
+    summary.status === "not_needed" ||
+    summary.status === "failed"
+  );
+}
+
+function getTranslationStatusTitle(summary: MeetingTranslationSummary) {
+  if (summary.status === "queued") {
+    return "Translation queued";
+  }
+
+  if (summary.status === "running") {
+    return "Translation in progress";
+  }
+
+  if (summary.status === "partial") {
+    return "Translation partially available";
+  }
+
+  if (summary.status === "failed") {
+    return "Translation did not finish";
+  }
+
+  if (summary.status === "not_needed") {
+    return "Translation not needed";
+  }
+
+  return "Translation not started";
+}
+
+function getTranslationStatusBody(summary: MeetingTranslationSummary) {
+  if (summary.status === "queued") {
+    return " Chinese translation will start shortly.";
+  }
+
+  if (summary.status === "running") {
+    return " Chinese view will appear here automatically.";
+  }
+
+  if (summary.status === "partial") {
+    return " You can read translated lines now while the rest is prepared.";
+  }
+
+  if (summary.status === "failed") {
+    return " Original transcript is still available.";
+  }
+
+  if (summary.status === "not_needed") {
+    return " This transcript already appears to be Chinese.";
+  }
+
+  return " Start Chinese translation when you need it.";
+}
+
 export function TranscriptViewer({
   audioUrl,
   meetingId,
   segments: initialSegments,
   speakerSuggestions = [],
+  translationSummary,
 }: TranscriptViewerProps) {
+  const router = useRouter();
   const [segments, setSegments] = useState(initialSegments);
   const [editingSpeaker, setEditingSpeaker] = useState<EditingSpeaker | null>(
     null,
@@ -121,6 +190,12 @@ export function TranscriptViewer({
     useState<SpeakerApplyScope>("matching_speaker");
   const [savingSpeakerKey, setSavingSpeakerKey] = useState<string | null>(null);
   const [errorSpeakerKey, setErrorSpeakerKey] = useState<string | null>(null);
+  const [isRequestingTranslation, setIsRequestingTranslation] = useState(false);
+  const [translationRequestQueued, setTranslationRequestQueued] =
+    useState(false);
+  const [translationRequestError, setTranslationRequestError] = useState<
+    string | null
+  >(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const segmentRefs = useRef(new Map<string, HTMLLIElement>());
   const [currentTime, setCurrentTime] = useState(0);
@@ -132,6 +207,14 @@ export function TranscriptViewer({
     () => segments.some((segment) => Boolean(segment.translatedText?.trim())),
     [segments],
   );
+  const displayTranslationSummary =
+    translationSummary && translationRequestQueued
+      ? {
+          ...translationSummary,
+          errorMessage: null,
+          status: "queued" as const,
+        }
+      : translationSummary;
   const [textVersion, setTextVersion] = useState<"zh" | "original">(
     hasTranslations ? "zh" : "original",
   );
@@ -257,6 +340,136 @@ export function TranscriptViewer({
     setEditingSpeaker(null);
   }
 
+  async function requestTranslation() {
+    if (!meetingId || isRequestingTranslation) {
+      return;
+    }
+
+    setIsRequestingTranslation(true);
+    setTranslationRequestError(null);
+
+    try {
+      const response = await fetch(
+        `/api/meetings/${encodeURIComponent(meetingId)}/translation`,
+        { method: "POST" },
+      );
+
+      if (!response.ok) {
+        setTranslationRequestError("Could not start translation.");
+        return;
+      }
+
+      setTranslationRequestQueued(true);
+      router.refresh();
+    } catch {
+      setTranslationRequestError("Could not start translation.");
+    } finally {
+      setIsRequestingTranslation(false);
+    }
+  }
+
+  function renderSpeakerEditor({
+    hasError,
+    isSaving,
+    showScope,
+  }: {
+    hasError: boolean;
+    isSaving: boolean;
+    showScope: boolean;
+  }) {
+    return (
+      <form className="flex w-full max-w-xl flex-col gap-2" onSubmit={saveSpeaker}>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <Input
+            aria-label="Speaker name"
+            aria-invalid={hasError}
+            autoFocus
+            list="speaker-suggestions"
+            onChange={(event) => setDraftSpeaker(event.currentTarget.value)}
+            placeholder="Speaker name"
+            value={draftSpeaker}
+          />
+          <datalist id="speaker-suggestions">
+            {speakerSuggestions.map((suggestion) => (
+              <option
+                key={suggestion.email}
+                label={suggestion.email}
+                value={suggestion.name}
+              />
+            ))}
+          </datalist>
+          <Button
+            aria-label="Save speaker"
+            disabled={isSaving}
+            size="icon"
+            type="submit"
+          >
+            <Check />
+          </Button>
+          <Button
+            aria-label="Cancel speaker edit"
+            disabled={isSaving}
+            onClick={() => setEditingSpeaker(null)}
+            size="icon"
+            type="button"
+            variant="outline"
+          >
+            <X />
+          </Button>
+        </div>
+        {speakerSuggestions.length > 0 ? (
+          <div aria-label="Speaker suggestions" className="flex flex-wrap gap-1.5">
+            {speakerSuggestions.slice(0, 8).map((suggestion) => (
+              <button
+                className="inline-flex h-7 max-w-full items-center rounded-md border px-2 text-xs font-medium text-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
+                key={suggestion.email}
+                onClick={() => setDraftSpeaker(suggestion.name)}
+                type="button"
+              >
+                <span className="truncate">{suggestion.name}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {showScope ? (
+          <div className="inline-flex w-fit rounded-md border bg-background p-0.5">
+            <button
+              aria-pressed={speakerApplyScope === "matching_speaker"}
+              className={cn(
+                "h-7 rounded px-2 text-xs font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                speakerApplyScope === "matching_speaker"
+                  ? "bg-muted text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => setSpeakerApplyScope("matching_speaker")}
+              type="button"
+            >
+              All matching
+            </button>
+            <button
+              aria-pressed={speakerApplyScope === "segment"}
+              className={cn(
+                "h-7 rounded px-2 text-xs font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                speakerApplyScope === "segment"
+                  ? "bg-muted text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => setSpeakerApplyScope("segment")}
+              type="button"
+            >
+              This line
+            </button>
+          </div>
+        ) : null}
+        {hasError ? (
+          <p className="text-xs font-medium text-destructive">
+            Add a speaker name.
+          </p>
+        ) : null}
+      </form>
+    );
+  }
+
   async function seekTo(startMs: number) {
     const audio = audioRef.current;
 
@@ -357,11 +570,54 @@ export function TranscriptViewer({
           </p>
         ) : (
           <>
+            {displayTranslationSummary &&
+            shouldShowTranslationPanel(displayTranslationSummary) ? (
+              <div className="mb-5 rounded-lg border bg-muted/30 p-4">
+                <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="flex items-center gap-2 text-sm font-semibold">
+                      <Languages className="size-4 text-primary" />
+                      {getTranslationStatusTitle(displayTranslationSummary)}
+                    </p>
+                    <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                      {getTranslationProgressLabel(displayTranslationSummary)}.
+                      {getTranslationStatusBody(displayTranslationSummary)}
+                    </p>
+                    {translationRequestError ? (
+                      <p className="mt-1 text-xs font-medium text-destructive">
+                        {translationRequestError}
+                      </p>
+                    ) : null}
+                  </div>
+                  {meetingId &&
+                  shouldShowTranslationAction(displayTranslationSummary) ? (
+                    <Button
+                      disabled={isRequestingTranslation}
+                      onClick={requestTranslation}
+                      type="button"
+                      variant="outline"
+                    >
+                      {displayTranslationSummary.status === "failed"
+                        ? "Retry translation"
+                        : displayTranslationSummary.status === "not_needed"
+                          ? "Translate anyway"
+                        : "Start translation"}
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
             <div className="mb-5 border-t py-4">
               <h3 className="text-sm font-semibold">Speakers</h3>
               <div className="mt-3 flex min-w-0 flex-wrap gap-2">
                 {speakerStats.map((speaker) => {
                   const speakerLabel = speaker.speaker ?? "Unknown speaker";
+                  const speakerKey = getSpeakerKey(speaker.speaker);
+                  const isSummaryEditing =
+                    editingSpeaker?.speakerKey === speakerKey &&
+                    !editingSpeaker.allowSegmentScope;
+                  const isSaving = savingSpeakerKey === speakerKey;
+                  const hasError = errorSpeakerKey === speakerKey;
                   const content = (
                     <>
                       <span
@@ -380,12 +636,25 @@ export function TranscriptViewer({
                     </>
                   );
 
+                  if (canEditSpeakers && isSummaryEditing) {
+                    return (
+                      <div className="w-full" key={speakerKey}>
+                        {renderSpeakerEditor({
+                          hasError,
+                          isSaving,
+                          showScope: false,
+                        })}
+                      </div>
+                    );
+                  }
+
                   return canEditSpeakers ? (
                     <button
+                      aria-label={`Rename ${speakerLabel} everywhere`}
                       className="inline-flex h-8 items-center gap-2 rounded-md border px-2 text-sm font-medium outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
-                      key={getSpeakerKey(speaker.speaker)}
+                      key={speakerKey}
                       onClick={() => startEditing(speaker.speaker)}
-                      title={speakerLabel}
+                      title={`Rename ${speakerLabel} everywhere`}
                       type="button"
                     >
                       {content}
@@ -393,7 +662,7 @@ export function TranscriptViewer({
                   ) : (
                     <span
                       className="inline-flex h-8 items-center gap-2 rounded-md border px-2 text-sm font-medium"
-                      key={getSpeakerKey(speaker.speaker)}
+                      key={speakerKey}
                       title={speakerLabel}
                     >
                       {content}
@@ -406,7 +675,9 @@ export function TranscriptViewer({
               {segments.map((segment, index) => {
                 const speakerLabel = segment.speaker ?? "Unknown speaker";
                 const speakerKey = getSpeakerKey(segment.speaker);
-                const isEditing = editingSpeaker?.segmentId === segment.id;
+                const isEditing =
+                  editingSpeaker?.allowSegmentScope &&
+                  editingSpeaker.segmentId === segment.id;
                 const isSaving = savingSpeakerKey === speakerKey;
                 const hasError = errorSpeakerKey === speakerKey;
                 const isActive = activeSegmentId === segment.id;
@@ -460,110 +731,11 @@ export function TranscriptViewer({
                     <div className="min-w-0">
                       <div className="mb-1.5 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1">
                         {isEditing ? (
-                          <form
-                            className="flex w-full max-w-xl flex-col gap-2"
-                            onSubmit={saveSpeaker}
-                          >
-                            <div className="flex min-w-0 items-center gap-1.5">
-                              <Input
-                                aria-label="Speaker name"
-                                aria-invalid={hasError}
-                                list="speaker-suggestions"
-                                onChange={(event) =>
-                                  setDraftSpeaker(event.currentTarget.value)
-                                }
-                                placeholder="Speaker name"
-                                value={draftSpeaker}
-                              />
-                              <datalist id="speaker-suggestions">
-                                {speakerSuggestions.map((suggestion) => (
-                                  <option
-                                    key={suggestion.email}
-                                    label={suggestion.email}
-                                    value={suggestion.name}
-                                  />
-                                ))}
-                              </datalist>
-                              <Button
-                                aria-label="Save speaker"
-                                disabled={isSaving}
-                                size="icon"
-                                type="submit"
-                              >
-                                <Check />
-                              </Button>
-                              <Button
-                                aria-label="Cancel speaker edit"
-                                disabled={isSaving}
-                                onClick={() => setEditingSpeaker(null)}
-                                size="icon"
-                                type="button"
-                                variant="outline"
-                              >
-                                <X />
-                              </Button>
-                            </div>
-                            {speakerSuggestions.length > 0 ? (
-                              <div
-                                aria-label="Speaker suggestions"
-                                className="flex flex-wrap gap-1.5"
-                              >
-                                {speakerSuggestions.slice(0, 8).map((suggestion) => (
-                                  <button
-                                    className="inline-flex h-7 max-w-full items-center rounded-md border px-2 text-xs font-medium text-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
-                                    key={suggestion.email}
-                                    onClick={() =>
-                                      setDraftSpeaker(suggestion.name)
-                                    }
-                                    type="button"
-                                  >
-                                    <span className="truncate">
-                                      {suggestion.name}
-                                    </span>
-                                  </button>
-                                ))}
-                              </div>
-                            ) : null}
-                            {editingSpeaker?.allowSegmentScope ? (
-                              <div className="inline-flex w-fit rounded-md border bg-background p-0.5">
-                                <button
-                                  aria-pressed={
-                                    speakerApplyScope === "matching_speaker"
-                                  }
-                                  className={cn(
-                                    "h-7 rounded px-2 text-xs font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-                                    speakerApplyScope === "matching_speaker"
-                                      ? "bg-muted text-foreground"
-                                      : "text-muted-foreground hover:text-foreground",
-                                  )}
-                                  onClick={() =>
-                                    setSpeakerApplyScope("matching_speaker")
-                                  }
-                                  type="button"
-                                >
-                                  All matching
-                                </button>
-                                <button
-                                  aria-pressed={speakerApplyScope === "segment"}
-                                  className={cn(
-                                    "h-7 rounded px-2 text-xs font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-                                    speakerApplyScope === "segment"
-                                      ? "bg-muted text-foreground"
-                                      : "text-muted-foreground hover:text-foreground",
-                                  )}
-                                  onClick={() => setSpeakerApplyScope("segment")}
-                                  type="button"
-                                >
-                                  This line
-                                </button>
-                              </div>
-                            ) : null}
-                            {hasError ? (
-                              <p className="text-xs font-medium text-destructive">
-                                Add a speaker name.
-                              </p>
-                            ) : null}
-                          </form>
+                          renderSpeakerEditor({
+                            hasError,
+                            isSaving,
+                            showScope: true,
+                          })
                         ) : canEditSpeakers ? (
                           <button
                             aria-label={`Edit speaker ${speakerLabel}`}

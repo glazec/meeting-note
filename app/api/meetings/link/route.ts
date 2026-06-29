@@ -8,9 +8,11 @@ import {
 } from "@/lib/meeting-bot-records";
 import { buildAppUrl, detectMeetingPlatform } from "@/lib/meeting-links";
 import {
-  DEFAULT_RECALL_BOT_NAME,
-  scheduleRecallBot,
-} from "@/lib/vendors/recall";
+  getMeetingBotMetadata,
+  getMeetingBotProfile,
+  getMeetingBotRecallCreateInput,
+} from "@/lib/meeting-bot-profile";
+import { scheduleRecallBot } from "@/lib/vendors/recall";
 import { SharedOnlyAccessError } from "@/lib/access-errors";
 
 export const runtime = "nodejs";
@@ -48,7 +50,7 @@ export async function POST(request: Request) {
     );
   }
 
-  let scheduledMeeting: { meetingId: string };
+  let scheduledMeeting: { meetingId: string; teamId: string };
 
   try {
     scheduledMeeting = await createScheduledMeetingBot({
@@ -67,11 +69,13 @@ export async function POST(request: Request) {
   }
 
   try {
+    const botProfile = await getMeetingBotProfile(scheduledMeeting.teamId);
     const bot = (await scheduleRecallBot({
       meetingUrl: result.data.meetingUrl,
-      botName: DEFAULT_RECALL_BOT_NAME,
+      ...getMeetingBotRecallCreateInput(botProfile),
       webhookUrl: buildAppUrl("/api/recall/webhook"),
       metadata: {
+        ...getMeetingBotMetadata(botProfile),
         meetingId: scheduledMeeting.meetingId,
       },
     })) as RecallBotResponse;

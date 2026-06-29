@@ -31,7 +31,13 @@ export function SignInForm() {
 
   return (
     <div className="mt-8 flex flex-col items-start gap-3">
-      <Button type="button" onClick={signInWithGoogle} disabled={isPending}>
+      <Button
+        type="button"
+        onClick={signInWithGoogle}
+        disabled={isPending}
+        size="lg"
+        className="min-w-44"
+      >
         {isPending ? "Opening Google..." : "Continue with Google"}
       </Button>
       {error ? (

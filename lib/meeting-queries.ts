@@ -47,6 +47,10 @@ import {
   type MeetingLibraryStatusFilter,
 } from "@/lib/meeting-library-view-options";
 import {
+  buildMeetingTranslationSummary,
+  type MeetingTranslationSummary,
+} from "@/lib/meeting-translation-status";
+import {
   getOrCreateWorkspaceForSessionUser,
   type WorkspaceContext,
 } from "@/lib/workspace";
@@ -58,6 +62,9 @@ import {
 
 const uuidSchema = z.string().uuid();
 export const MEETING_LIBRARY_PAGE_SIZE = 50;
+export const DEFAULT_MEETING_LIBRARY_HISTORY_MONTHS = 6;
+export const MEETING_LIBRARY_HISTORY_MONTH_STEP = 6;
+export const MAX_MEETING_LIBRARY_HISTORY_MONTHS = 60;
 const genericMeetingGroupTitles = new Set([
   "google meet",
   "google meet recording",
@@ -76,6 +83,7 @@ export type MeetingTranscript = {
   platform: MeetingListItem["platform"];
   status: MeetingListItem["status"];
   transcriptJobStatus: TranscriptJobStatus | null;
+  translationSummary: MeetingTranslationSummary;
   audioUrl: string | null;
   segments: TranscriptSegment[];
   speakerSuggestions: SpeakerSuggestion[];
@@ -106,13 +114,18 @@ export type MeetingLibraryPage = {
   pageSize: number;
   hasNextPage: boolean;
   hasPreviousPage: boolean;
+  hasOlderMeetings: boolean;
+  historyMonths: number;
+  relatedHistoryMonths: number;
 };
 
 export type MeetingLibraryPageOptions = {
   now?: Date;
   page?: number;
   pageSize?: number;
+  historyMonths?: number;
   query?: string;
+  relatedHistoryMonths?: number;
   searchScope?: MeetingLibrarySearchScope;
   sort?: MeetingLibrarySort;
   status?: MeetingLibraryStatusFilter;
@@ -234,49 +247,42 @@ export async function listMeetingLibraryPageForWorkspace(
       ),
       primaryEntity: primaryEntityByMeetingId.get(meeting.id) ?? null,
     }));
-  const grouped = groupRelatedMeetings(items);
-  const itemById = new Map(items.map((meeting) => [meeting.id, meeting]));
-  const groupedById = new Map(
-    grouped.map((meeting) => [
-      meeting.id,
-      meeting.relatedMeetings.flatMap((relatedMeeting) => {
-        const fullMeeting = itemById.get(relatedMeeting.id);
-
-        return fullMeeting ? [toRelatedMeeting(fullMeeting)] : [];
-      }),
-    ]),
-  );
-
-  const meetingsForLibrary = items
-    .filter((meeting) => groupedById.has(meeting.id))
-    .map((meeting) => ({
-      id: meeting.id,
-      title: meeting.title,
-      platform: meeting.platform,
-      status: meeting.status,
-      transcriptJobStatus: meeting.transcriptJobStatus,
-      hasRecallBot: meeting.hasRecallBot,
-      startedAt: meeting.startedAt,
-      endedAt: meeting.endedAt,
-      durationMs: meeting.durationMs,
-      participantCount: meeting.participantCount,
-      accessScope: meeting.accessScope,
-      ...(meeting.primaryEntity
-        ? { primaryEntity: meeting.primaryEntity }
-        : {}),
-      relatedMeetings: groupedById.get(meeting.id),
-    }));
-
-  return buildMeetingLibraryPage(meetingsForLibrary, options);
+  return buildMeetingLibraryPage(items, options);
 }
 
 export function buildMeetingLibraryPage(
   meetingsForLibrary: MeetingListItem[],
   options: MeetingLibraryPageOptions = {},
 ): MeetingLibraryPage {
-  const nowTime = (options.now ?? new Date()).getTime();
+  const now = options.now ?? new Date();
+  const nowTime = now.getTime();
   const sort = parseMeetingLibrarySort(options.sort);
   const status = parseMeetingLibraryStatusFilter(options.status);
+  const historyMonths = normalizeHistoryMonths(options.historyMonths);
+  const relatedHistoryMonths = Math.max(
+    historyMonths,
+    normalizeHistoryMonths(options.relatedHistoryMonths ?? historyMonths),
+  );
+  const historyCutoff = subtractMonths(now, historyMonths);
+  const relatedHistoryCutoff = subtractMonths(now, relatedHistoryMonths);
+  const visibleMeetingsForLibrary = meetingsForLibrary.filter((meeting) =>
+    isMeetingInsideHistoryWindow(meeting, historyCutoff),
+  );
+  const relatedMeetingsForLibrary = meetingsForLibrary.filter((meeting) =>
+    isMeetingInsideHistoryWindow(meeting, relatedHistoryCutoff),
+  );
+  const relatedMeetingsByRoot = getRelatedMeetingsByRoot(
+    relatedMeetingsForLibrary,
+  );
+  const allRelatedMeetingsByRoot = getRelatedMeetingsByRoot(meetingsForLibrary);
+  const hasMoreRelatedMeetingByRoot = new Map(
+    Array.from(allRelatedMeetingsByRoot, ([meetingId, relatedMeetings]) => [
+      meetingId,
+      relatedMeetings.some(
+        (meeting) => !isMeetingInsideHistoryWindow(meeting, relatedHistoryCutoff),
+      ),
+    ]),
+  );
   const scheduledBotMeetingIds = new Set(
     meetingsForLibrary
       .filter((meeting) => isFutureScheduledBotMeeting(meeting, nowTime))
@@ -288,16 +294,39 @@ export function buildMeetingLibraryPage(
       .slice(0, 3)
       .map((meeting) => meeting.id),
   );
-  const sortedMeetings = meetingsForLibrary
-    .filter(
-      (meeting) =>
-        meeting.status !== "scheduled" ||
-        scheduledBotMeetingIds.has(meeting.id),
+  const meetingsForVisibleWindow = visibleMeetingsForLibrary
+    .filter((meeting) => relatedMeetingsByRoot.has(meeting.id))
+    .map((meeting) =>
+      toLibraryRootMeeting({
+        meeting,
+        hasMoreRelatedMeetings:
+          hasMoreRelatedMeetingByRoot.get(meeting.id) ?? false,
+        relatedMeetings: relatedMeetingsByRoot.get(meeting.id) ?? [],
+      }),
+    );
+  const allRootMeetings = meetingsForLibrary
+    .filter((meeting) => allRelatedMeetingsByRoot.has(meeting.id))
+    .map((meeting) =>
+      toLibraryRootMeeting({
+        meeting,
+        hasMoreRelatedMeetings: false,
+        relatedMeetings: allRelatedMeetingsByRoot.get(meeting.id) ?? [],
+      }),
+    );
+  const sortedMeetings = meetingsForVisibleWindow
+    .filter((meeting) =>
+      shouldShowMeetingInLibrary(meeting, scheduledBotMeetingIds),
     )
     .filter((meeting) => matchesMeetingLibraryStatus(meeting, status))
     .toSorted((left, right) =>
       compareMeetingLibraryItems(left, right, scheduledBotMeetingIds, sort),
     );
+  const hasOlderMeetings = allRootMeetings.some(
+    (meeting) =>
+      !isMeetingInsideHistoryWindow(meeting, historyCutoff) &&
+      shouldShowMeetingInLibrary(meeting, scheduledBotMeetingIds) &&
+      matchesMeetingLibraryStatus(meeting, status),
+  );
   const visibleMeetings =
     sort === "smart" ? foldSimilarMeetings(sortedMeetings) : sortedMeetings;
   const page = normalizePage(options.page);
@@ -310,7 +339,28 @@ export function buildMeetingLibraryPage(
     pageSize,
     hasNextPage: start + pageSize < visibleMeetings.length,
     hasPreviousPage: page > 1,
+    hasOlderMeetings,
+    historyMonths,
+    relatedHistoryMonths,
   };
+}
+
+function getRelatedMeetingsByRoot(meetingsForLibrary: MeetingListItem[]) {
+  const grouped = groupRelatedMeetings(meetingsForLibrary);
+  const itemById = new Map(
+    meetingsForLibrary.map((meeting) => [meeting.id, meeting]),
+  );
+
+  return new Map(
+    grouped.map((meeting) => [
+      meeting.id,
+      meeting.relatedMeetings.flatMap((relatedMeeting) => {
+        const fullMeeting = itemById.get(relatedMeeting.id);
+
+        return fullMeeting ? [toRelatedMeeting(fullMeeting)] : [];
+      }),
+    ]),
+  );
 }
 
 function foldSimilarMeetings(meetingsForLibrary: MeetingListItem[]) {
@@ -342,9 +392,35 @@ function foldSimilarMeetings(meetingsForLibrary: MeetingListItem[]) {
       existingRoot.relatedMeetings,
       [toRelatedMeeting(meeting), ...(meeting.relatedMeetings ?? [])],
     );
+    existingRoot.hasMoreRelatedMeetings =
+      Boolean(existingRoot.hasMoreRelatedMeetings) ||
+      Boolean(meeting.hasMoreRelatedMeetings);
   }
 
   return roots;
+}
+
+function shouldShowMeetingInLibrary(
+  meeting: MeetingListItem,
+  scheduledBotMeetingIds: Set<string>,
+) {
+  return (
+    meeting.status !== "scheduled" || scheduledBotMeetingIds.has(meeting.id)
+  );
+}
+
+function subtractMonths(date: Date, months: number) {
+  const copy = new Date(date);
+  copy.setMonth(copy.getMonth() - months);
+
+  return copy;
+}
+
+function isMeetingInsideHistoryWindow(
+  meeting: MeetingListItem,
+  cutoff: Date,
+) {
+  return new Date(meeting.startedAt).getTime() >= cutoff.getTime();
 }
 
 function getSimilarMeetingTitleKey(title: string) {
@@ -371,6 +447,33 @@ function toRelatedMeeting(meeting: MeetingListItem): MeetingListRelatedItem {
     hasRecallBot: meeting.hasRecallBot,
     accessScope: meeting.accessScope,
     primaryEntity: meeting.primaryEntity,
+  };
+}
+
+function toLibraryRootMeeting(input: {
+  meeting: MeetingListItem;
+  hasMoreRelatedMeetings: boolean;
+  relatedMeetings: MeetingListRelatedItem[];
+}): MeetingListItem {
+  return {
+    id: input.meeting.id,
+    title: input.meeting.title,
+    platform: input.meeting.platform,
+    status: input.meeting.status,
+    transcriptJobStatus: input.meeting.transcriptJobStatus,
+    hasRecallBot: input.meeting.hasRecallBot,
+    startedAt: input.meeting.startedAt,
+    endedAt: input.meeting.endedAt,
+    ...(typeof input.meeting.durationMs === "number"
+      ? { durationMs: input.meeting.durationMs }
+      : {}),
+    participantCount: input.meeting.participantCount,
+    accessScope: input.meeting.accessScope,
+    ...(input.meeting.primaryEntity
+      ? { primaryEntity: input.meeting.primaryEntity }
+      : {}),
+    ...(input.hasMoreRelatedMeetings ? { hasMoreRelatedMeetings: true } : {}),
+    relatedMeetings: input.relatedMeetings,
   };
 }
 
@@ -639,6 +742,17 @@ function normalizePageSize(pageSize: number | undefined) {
   return Math.max(1, Math.min(100, Math.floor(pageSize)));
 }
 
+function normalizeHistoryMonths(months: number | undefined) {
+  if (!months || !Number.isFinite(months)) {
+    return DEFAULT_MEETING_LIBRARY_HISTORY_MONTHS;
+  }
+
+  return Math.max(
+    DEFAULT_MEETING_LIBRARY_HISTORY_MONTHS,
+    Math.min(MAX_MEETING_LIBRARY_HISTORY_MONTHS, Math.floor(months)),
+  );
+}
+
 function getExternalParticipantKeys(
   attendeeEmails: unknown,
   workspaceDomain: string,
@@ -839,6 +953,8 @@ export async function getMeetingTranscriptForWorkspace(
       audioObjectKey: mediaAssets.objectKey,
       calendarAttendeeEmails: calendarEvents.attendeeEmails,
       recallRecordingId: meetings.recallRecordingId,
+      translationErrorMessage: meetings.translationErrorMessage,
+      translationStatus: meetings.translationStatus,
     })
     .from(meetings)
     .leftJoin(
@@ -899,6 +1015,14 @@ export async function getMeetingTranscriptForWorkspace(
     platform: meeting.platform,
     status: meeting.status,
     transcriptJobStatus: meeting.transcriptJobStatus,
+    translationSummary: buildMeetingTranslationSummary({
+      errorMessage: meeting.translationErrorMessage,
+      status: meeting.translationStatus,
+      totalSegments: segments.length,
+      translatedSegments: segments.filter((segment) =>
+        Boolean(segment.translatedText?.trim()),
+      ).length,
+    }),
     audioUrl:
       meeting.audioObjectKey || meeting.recallRecordingId
         ? `/api/meetings/${meeting.id}/audio`

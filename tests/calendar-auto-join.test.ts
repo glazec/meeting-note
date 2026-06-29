@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   deleteRecallCalendarEventBot,
   deleteScheduledRecallBot,
+  getMeetingBotProfile,
   insert,
   scheduleRecallCalendarEventBot,
   scheduleRecallBot,
@@ -12,6 +13,7 @@ const {
 } = vi.hoisted(() => ({
   deleteRecallCalendarEventBot: vi.fn(),
   deleteScheduledRecallBot: vi.fn(),
+  getMeetingBotProfile: vi.fn(),
   insert: vi.fn(),
   scheduleRecallCalendarEventBot: vi.fn(),
   scheduleRecallBot: vi.fn(),
@@ -37,10 +39,46 @@ vi.mock("@/lib/vendors/recall", () => ({
   updateScheduledRecallBot,
 }));
 
+vi.mock("@/lib/meeting-bot-profile", () => ({
+  getMeetingBotProfile,
+  getMeetingBotMetadata: (profile: {
+    botName: string;
+    avatarJpegBase64: string | null;
+  }) => (profile.botName === "IOSG Old Friend" ? {} : { botName: profile.botName }),
+  getMeetingBotRecallCreateInput: (profile: {
+    botName: string;
+    avatarJpegBase64: string | null;
+  }) => ({
+    botName: profile.botName,
+    ...(profile.avatarJpegBase64
+      ? { avatarJpegBase64: profile.avatarJpegBase64 }
+      : {}),
+  }),
+  getMeetingBotRecallUpdateInput: (profile: {
+    botName: string;
+    avatarJpegBase64: string | null;
+  }) => ({
+    ...(profile.botName === "IOSG Old Friend"
+      ? {}
+      : { botName: profile.botName }),
+    ...(profile.avatarJpegBase64
+      ? { avatarJpegBase64: profile.avatarJpegBase64 }
+      : {}),
+  }),
+}));
+
 describe("calendar auto join", () => {
+  beforeEach(() => {
+    getMeetingBotProfile.mockResolvedValue({
+      botName: "IOSG Old Friend",
+      avatarJpegBase64: null,
+    });
+  });
+
   afterEach(() => {
     deleteRecallCalendarEventBot.mockReset();
     deleteScheduledRecallBot.mockReset();
+    getMeetingBotProfile.mockReset();
     insert.mockReset();
     scheduleRecallCalendarEventBot.mockReset();
     scheduleRecallBot.mockReset();
@@ -124,6 +162,10 @@ describe("calendar auto join", () => {
       }),
     });
     update.mockReturnValue({ set: updateSet });
+    getMeetingBotProfile.mockResolvedValue({
+      botName: "Deal Scribe",
+      avatarJpegBase64: "custom-avatar",
+    });
     scheduleRecallBot.mockResolvedValue({ id: "bot_123" });
 
     const { autoJoinCalendarEvent } = await import("@/lib/calendar-auto-join");
@@ -197,9 +239,11 @@ describe("calendar auto join", () => {
       },
     ]);
     expect(scheduleRecallBot).toHaveBeenCalledWith({
-      botName: "IOSG Old Friend",
+      botName: "Deal Scribe",
+      avatarJpegBase64: "custom-avatar",
       meetingUrl: "https://meet.google.com/abc-defg-hij",
       metadata: {
+        botName: "Deal Scribe",
         calendarEventId: "33333333-3333-4333-8333-333333333333",
         meetingId: "44444444-4444-4444-8444-444444444444",
       },

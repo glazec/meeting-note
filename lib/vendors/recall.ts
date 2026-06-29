@@ -52,7 +52,13 @@ type RecallAutomaticVideoOutput = {
 let recallBotLogoJpegBase64: string | null = null;
 
 export function getDefaultRecallBotVideoOutput(): RecallAutomaticVideoOutput {
-  const logo = getRecallBotLogoJpegBase64();
+  return buildRecallBotVideoOutput(getRecallBotLogoJpegBase64());
+}
+
+function buildRecallBotVideoOutput(
+  avatarJpegBase64: string,
+): RecallAutomaticVideoOutput {
+  const logo = avatarJpegBase64;
 
   return {
     in_call_not_recording: {
@@ -66,9 +72,20 @@ export function getDefaultRecallBotVideoOutput(): RecallAutomaticVideoOutput {
   };
 }
 
+function getRecallBotVideoOutput(input?: string | null) {
+  if (input) {
+    return buildRecallBotVideoOutput(input);
+  }
+
+  const logo = getRecallBotLogoJpegBase64();
+
+  return buildRecallBotVideoOutput(logo);
+}
+
 const recallBotInputSchema = z.object({
   meetingUrl: z.string().url(),
   botName: z.string().trim().min(1).max(100).default(DEFAULT_RECALL_BOT_NAME),
+  avatarJpegBase64: z.string().trim().min(1).optional(),
   startAt: z.string().datetime().optional(),
   webhookUrl: z.string().url(),
   metadata: z.record(z.string(), z.string()).optional(),
@@ -77,6 +94,8 @@ const recallBotInputSchema = z.object({
 const recallBotUpdateInputSchema = z.object({
   botId: z.string().trim().min(1),
   meetingUrl: z.string().url(),
+  botName: z.string().trim().min(1).max(100).optional(),
+  avatarJpegBase64: z.string().trim().min(1).optional(),
   startAt: z.string().datetime(),
   metadata: z.record(z.string(), z.string()).optional(),
 });
@@ -106,6 +125,7 @@ const recallCalendarEventBotInputSchema = z.object({
   calendarEventId: z.string().trim().min(1),
   deduplicationKey: z.string().trim().min(1).max(2000),
   botName: z.string().trim().min(1).max(100).default(DEFAULT_RECALL_BOT_NAME),
+  avatarJpegBase64: z.string().trim().min(1).optional(),
   metadata: z.record(z.string(), z.string()).optional(),
 });
 
@@ -204,6 +224,7 @@ export function getRecallWebhookIdempotencyKey(
 export async function scheduleRecallBot(input: {
   meetingUrl: string;
   botName?: string;
+  avatarJpegBase64?: string;
   startAt?: string;
   webhookUrl: string;
   metadata?: Record<string, string>;
@@ -222,7 +243,9 @@ export async function scheduleRecallBot(input: {
       meeting_url: parsedInput.meetingUrl,
       bot_name: parsedInput.botName,
       join_at: parsedInput.startAt,
-      automatic_video_output: getDefaultRecallBotVideoOutput(),
+      automatic_video_output: getRecallBotVideoOutput(
+        parsedInput.avatarJpegBase64,
+      ),
       recording_config: buildRecallRealtimeRecordingConfig(
         buildRecallRealtimeWebhookUrl(parsedInput.webhookUrl),
       ),
@@ -389,6 +412,7 @@ export async function scheduleRecallCalendarEventBot(input: {
   calendarEventId: string;
   deduplicationKey: string;
   botName?: string;
+  avatarJpegBase64?: string;
   metadata?: Record<string, string>;
 }) {
   const parsedInput = recallCalendarEventBotInputSchema.parse(input);
@@ -408,7 +432,9 @@ export async function scheduleRecallCalendarEventBot(input: {
         deduplication_key: parsedInput.deduplicationKey,
         bot_config: {
           bot_name: parsedInput.botName,
-          automatic_video_output: getDefaultRecallBotVideoOutput(),
+          automatic_video_output: getRecallBotVideoOutput(
+            parsedInput.avatarJpegBase64,
+          ),
           recording_config: buildRecallRealtimeRecordingConfig(
             buildRecallRealtimeWebhookUrl(),
           ),
@@ -462,6 +488,8 @@ export async function deleteRecallCalendarEventBot(input: {
 export async function updateScheduledRecallBot(input: {
   botId: string;
   meetingUrl: string;
+  botName?: string;
+  avatarJpegBase64?: string;
   startAt: string;
   metadata?: Record<string, string>;
 }) {
@@ -479,8 +507,11 @@ export async function updateScheduledRecallBot(input: {
       },
       body: JSON.stringify({
         meeting_url: parsedInput.meetingUrl,
+        ...(parsedInput.botName ? { bot_name: parsedInput.botName } : {}),
         join_at: parsedInput.startAt,
-        automatic_video_output: getDefaultRecallBotVideoOutput(),
+        automatic_video_output: getRecallBotVideoOutput(
+          parsedInput.avatarJpegBase64,
+        ),
         recording_config: buildRecallRealtimeRecordingConfig(
           buildRecallRealtimeWebhookUrl(),
         ),

@@ -32,8 +32,8 @@ export function CalendarAutomationPanel({
   const statusVariant = connected ? "secondary" : "destructive";
 
   return (
-    <Card size="sm" className="w-full sm:max-w-sm">
-      <CardHeader>
+    <Card size="sm" className="w-full shadow-sm sm:max-w-sm">
+      <CardHeader className="border-b bg-muted/35">
         <CardTitle>Calendar capture</CardTitle>
         <CardDescription>
           Future meetings are watched from the connected calendar.
@@ -96,8 +96,10 @@ function StatusRow({
   value: string;
 }) {
   return (
-    <div className="grid grid-cols-[1rem_1fr] gap-x-2">
-      <span className="text-muted-foreground [&>svg]:size-4">{icon}</span>
+    <div className="grid grid-cols-[1.5rem_1fr] gap-x-2">
+      <span className="flex size-6 items-center justify-center rounded-md bg-primary/10 text-primary [&>svg]:size-3.5">
+        {icon}
+      </span>
       <span className="min-w-0">
         <span className="block font-medium leading-5">{label}</span>
         <span className="block text-muted-foreground">{value}</span>

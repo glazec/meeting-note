@@ -90,4 +90,31 @@ describe("Recall chat messages", () => {
       reason: "not_addressed_to_bot",
     });
   });
+
+  it("answers global mentions of a custom bot name from metadata", () => {
+    const customMention = normalizeRecallChatWebhook({
+      ...chatPayload,
+      data: {
+        ...chatPayload.data,
+        data: {
+          ...chatPayload.data.data,
+          data: {
+            text: "@Deal Scribe what did we decide?",
+            to: "everyone",
+          },
+        },
+        bot: {
+          id: "bot_123",
+          metadata: {
+            botName: "Deal Scribe",
+          },
+        },
+      },
+    });
+
+    expect(shouldAnswerRecallChatMessage(customMention)).toEqual({
+      shouldAnswer: true,
+      question: "what did we decide?",
+    });
+  });
 });

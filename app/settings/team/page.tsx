@@ -11,6 +11,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { requireCurrentUser } from "@/lib/auth-guards";
+import { getMeetingBotProfile } from "@/lib/meeting-bot-profile";
 import { listTeamVocabularyTerms } from "@/lib/team-vocabulary";
 import {
   getOrCreateWorkspaceForSessionUser,
@@ -26,6 +27,9 @@ export default async function TeamSettingsPage() {
   const vocabularyTerms = accessSummary.canCreateMeetings
     ? await listTeamVocabularyTerms(workspace.teamId)
     : [];
+  const botProfile = accessSummary.canCreateMeetings
+    ? await getMeetingBotProfile(workspace.teamId)
+    : null;
 
   if (!accessSummary.canCreateMeetings) {
     redirect("/dashboard");
@@ -63,6 +67,89 @@ export default async function TeamSettingsPage() {
             </p>
           </CardContent>
         </Card>
+        {botProfile ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Meeting bot</CardTitle>
+              <CardDescription>
+                Set the name and JPG avatar people see when the bot joins calls.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form
+                action="/api/team/bot-profile"
+                className="flex flex-col gap-4"
+                encType="multipart/form-data"
+                method="post"
+              >
+                <div className="grid gap-2">
+                  <label
+                    className="text-sm leading-none font-medium"
+                    htmlFor="botName"
+                  >
+                    Bot name
+                  </label>
+                  <Input
+                    defaultValue={botProfile.botName}
+                    id="botName"
+                    maxLength={100}
+                    name="botName"
+                    required
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <label
+                    className="text-sm leading-none font-medium"
+                    htmlFor="avatar"
+                  >
+                    Avatar
+                  </label>
+                  <Input
+                    accept="image/jpeg"
+                    id="avatar"
+                    name="avatar"
+                    type="file"
+                  />
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    Upload a JPG image under 1 MB.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <div
+                    aria-label="Current bot avatar"
+                    className="size-16 rounded-lg border bg-muted bg-cover bg-center"
+                    role="img"
+                    style={
+                      botProfile.avatarJpegBase64
+                        ? {
+                            backgroundImage: `url(data:image/jpeg;base64,${botProfile.avatarJpegBase64})`,
+                          }
+                        : undefined
+                    }
+                  />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">
+                      {botProfile.avatarJpegBase64
+                        ? "Custom avatar saved"
+                        : "Default avatar"}
+                    </p>
+                    <label className="mt-2 flex items-center gap-2 text-xs font-normal text-muted-foreground">
+                      <input
+                        className="size-4"
+                        name="resetAvatar"
+                        type="checkbox"
+                      />
+                      Use default avatar
+                    </label>
+                  </div>
+                </div>
+                <Button className="self-start" type="submit">
+                  Save bot profile
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        ) : null}
         <Card>
           <CardHeader>
             <CardTitle>Team vocabulary</CardTitle>

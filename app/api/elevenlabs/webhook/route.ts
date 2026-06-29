@@ -10,6 +10,12 @@ import {
 import { applyElevenLabsTranscriptEvent } from "@/lib/elevenlabs-transcripts";
 import { inngest } from "@/inngest/client";
 import {
+  markMeetingTranslationCompleted,
+  markMeetingTranslationFailed,
+  markMeetingTranslationQueued,
+} from "@/lib/meeting-translation-jobs";
+import { shouldAutoTranslateTranscript } from "@/lib/meeting-translation-language";
+import {
   verifyElevenLabsWebhook,
   webhookVerificationResponse,
 } from "@/lib/webhook-signatures";
@@ -47,12 +53,19 @@ export async function POST(request: Request) {
       const persistence = await applyElevenLabsTranscriptEvent(event);
 
       if (persistence.action === "complete") {
-        await inngest
-          .send({
-            name: "meeting/enrich.transcript",
-            data: { meetingId: persistence.meetingId },
-          })
-          .catch(() => undefined);
+        if (shouldAutoTranslateTranscript(persistence.text)) {
+          await markMeetingTranslationQueued(persistence.meetingId);
+          await inngest
+            .send({
+              name: "meeting/enrich.transcript",
+              data: { meetingId: persistence.meetingId },
+            })
+            .catch((error) =>
+              markMeetingTranslationFailed(persistence.meetingId, error),
+            );
+        } else {
+          await markMeetingTranslationCompleted(persistence.meetingId);
+        }
       }
 
       await markVendorWebhookEventProcessed({

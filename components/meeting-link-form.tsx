@@ -65,11 +65,21 @@ export function MeetingLinkForm() {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Meeting link</CardTitle>
-        <CardDescription>
-          Schedule a bot for a Google Meet or Zoom call.
-        </CardDescription>
+      <CardHeader className="border-b bg-muted/35">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <CardTitle>Meeting link</CardTitle>
+            <CardDescription>
+              Schedule a bot for a Google Meet or Zoom call.
+            </CardDescription>
+          </div>
+          <span
+            aria-hidden="true"
+            className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary"
+          >
+            <CalendarPlus className="size-4" />
+          </span>
+        </div>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -80,6 +90,7 @@ export function MeetingLinkForm() {
               name="meeting-link"
               type="url"
               placeholder="https://meet.google.com/example"
+              className="bg-background"
               aria-invalid={state === "error"}
             />
           </div>

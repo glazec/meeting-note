@@ -22,12 +22,18 @@ const {
   applyElevenLabsTranscriptEvent,
   applyRecallMeetingEvent,
   markVendorWebhookEventProcessed,
+  markMeetingTranslationCompleted,
+  markMeetingTranslationFailed,
+  markMeetingTranslationQueued,
   recordVendorWebhookEvent,
   MissingWebhookIdempotencyKeyError,
 } = vi.hoisted(() => ({
     applyElevenLabsTranscriptEvent: vi.fn(),
     applyRecallMeetingEvent: vi.fn(),
     markVendorWebhookEventProcessed: vi.fn(),
+    markMeetingTranslationCompleted: vi.fn(),
+    markMeetingTranslationFailed: vi.fn(),
+    markMeetingTranslationQueued: vi.fn(),
     recordVendorWebhookEvent: vi.fn(),
     MissingWebhookIdempotencyKeyError: class MissingWebhookIdempotencyKeyError extends Error {
       constructor() {
@@ -46,6 +52,12 @@ vi.mock("@/lib/vendor-webhook-events", () => {
 
 vi.mock("@/lib/elevenlabs-transcripts", () => ({
   applyElevenLabsTranscriptEvent,
+}));
+
+vi.mock("@/lib/meeting-translation-jobs", () => ({
+  markMeetingTranslationCompleted,
+  markMeetingTranslationFailed,
+  markMeetingTranslationQueued,
 }));
 
 vi.mock("@/lib/recall-meetings", () => ({
@@ -67,6 +79,14 @@ function signElevenLabsWebhook(rawBody: string) {
 function signRecallWebhook(rawBody: string) {
   const messageId = "msg_test";
   const timestamp = Math.floor(Date.now() / 1000).toString();
+  return signRecallWebhookWithTimestamp(rawBody, messageId, timestamp);
+}
+
+function signRecallWebhookWithTimestamp(
+  rawBody: string,
+  messageId: string,
+  timestamp: string,
+) {
   const key = Buffer.from(recallWebhookSecret.slice("whsec_".length), "base64");
   const signature = createHmac("sha256", key)
     .update(`${messageId}.${timestamp}.${rawBody}`)
@@ -176,6 +196,9 @@ describe("vendor webhook normalization", () => {
       shouldProcess: true,
     });
     markVendorWebhookEventProcessed.mockResolvedValue(undefined);
+    markMeetingTranslationCompleted.mockResolvedValue(undefined);
+    markMeetingTranslationFailed.mockResolvedValue(undefined);
+    markMeetingTranslationQueued.mockResolvedValue(undefined);
     applyElevenLabsTranscriptEvent.mockResolvedValue({ action: "skip" });
     applyRecallMeetingEvent.mockResolvedValue({ action: "skip" });
   });
@@ -185,6 +208,9 @@ describe("vendor webhook normalization", () => {
     vi.unstubAllEnvs();
     vi.resetModules();
     markVendorWebhookEventProcessed.mockReset();
+    markMeetingTranslationCompleted.mockReset();
+    markMeetingTranslationFailed.mockReset();
+    markMeetingTranslationQueued.mockReset();
     recordVendorWebhookEvent.mockReset();
     applyElevenLabsTranscriptEvent.mockReset();
     applyRecallMeetingEvent.mockReset();
@@ -403,6 +429,35 @@ describe("vendor webhook normalization", () => {
         transcriptionText: "Transcript text",
       }),
     );
+  });
+
+  it("does not queue automatic translation for mostly Chinese transcripts", async () => {
+    applyElevenLabsTranscriptEvent.mockResolvedValueOnce({
+      action: "complete",
+      meetingId: "11111111-1111-4111-8111-111111111111",
+      text: "今天我们先聊 IOSG portfolio，然后看 OpenAI API 成本和下周安排。",
+    });
+
+    const response = await postElevenLabsWebhook({
+      type: "speech_to_text_transcription",
+      data: {
+        request_id: "req_123",
+        webhook_metadata: {
+          meetingId: "11111111-1111-4111-8111-111111111111",
+          transcriptJobId: "22222222-2222-4222-8222-222222222222",
+        },
+        transcription: {
+          text: "今天我们先聊 IOSG portfolio，然后看 OpenAI API 成本和下周安排。",
+        },
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(markMeetingTranslationCompleted).toHaveBeenCalledWith(
+      "11111111-1111-4111-8111-111111111111",
+    );
+    expect(markMeetingTranslationQueued).not.toHaveBeenCalled();
+    expect(markMeetingTranslationFailed).not.toHaveBeenCalled();
   });
 
   it("accepts copied ElevenLabs webhook secret values", async () => {
@@ -680,6 +735,35 @@ describe("vendor webhook normalization", () => {
     });
   });
 
+  it("rejects stale Recall webhook signatures", async () => {
+    const payload = {
+      event: "bot.status_change",
+      data: {
+        data: {
+          code: "done",
+          sub_code: "recording_done",
+          updated_at: "2026-06-23T12:00:00Z",
+        },
+        bot: {
+          id: "bot_123",
+          metadata: {},
+        },
+      },
+    };
+    const rawBody = JSON.stringify(payload);
+    const response = await postRecallWebhookWithHeaders(
+      payload,
+      signRecallWebhookWithTimestamp(rawBody, "msg_test", "1731705121"),
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid webhook signature",
+    });
+    expect(recordVendorWebhookEvent).not.toHaveBeenCalled();
+    expect(applyRecallMeetingEvent).not.toHaveBeenCalled();
+  });
+
   it("rejects invalid Recall webhook signatures", async () => {
     const response = await postRecallWebhookWithHeaders(
       {
@@ -795,6 +879,42 @@ describe("vendor job creation", () => {
           ],
         },
       ],
+    });
+  });
+
+  it("uses a custom Recall bot avatar when provided", async () => {
+    vi.stubEnv("RECALL_API_KEY", "recall-key\n");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "bot_123" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await scheduleRecallBot({
+      meetingUrl: "https://meet.google.com/abc-defg-hij",
+      botName: "Deal Scribe",
+      avatarJpegBase64: "custom-avatar",
+      webhookUrl: "https://app.example.com/api/recall/webhook",
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(String(init.body));
+
+    expect(body).toMatchObject({
+      meeting_url: "https://meet.google.com/abc-defg-hij",
+      bot_name: "Deal Scribe",
+    });
+    expect(body.automatic_video_output).toEqual({
+      in_call_not_recording: {
+        kind: "jpeg",
+        b64_data: "custom-avatar",
+      },
+      in_call_recording: {
+        kind: "jpeg",
+        b64_data: "custom-avatar",
+      },
     });
   });
 

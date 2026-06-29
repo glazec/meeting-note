@@ -20,7 +20,13 @@ type RecallMeetingUpdate =
       meetingId: string;
       recallBotId: string | null;
       recallRecordingId: string | null;
-      status: "scheduled" | "recording" | "processing" | "failed" | null;
+      status:
+        | "scheduled"
+        | "recording"
+        | "processing"
+        | "failed"
+        | "missed"
+        | null;
     }
   | {
       action: "skip";
@@ -142,11 +148,15 @@ function mapRecallStatus(event: RecallWebhookEvent) {
     .join(" ")
     .toLowerCase();
 
+  if (isRecallMissedRecording(event)) {
+    return "missed";
+  }
+
   if (/(fatal|fail|error)/.test(statusText)) {
     return "failed";
   }
 
-  if (/recording_done|done|ended|complete/.test(statusText)) {
+  if (/recording_done|\bdone\b|complete/.test(statusText)) {
     return "processing";
   }
 
@@ -155,4 +165,20 @@ function mapRecallStatus(event: RecallWebhookEvent) {
   }
 
   return null;
+}
+
+function isRecallMissedRecording(event: RecallWebhookEvent) {
+  if (event.recordingId) {
+    return false;
+  }
+
+  const code = (event.code ?? event.statusCode ?? "").toLowerCase();
+  const eventType = event.eventType.toLowerCase();
+
+  return (
+    code === "call_ended" ||
+    code === "fatal" ||
+    eventType === "bot.call_ended" ||
+    eventType === "bot.fatal"
+  );
 }

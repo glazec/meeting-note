@@ -15,7 +15,12 @@ import {
 } from "@/lib/meeting-links";
 import { buildSmartMeetingTitle } from "@/lib/meeting-intelligence";
 import {
-  DEFAULT_RECALL_BOT_NAME,
+  getMeetingBotMetadata,
+  getMeetingBotProfile,
+  getMeetingBotRecallCreateInput,
+  getMeetingBotRecallUpdateInput,
+} from "@/lib/meeting-bot-profile";
+import {
   deleteRecallCalendarEventBot,
   deleteScheduledRecallBot,
   scheduleRecallCalendarEventBot,
@@ -292,6 +297,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
       meetingUrl,
       startsAt,
       endsAt,
+      teamId: input.connection.teamId,
       teamMeetingKey: activeTeamMeetingKey,
     });
   }
@@ -348,6 +354,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
       meetingUrl,
       startsAt,
       endsAt,
+      teamId: input.connection.teamId,
       teamMeetingKey: activeTeamMeetingKey,
       forceScheduleBot: true,
     });
@@ -378,6 +385,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
       event: input.event,
       meetingUrl,
       startsAt,
+      teamId: input.connection.teamId,
       teamMeetingKey: activeTeamMeetingKey,
       calendarEventId: calendarEvent.id,
       meetingId: meeting.id,
@@ -515,6 +523,7 @@ async function syncExistingCalendarMeeting(input: {
   meetingUrl: string;
   startsAt: Date;
   endsAt: Date | null;
+  teamId: string;
   teamMeetingKey?: string | null;
   forceScheduleBot?: boolean;
 }) {
@@ -546,6 +555,7 @@ async function syncExistingCalendarMeeting(input: {
         event: input.event,
         meetingUrl: input.meetingUrl,
         startsAt: input.startsAt,
+        teamId: input.teamId,
         teamMeetingKey: input.teamMeetingKey,
         calendarEventId: input.calendarEvent.id,
         meetingId: input.meeting.id,
@@ -757,9 +767,12 @@ async function scheduleBotForCalendarEvent(input: {
   teamMeetingKey?: string | null;
   calendarEventId: string;
   meetingId: string;
+  teamId: string;
   existingBotId?: string;
 }) {
+  const botProfile = await getMeetingBotProfile(input.teamId);
   const metadata = {
+    ...getMeetingBotMetadata(botProfile),
     calendarEventId: input.calendarEventId,
     meetingId: input.meetingId,
   };
@@ -771,7 +784,7 @@ async function scheduleBotForCalendarEvent(input: {
         input.teamMeetingKey ??
         input.event.recallCalendarEventDeduplicationKey ??
         input.event.recallCalendarEventId,
-      botName: DEFAULT_RECALL_BOT_NAME,
+      ...getMeetingBotRecallCreateInput(botProfile),
       metadata,
     })) as RecallBotResponse;
   }
@@ -780,6 +793,7 @@ async function scheduleBotForCalendarEvent(input: {
     return (await updateScheduledRecallBot({
       botId: input.existingBotId,
       meetingUrl: input.meetingUrl,
+      ...getMeetingBotRecallUpdateInput(botProfile),
       startAt: input.startsAt.toISOString(),
       metadata,
     })) as RecallBotResponse;
@@ -787,7 +801,7 @@ async function scheduleBotForCalendarEvent(input: {
 
   return (await scheduleRecallBot({
     meetingUrl: input.meetingUrl,
-    botName: DEFAULT_RECALL_BOT_NAME,
+    ...getMeetingBotRecallCreateInput(botProfile),
     startAt: input.startsAt.toISOString(),
     webhookUrl: buildAppUrl("/api/recall/webhook"),
     metadata,

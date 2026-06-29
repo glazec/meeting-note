@@ -5,14 +5,12 @@ type SegmentForTranslation = {
   text: string;
 };
 
-const translationResponseSchema = z.object({
-  translations: z.array(
-    z.object({
-      id: z.string().min(1),
-      text: z.string().trim().min(1),
-    }),
-  ),
-});
+const translatedRowsSchema = z.array(
+  z.object({
+    id: z.string().min(1),
+    text: z.string().trim().min(1),
+  }),
+);
 
 export function buildChineseTranslationMessages(
   segments: SegmentForTranslation[],
@@ -21,7 +19,7 @@ export function buildChineseTranslationMessages(
     {
       role: "system" as const,
       content:
-        "Translate meeting transcript segments into concise Chinese. Preserve product names, company names, numbers, and tickers. Return only JSON.",
+        "Translate meeting transcript segments into concise Chinese. Preserve product names, company names, numbers, and tickers. Return only JSON. Do not wrap the JSON in markdown fences.",
     },
     {
       role: "user" as const,
@@ -40,9 +38,43 @@ export function parseChineseTranslationResponse(input: {
   segmentIds: string[];
 }) {
   const allowedIds = new Set(input.segmentIds);
-  const parsed = translationResponseSchema.parse(JSON.parse(input.content));
+  const parsedJson = JSON.parse(extractJsonObject(input.content));
+  const translatedRows = getTranslatedRows(parsedJson);
 
-  return parsed.translations.filter((translation) =>
-    allowedIds.has(translation.id),
+  return translatedRows.filter((translation) => allowedIds.has(translation.id));
+}
+
+function extractJsonObject(content: string) {
+  const trimmedContent = content.trim();
+
+  if (trimmedContent.startsWith("{")) {
+    return trimmedContent;
+  }
+
+  const fencedJson = trimmedContent.match(
+    /^```(?:json)?\s*([\s\S]*?)\s*```$/i,
   );
+
+  if (fencedJson?.[1]) {
+    return fencedJson[1].trim();
+  }
+
+  const objectMatch = trimmedContent.match(/\{[\s\S]*\}/);
+
+  if (objectMatch?.[0]) {
+    return objectMatch[0];
+  }
+
+  return trimmedContent;
+}
+
+function getTranslatedRows(input: unknown) {
+  const parsedObject = z
+    .object({
+      translations: translatedRowsSchema.optional(),
+      segments: translatedRowsSchema.optional(),
+    })
+    .parse(input);
+
+  return parsedObject.translations ?? parsedObject.segments ?? [];
 }

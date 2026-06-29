@@ -56,16 +56,22 @@ describe("vendor webhook idempotency", () => {
       expect.objectContaining({
         idempotencyKey: "msg_calendar_sync",
         processedAt: null,
+        processingStartedAt: expect.any(Date),
       }),
     );
   });
 
-  it("allows a duplicate webhook retry when the stored row is not processed", async () => {
+  it("skips a duplicate webhook while the stored row is being processed", async () => {
     const returning = vi.fn().mockResolvedValue([]);
     const onConflictDoNothing = vi.fn().mockReturnValue({ returning });
     const values = vi.fn().mockReturnValue({ onConflictDoNothing });
+    const processingStartedAt = new Date("2026-06-30T11:58:00.000Z");
+    const claimReturning = vi.fn().mockResolvedValue([]);
+    const claimWhere = vi.fn().mockReturnValue({ returning: claimReturning });
+    const claimSet = vi.fn().mockReturnValue({ where: claimWhere });
 
     insert.mockReturnValue({ values });
+    update.mockReturnValue({ set: claimSet });
     select.mockReturnValue({
       from: () => ({
         where: () => ({
@@ -73,6 +79,7 @@ describe("vendor webhook idempotency", () => {
             {
               id: "11111111-1111-4111-8111-111111111111",
               processedAt: null,
+              processingStartedAt,
             },
           ]),
         }),
@@ -94,8 +101,53 @@ describe("vendor webhook idempotency", () => {
       id: "11111111-1111-4111-8111-111111111111",
       inserted: false,
       processed: false,
+      shouldProcess: false,
+    });
+    expect(claimSet).toHaveBeenCalled();
+  });
+
+  it("claims a stale unfinished webhook before retrying it", async () => {
+    const returning = vi.fn().mockResolvedValue([]);
+    const onConflictDoNothing = vi.fn().mockReturnValue({ returning });
+    const values = vi.fn().mockReturnValue({ onConflictDoNothing });
+    const claimReturning = vi.fn().mockResolvedValue([
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        processedAt: null,
+        processingStartedAt: new Date("2026-06-30T12:00:00.000Z"),
+      },
+    ]);
+    const claimWhere = vi.fn().mockReturnValue({ returning: claimReturning });
+    const claimSet = vi.fn().mockReturnValue({ where: claimWhere });
+
+    insert.mockReturnValue({ values });
+    update.mockReturnValue({ set: claimSet });
+
+    const { recordVendorWebhookEvent } = await import(
+      "@/lib/vendor-webhook-events"
+    );
+
+    await expect(
+      recordVendorWebhookEvent({
+        provider: "recall",
+        eventType: "calendar.sync_events",
+        idempotencyKey: "msg_calendar_sync",
+        payload: { event: "calendar.sync_events" },
+      }),
+    ).resolves.toEqual({
+      id: "11111111-1111-4111-8111-111111111111",
+      inserted: false,
+      processed: false,
       shouldProcess: true,
     });
+
+    expect(claimSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        processingStartedAt: expect.any(Date),
+        updatedAt: expect.any(Date),
+      }),
+    );
+    expect(select).not.toHaveBeenCalled();
   });
 
   it("skips a duplicate webhook when the stored row is already processed", async () => {
@@ -103,8 +155,12 @@ describe("vendor webhook idempotency", () => {
     const returning = vi.fn().mockResolvedValue([]);
     const onConflictDoNothing = vi.fn().mockReturnValue({ returning });
     const values = vi.fn().mockReturnValue({ onConflictDoNothing });
+    const claimReturning = vi.fn().mockResolvedValue([]);
+    const claimWhere = vi.fn().mockReturnValue({ returning: claimReturning });
+    const claimSet = vi.fn().mockReturnValue({ where: claimWhere });
 
     insert.mockReturnValue({ values });
+    update.mockReturnValue({ set: claimSet });
     select.mockReturnValue({
       from: () => ({
         where: () => ({
@@ -155,6 +211,7 @@ describe("vendor webhook idempotency", () => {
     expect(set).toHaveBeenCalledWith(
       expect.objectContaining({
         processedAt: expect.any(Date),
+        processingStartedAt: null,
         updatedAt: expect.any(Date),
       }),
     );

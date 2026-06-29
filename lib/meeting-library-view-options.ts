@@ -11,6 +11,7 @@ export const meetingLibraryStatusFilters = [
   "in_progress",
   "ready",
   "failed",
+  "missed",
 ] as const;
 
 export const meetingLibrarySorts = [
@@ -64,6 +65,7 @@ export const meetingLibraryStatusLabels: Record<
   in_progress: "In progress",
   ready: "Ready",
   failed: "Failed",
+  missed: "No recording",
 };
 
 export const meetingLibrarySortLabels: Record<MeetingLibrarySort, string> = {

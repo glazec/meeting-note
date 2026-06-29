@@ -84,7 +84,7 @@ describe("buildRecallMeetingUpdate", () => {
     });
   });
 
-  it("marks meetings as failed when Recall reports an error", () => {
+  it("marks Recall bot fatal join failures as missed", () => {
     expect(
       buildRecallMeetingUpdate({
         eventType: "bot.status_change",
@@ -104,7 +104,31 @@ describe("buildRecallMeetingUpdate", () => {
       meetingId: "11111111-1111-4111-8111-111111111111",
       recallBotId: "bot_123",
       recallRecordingId: null,
-      status: "failed",
+      status: "missed",
+    });
+  });
+
+  it("marks bot call endings without a recording as missed", () => {
+    expect(
+      buildRecallMeetingUpdate({
+        eventType: "bot.call_ended",
+        botId: "bot_123",
+        recordingId: null,
+        meetingUrl: null,
+        statusCode: "call_ended",
+        code: "call_ended",
+        subCode: "timeout_exceeded_waiting_room",
+        updatedAt: "2026-06-23T12:00:00Z",
+        metadata: {
+          meetingId: "11111111-1111-4111-8111-111111111111",
+        },
+      }),
+    ).toEqual({
+      action: "update",
+      meetingId: "11111111-1111-4111-8111-111111111111",
+      recallBotId: "bot_123",
+      recallRecordingId: null,
+      status: "missed",
     });
   });
 

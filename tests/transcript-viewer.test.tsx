@@ -1,10 +1,16 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   getWaveformHoverSnapshot,
   TranscriptViewer,
 } from "@/components/transcript-viewer";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    refresh: vi.fn(),
+  }),
+}));
 
 const segments = [
   {
@@ -62,6 +68,17 @@ describe("TranscriptViewer", () => {
     expect(html).toContain("Edit speaker");
   });
 
+  it("labels speaker summary chips as rename controls", () => {
+    const html = renderToStaticMarkup(
+      <TranscriptViewer
+        meetingId="11111111-1111-4111-8111-111111111111"
+        segments={segments}
+      />,
+    );
+
+    expect(html).toContain('aria-label="Rename Speaker 1 everywhere"');
+  });
+
   it("shows Chinese translation first with original text on hover", () => {
     const html = renderToStaticMarkup(
       <TranscriptViewer
@@ -81,6 +98,42 @@ describe("TranscriptViewer", () => {
     expect(html).toContain("group-hover/original:opacity-100");
     expect(html).toContain("Hello team");
     expect(html).not.toContain("Original sentence");
+  });
+
+  it("shows translation progress when Chinese text is still being prepared", () => {
+    const html = renderToStaticMarkup(
+      <TranscriptViewer
+        segments={segments}
+        translationSummary={{
+          hasTranslations: false,
+          status: "running",
+          totalSegments: 672,
+          translatedSegments: 0,
+        }}
+      />,
+    );
+
+    expect(html).toContain("Translation in progress");
+    expect(html).toContain("0 of 672 lines translated");
+  });
+
+  it("shows when a transcript does not need translation", () => {
+    const html = renderToStaticMarkup(
+      <TranscriptViewer
+        meetingId="11111111-1111-4111-8111-111111111111"
+        segments={segments}
+        translationSummary={{
+          hasTranslations: false,
+          status: "not_needed",
+          totalSegments: 672,
+          translatedSegments: 0,
+        }}
+      />,
+    );
+
+    expect(html).toContain("Translation not needed");
+    expect(html).toContain("This transcript already appears to be Chinese.");
+    expect(html).toContain("Translate anyway");
   });
 
   it("hides translation correction controls on workspace meetings", () => {

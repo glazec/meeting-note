@@ -32,16 +32,25 @@ export function AppShell({
   const oneSignalAllowedOrigins = getOneSignalAllowedOrigins();
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <header className="border-b bg-card">
-        <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <Link href="/dashboard" className="text-base font-semibold">
-            Meeting Transcript
+    <div className="min-h-screen bg-[linear-gradient(180deg,var(--background)_0%,var(--surface)_100%)] text-foreground">
+      <header className="sticky top-0 z-30 border-b bg-background/90 backdrop-blur">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <Link
+            href="/dashboard"
+            className="inline-flex w-fit items-center gap-2 text-base font-semibold"
+          >
+            <span
+              aria-hidden="true"
+              className="flex size-7 items-center justify-center rounded-md bg-primary text-xs font-semibold text-primary-foreground shadow-sm"
+            >
+              MT
+            </span>
+            <span>Meeting Transcript</span>
           </Link>
           <div className="flex flex-wrap items-center gap-2">
             <nav
               aria-label="Primary navigation"
-              className="flex flex-wrap gap-2"
+              className="flex flex-wrap gap-1 rounded-lg border bg-card p-1 shadow-sm"
             >
               {visibleNavItems.map((item) => {
                 const isPrimaryAction = item.href === "/meetings/new";
@@ -63,6 +72,7 @@ export function AppShell({
                       }),
                       !isPrimaryAction &&
                         (isActive ? "text-foreground" : "text-muted-foreground"),
+                      "shadow-none",
                     )}
                   >
                     {item.label}

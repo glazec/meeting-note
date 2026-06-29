@@ -23,12 +23,33 @@ describe("shouldAutoRefreshMeeting", () => {
     ).toBe(false);
   });
 
+  it("polls while translation is active after transcript segments exist", () => {
+    expect(
+      shouldAutoRefreshMeeting({
+        meetingStatus: "ready",
+        segmentCount: 3,
+        transcriptJobStatus: "completed",
+        translationStatus: "running",
+      }),
+    ).toBe(true);
+  });
+
   it("does not poll terminal statuses", () => {
     expect(
       shouldAutoRefreshMeeting({
         meetingStatus: "failed",
         segmentCount: 0,
         transcriptJobStatus: "failed",
+      }),
+    ).toBe(false);
+  });
+
+  it("does not poll missed bot joins", () => {
+    expect(
+      shouldAutoRefreshMeeting({
+        meetingStatus: "missed",
+        segmentCount: 0,
+        transcriptJobStatus: null,
       }),
     ).toBe(false);
   });
