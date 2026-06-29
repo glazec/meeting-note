@@ -3,6 +3,7 @@
 import {
   type ChangeEvent,
   type FormEvent,
+  type MouseEvent,
   type PointerEvent,
   type RefObject,
   useEffect,
@@ -91,6 +92,12 @@ type WpmSample = {
   wordCount: number;
 };
 
+type TranscriptTextToken = {
+  isWordLike: boolean;
+  text: string;
+  wordIndex: number | null;
+};
+
 function formatTimestamp(startMs: number) {
   const totalSeconds = Math.floor(startMs / 1000);
   const minutes = Math.floor(totalSeconds / 60);
@@ -128,6 +135,7 @@ export function TranscriptViewer({
   const [textVersion, setTextVersion] = useState<"zh" | "original">(
     hasTranslations ? "zh" : "original",
   );
+  const canSeekTranscript = Boolean(audioUrl);
   const activeSegmentId = useMemo(() => {
     const currentMs = currentTime * 1000;
 
@@ -267,6 +275,26 @@ export function TranscriptViewer({
     }
   }
 
+  async function seekToTranscriptWord(
+    event: MouseEvent<HTMLButtonElement>,
+    segment: TranscriptSegment,
+    tokens: TranscriptTextToken[],
+    segmentEndMs: number,
+  ) {
+    const wordIndex = getTranscriptWordIndex(event);
+    const seekMs =
+      wordIndex === null
+        ? segment.startMs
+        : getEstimatedWordStartMs(
+            segment.startMs,
+            segmentEndMs,
+            tokens,
+            wordIndex,
+          );
+
+    await seekTo(seekMs);
+  }
+
   function scrollTranscriptToTime(timeSecond: number) {
     const targetSegment = findNearestSegmentAtTime(segments, timeSecond * 1000);
     const targetNode = targetSegment
@@ -375,7 +403,8 @@ export function TranscriptViewer({
               </div>
             </div>
             <ol className="border-t">
-              {segments.map((segment) => {
+              {segments.map((segment, index) => {
+                const speakerLabel = segment.speaker ?? "Unknown speaker";
                 const speakerKey = getSpeakerKey(segment.speaker);
                 const isEditing = editingSpeaker?.segmentId === segment.id;
                 const isSaving = savingSpeakerKey === speakerKey;
@@ -385,8 +414,22 @@ export function TranscriptViewer({
                 const shouldShowTranslation =
                   textVersion === "zh" && Boolean(translatedText);
                 const displayedText = shouldShowTranslation
-                  ? translatedText
+                  ? translatedText ?? ""
                   : segment.text;
+                const textTokens = getTranscriptTextTokens(displayedText);
+                const segmentEndMs = getSegmentDisplayEndMs(
+                  segment,
+                  segments,
+                  index,
+                );
+                const activeWordIndex = isActive
+                  ? getActiveWordIndex(
+                      segment.startMs,
+                      segmentEndMs,
+                      textTokens,
+                      currentTime * 1000,
+                    )
+                  : null;
                 return (
                   <li
                     key={segment.id}
@@ -399,20 +442,23 @@ export function TranscriptViewer({
                       segmentRefs.current.delete(segment.id);
                     }}
                     className={cn(
-                      "grid gap-4 border-b py-5 transition-colors sm:grid-cols-[6rem_minmax(0,1fr)]",
+                      "grid grid-cols-[2rem_minmax(0,1fr)] gap-3 border-b py-4 transition-colors",
                       isActive ? "bg-primary/5 px-3 sm:-mx-3" : undefined,
                     )}
                   >
-                    <button
-                      aria-label={`Play from ${formatTimestamp(segment.startMs)}`}
-                      className="h-7 w-fit rounded-md text-left text-xs font-medium text-primary outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
-                      onClick={() => seekTo(segment.startMs)}
-                      type="button"
+                    <span
+                      aria-hidden="true"
+                      className="mt-1 flex size-7 items-center justify-center rounded-full text-xs font-semibold text-white shadow-sm"
+                      style={{
+                        backgroundColor: getWaveformSpeakerColor(
+                          segment.speaker,
+                        ),
+                      }}
                     >
-                      {formatTimestamp(segment.startMs)}
-                    </button>
+                      {getSpeakerInitial(speakerLabel)}
+                    </span>
                     <div className="min-w-0">
-                      <div className="mb-2 flex min-h-8 items-center">
+                      <div className="mb-1.5 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1">
                         {isEditing ? (
                           <form
                             className="flex w-full max-w-xl flex-col gap-2"
@@ -520,40 +566,85 @@ export function TranscriptViewer({
                           </form>
                         ) : canEditSpeakers ? (
                           <button
-                            aria-label={`Edit speaker ${segment.speaker ?? "Unknown speaker"}`}
+                            aria-label={`Edit speaker ${speakerLabel}`}
                             className="group inline-flex min-h-8 items-center gap-2 rounded-lg px-0 text-left text-sm font-semibold text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
                             onClick={() => startEditing(segment.speaker, segment.id)}
                             type="button"
                           >
                             <span>
-                              {segment.speaker ?? "Unknown speaker"}
+                              {speakerLabel}
                             </span>
                             <Pencil className="size-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
                           </button>
                         ) : (
                           <p className="text-sm font-semibold text-foreground">
-                            {segment.speaker ?? "Unknown speaker"}
+                            {speakerLabel}
                           </p>
+                        )}
+                        {canSeekTranscript ? (
+                          <button
+                            aria-label={`Play from ${formatTimestamp(segment.startMs)}`}
+                            className="h-6 shrink-0 rounded-md text-left text-xs font-medium text-muted-foreground outline-none hover:text-primary hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+                            onClick={() => seekTo(segment.startMs)}
+                            type="button"
+                          >
+                            {formatTimestamp(segment.startMs)}
+                          </button>
+                        ) : (
+                          <span className="text-xs font-medium text-muted-foreground">
+                            {formatTimestamp(segment.startMs)}
+                          </span>
                         )}
                         {segment.emotionLabel &&
                         segment.emotionLabel !== "neutral" ? (
-                          <span className="ml-2 inline-flex h-6 items-center rounded-md border px-2 text-xs font-medium text-muted-foreground">
+                          <span className="inline-flex h-6 items-center rounded-md border px-2 text-xs font-medium text-muted-foreground">
                             {formatEmotionLabel(segment.emotionLabel)}
                           </span>
                         ) : null}
                       </div>
                       <div className="group/original relative inline-block max-w-full">
-                        <p
-                          aria-describedby={
-                            shouldShowTranslation
-                              ? `${segment.id}-original-text`
-                              : undefined
-                          }
-                          className="text-[0.95rem] leading-7 text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-                          tabIndex={shouldShowTranslation ? 0 : undefined}
-                        >
-                          {displayedText}
-                        </p>
+                        {canSeekTranscript ? (
+                          <button
+                            aria-describedby={
+                              shouldShowTranslation
+                                ? `${segment.id}-original-text`
+                                : undefined
+                            }
+                            aria-label={`Play transcript from ${formatTimestamp(segment.startMs)}`}
+                            className="block max-w-full rounded-md text-left text-[0.95rem] leading-7 text-foreground outline-none transition-colors hover:bg-muted/40 focus-visible:ring-3 focus-visible:ring-ring/50"
+                            onClick={(event) =>
+                              seekToTranscriptWord(
+                                event,
+                                segment,
+                                textTokens,
+                                segmentEndMs,
+                              )
+                            }
+                            type="button"
+                          >
+                            <TranscriptText
+                              activeWordIndex={activeWordIndex}
+                              isInteractive
+                              tokens={textTokens}
+                            />
+                          </button>
+                        ) : (
+                          <p
+                            aria-describedby={
+                              shouldShowTranslation
+                                ? `${segment.id}-original-text`
+                                : undefined
+                            }
+                            className="text-[0.95rem] leading-7 text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                            tabIndex={shouldShowTranslation ? 0 : undefined}
+                          >
+                            <TranscriptText
+                              activeWordIndex={null}
+                              isInteractive={false}
+                              tokens={textTokens}
+                            />
+                          </p>
+                        )}
                         {shouldShowTranslation ? (
                           <div
                             className="pointer-events-none absolute left-0 top-full z-30 mt-2 w-[min(32rem,calc(100vw-3rem))] translate-y-1 rounded-md border bg-background p-3 text-sm text-foreground opacity-0 shadow-lg ring-1 ring-border transition group-hover/original:translate-y-0 group-hover/original:opacity-100 group-focus-within/original:translate-y-0 group-focus-within/original:opacity-100"
@@ -590,6 +681,41 @@ export function TranscriptViewer({
           setPlaybackRate={setPlaybackRate}
         />
       ) : null}
+    </>
+  );
+}
+
+function TranscriptText({
+  activeWordIndex,
+  isInteractive,
+  tokens,
+}: {
+  activeWordIndex: number | null;
+  isInteractive: boolean;
+  tokens: TranscriptTextToken[];
+}) {
+  return (
+    <>
+      {tokens.map((token, index) =>
+        token.isWordLike ? (
+          <span
+            className={cn(
+              "rounded-[3px] px-0.5 transition-colors",
+              token.wordIndex === activeWordIndex
+                ? "bg-primary text-primary-foreground"
+                : isInteractive
+                ? "hover:bg-primary/15"
+                : undefined,
+            )}
+            data-transcript-word-index={token.wordIndex}
+            key={`${index}:${token.text}`}
+          >
+            {token.text}
+          </span>
+        ) : (
+          <span key={`${index}:${token.text}`}>{token.text}</span>
+        ),
+      )}
     </>
   );
 }
@@ -1481,6 +1607,125 @@ function createTranscriptWordSegmenter() {
   return new Intl.Segmenter(undefined, { granularity: "word" });
 }
 
+function getTranscriptTextTokens(text: string): TranscriptTextToken[] {
+  if (!text) {
+    return [];
+  }
+
+  if (transcriptWordSegmenter) {
+    const tokens: TranscriptTextToken[] = [];
+    let wordIndex = 0;
+
+    for (const segment of transcriptWordSegmenter.segment(text)) {
+      const isWordLike = Boolean(segment.isWordLike);
+      tokens.push({
+        isWordLike,
+        text: segment.segment,
+        wordIndex: isWordLike ? wordIndex : null,
+      });
+
+      if (isWordLike) {
+        wordIndex += 1;
+      }
+    }
+
+    if (tokens.length > 0) {
+      return tokens;
+    }
+  }
+
+  let wordIndex = 0;
+
+  return (text.match(/\s+|[^\s]+/g) ?? [text]).map((part) => {
+    const isWordLike = /[A-Za-z0-9\u3400-\u9fff\uf900-\ufaff]/.test(part);
+    const token: TranscriptTextToken = {
+      isWordLike,
+      text: part,
+      wordIndex: isWordLike ? wordIndex : null,
+    };
+
+    if (isWordLike) {
+      wordIndex += 1;
+    }
+
+    return token;
+  });
+}
+
+function getTranscriptWordCount(tokens: TranscriptTextToken[]) {
+  return tokens.reduce(
+    (count, token) => (token.isWordLike ? count + 1 : count),
+    0,
+  );
+}
+
+function getActiveWordIndex(
+  startMs: number,
+  endMs: number,
+  tokens: TranscriptTextToken[],
+  currentMs: number,
+) {
+  const wordCount = getTranscriptWordCount(tokens);
+
+  if (wordCount === 0) {
+    return null;
+  }
+
+  if (endMs <= startMs) {
+    return 0;
+  }
+
+  const progress = clamp((currentMs - startMs) / (endMs - startMs), 0, 0.999);
+
+  return Math.min(wordCount - 1, Math.floor(progress * wordCount));
+}
+
+function getEstimatedWordStartMs(
+  startMs: number,
+  endMs: number,
+  tokens: TranscriptTextToken[],
+  wordIndex: number,
+) {
+  const wordCount = getTranscriptWordCount(tokens);
+
+  if (wordCount <= 1 || endMs <= startMs) {
+    return startMs;
+  }
+
+  const boundedWordIndex = clamp(wordIndex, 0, wordCount - 1);
+  const progress = boundedWordIndex / wordCount;
+
+  return Math.floor(startMs + (endMs - startMs) * progress);
+}
+
+function getTranscriptWordIndex(event: MouseEvent<HTMLButtonElement>) {
+  const target = event.target;
+
+  if (!(target instanceof HTMLElement)) {
+    return null;
+  }
+
+  const wordNode = target.closest<HTMLElement>("[data-transcript-word-index]");
+
+  if (!wordNode || !event.currentTarget.contains(wordNode)) {
+    return null;
+  }
+
+  const wordIndex = Number(wordNode.dataset.transcriptWordIndex);
+
+  return Number.isInteger(wordIndex) ? wordIndex : null;
+}
+
+function getSegmentDisplayEndMs(
+  segment: TranscriptSegment,
+  segments: TranscriptSegment[],
+  index: number,
+) {
+  const nextSegment = segments[index + 1];
+
+  return segment.endMs ?? nextSegment?.startMs ?? segment.startMs;
+}
+
 function getWaveformSpeakerColor(speaker: string | null) {
   const speakerKey = getSpeakerKey(speaker);
   let hash = 0;
@@ -1643,4 +1888,8 @@ function clamp(value: number, min: number, max: number) {
 
 function getSpeakerKey(speaker: string | null) {
   return speaker ?? "__unknown__";
+}
+
+function getSpeakerInitial(speaker: string) {
+  return speaker.trim().charAt(0).toUpperCase() || "?";
 }

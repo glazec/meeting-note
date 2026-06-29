@@ -27,6 +27,30 @@ describe("TranscriptViewer", () => {
     expect(html).not.toContain("Edit speaker");
   });
 
+  it("places the timestamp after the speaker before the sentence", () => {
+    const html = renderToStaticMarkup(<TranscriptViewer segments={segments} />);
+
+    expect(html.indexOf("Speaker 1")).toBeLessThan(html.indexOf("0:00"));
+    expect(html.indexOf("0:00")).toBeLessThan(html.indexOf("Hello"));
+  });
+
+  it("makes transcript words seekable when audio is available", () => {
+    const html = renderToStaticMarkup(
+      <TranscriptViewer audioUrl="/audio.mp3" segments={segments} />,
+    );
+
+    expect(html).toContain('aria-label="Play transcript from 0:00"');
+    expect(html).toContain('data-transcript-word-index="0"');
+    expect(html).toContain('data-transcript-word-index="1"');
+  });
+
+  it("keeps transcript words read only when audio is unavailable", () => {
+    const html = renderToStaticMarkup(<TranscriptViewer segments={segments} />);
+
+    expect(html).not.toContain("Play transcript from 0:00");
+    expect(html).not.toContain("hover:bg-primary/15");
+  });
+
   it("shows speaker editing for workspace meeting pages", () => {
     const html = renderToStaticMarkup(
       <TranscriptViewer
@@ -51,7 +75,8 @@ describe("TranscriptViewer", () => {
     );
 
     expect(html).toContain("中文");
-    expect(html).toContain("大家好");
+    expect(html).toContain("大家");
+    expect(html).toContain("好");
     expect(html).toContain('role="tooltip"');
     expect(html).toContain("group-hover/original:opacity-100");
     expect(html).toContain("Hello team");
