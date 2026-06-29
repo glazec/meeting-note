@@ -51,6 +51,10 @@ import {
   type WorkspaceContext,
 } from "@/lib/workspace";
 import { groupRelatedMeetings } from "@/lib/meeting-intelligence";
+import {
+  getMeetingAccessScope,
+  getReadableMeetingsCondition,
+} from "@/lib/meeting-access-policy";
 
 const uuidSchema = z.string().uuid();
 export const MEETING_LIBRARY_PAGE_SIZE = 50;
@@ -142,21 +146,13 @@ export async function listMeetingLibraryPageForWorkspace(
 ): Promise<MeetingLibraryPage> {
   const search = options.query?.trim();
   const searchScope = parseMeetingLibrarySearchScope(options.searchScope);
-  const hasMeetingAccess = sql`exists (
-    select 1
-    from ${meetingAccess}
-    where ${meetingAccess.meetingId} = ${meetings.id}
-      and ${meetingAccess.userId} = ${workspace.userId}
-  )`;
   const searchCondition = search
     ? getMeetingLibrarySearchCondition(search, searchScope)
     : undefined;
+  const readableMeetingsCondition = getReadableMeetingsCondition(workspace);
   const where = searchCondition
-    ? and(
-        or(eq(meetings.teamId, workspace.teamId), hasMeetingAccess),
-        searchCondition,
-      )
-    : or(eq(meetings.teamId, workspace.teamId), hasMeetingAccess);
+    ? and(readableMeetingsCondition, searchCondition)
+    : readableMeetingsCondition;
   const activeWorkRank = sql<number>`case
     when ${meetings.status} in ('recording', 'processing') then 0
     else 1
@@ -853,15 +849,7 @@ export async function getMeetingTranscriptForWorkspace(
     .where(
       and(
         eq(meetings.id, parsedMeetingId.data),
-        or(
-          eq(meetings.teamId, workspace.teamId),
-          sql`exists (
-            select 1
-            from ${meetingAccess}
-            where ${meetingAccess.meetingId} = ${meetings.id}
-              and ${meetingAccess.userId} = ${workspace.userId}
-          )`,
-        ),
+        getReadableMeetingsCondition(workspace),
       ),
     )
     .orderBy(desc(mediaAssets.createdAt))
@@ -872,8 +860,7 @@ export async function getMeetingTranscriptForWorkspace(
     return null;
   }
 
-  const accessScope =
-    meeting.teamId === workspace.teamId ? "workspace" : "shared";
+  const accessScope = getMeetingAccessScope(meeting.teamId, workspace);
   const [segments, speakerSuggestions, accessPeople, entities] = await Promise.all([
     db
       .select({
@@ -913,8 +900,7 @@ export async function getMeetingTranscriptForWorkspace(
     status: meeting.status,
     transcriptJobStatus: meeting.transcriptJobStatus,
     audioUrl:
-      meeting.teamId === workspace.teamId &&
-      (meeting.audioObjectKey || meeting.recallRecordingId)
+      meeting.audioObjectKey || meeting.recallRecordingId
         ? `/api/meetings/${meeting.id}/audio`
         : null,
     segments: segments.map((segment) => ({

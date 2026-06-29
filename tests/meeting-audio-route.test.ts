@@ -1,3 +1,5 @@
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const {
@@ -7,14 +9,28 @@ const {
   getWorkspace,
   limit,
   retrieveRecallBot,
+  where,
 } = vi.hoisted(() => ({
-    createReadUrl: vi.fn(),
-    findRecallRecordingMediaUrl: vi.fn(),
-    getCurrentUser: vi.fn(),
-    getWorkspace: vi.fn(),
-    limit: vi.fn(),
-    retrieveRecallBot: vi.fn(),
-  }));
+  createReadUrl: vi.fn(),
+  findRecallRecordingMediaUrl: vi.fn(),
+  getCurrentUser: vi.fn(),
+  getWorkspace: vi.fn(),
+  limit: vi.fn(),
+  retrieveRecallBot: vi.fn(),
+  where: vi.fn(),
+}));
+
+where.mockImplementation(() => ({
+  orderBy: () => ({
+    limit,
+  }),
+}));
+
+const dialect = new PgDialect();
+
+function toQuery(condition: SQL) {
+  return dialect.sqlToQuery(condition);
+}
 
 vi.mock("@/lib/auth", () => ({
   getCurrentUser,
@@ -38,11 +54,7 @@ vi.mock("@/db/client", () => ({
     select: () => ({
       from: () => ({
         leftJoin: () => ({
-          where: () => ({
-            orderBy: () => ({
-              limit,
-            }),
-          }),
+          where,
         }),
       }),
     }),
@@ -72,6 +84,12 @@ describe("GET /api/meetings/[meetingId]/audio", () => {
     getWorkspace.mockReset();
     limit.mockReset();
     retrieveRecallBot.mockReset();
+    where.mockReset();
+    where.mockImplementation(() => ({
+      orderBy: () => ({
+        limit,
+      }),
+    }));
     vi.unstubAllGlobals();
     vi.resetModules();
   });
@@ -106,6 +124,32 @@ describe("GET /api/meetings/[meetingId]/audio", () => {
       key: "users/user_123/uploads/audio.mp3",
     });
     expect(retrieveRecallBot).not.toHaveBeenCalled();
+  });
+
+  it("uses explicit share access for shared only users", async () => {
+    getCurrentUser.mockResolvedValue({
+      id: "auth_user_123",
+      email: "reader@partner.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({
+      teamId: "guest_team_123",
+      userId: "user_123",
+      domain: "partner.com",
+      canCreateMeetings: false,
+    });
+    limit.mockResolvedValue([]);
+
+    const response = await getMeetingAudio();
+
+    expect(response.status).toBe(404);
+    const query = toQuery(where.mock.calls[0][0] as SQL);
+    expect(query.sql).not.toContain('"meetings"."team_id" =');
+    expect(query.sql).toContain('"meeting_access"');
+    expect(query.params).toEqual([
+      "11111111-1111-4111-8111-111111111111",
+      "user_123",
+    ]);
   });
 
   it("proxies authenticated R2 audio when waveform decoding requests same-origin media", async () => {

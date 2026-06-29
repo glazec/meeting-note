@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/db/client";
 import { meetings, transcriptSegments } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { getReadableMeetingsCondition } from "@/lib/meeting-access-policy";
 import { getOrCreateWorkspaceForSessionUser } from "@/lib/workspace";
 
 export const runtime = "nodejs";
@@ -55,7 +56,7 @@ export async function GET(
     .where(
       and(
         eq(meetings.id, parsedMeetingId.data),
-        eq(meetings.teamId, workspace.teamId),
+        getReadableMeetingsCondition(workspace),
       ),
     )
     .limit(1);

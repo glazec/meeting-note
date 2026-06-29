@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/db/client";
 import { mediaAssets, meetings } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { getReadableMeetingsCondition } from "@/lib/meeting-access-policy";
 import { createReadUrl } from "@/lib/r2";
 import {
   findRecallRecordingMediaUrl,
@@ -51,7 +52,7 @@ export async function GET(
     .where(
       and(
         eq(meetings.id, parsedMeetingId.data),
-        eq(meetings.teamId, workspace.teamId),
+        getReadableMeetingsCondition(workspace),
       ),
     )
     .orderBy(desc(mediaAssets.createdAt))

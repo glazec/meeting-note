@@ -1,3 +1,5 @@
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const { getCurrentUser, getWorkspace, select } = vi.hoisted(() => ({
@@ -19,6 +21,12 @@ vi.mock("@/db/client", () => ({
     select,
   },
 }));
+
+const dialect = new PgDialect();
+
+function toQuery(condition: SQL) {
+  return dialect.sqlToQuery(condition);
+}
 
 async function getMeetingExport(
   url = "https://app.example.com/api/meetings/11111111-1111-4111-8111-111111111111/export",
@@ -104,6 +112,40 @@ describe("GET /api/meetings/[meetingId]/export", () => {
       "[0:20] Speaker 1: First line.",
     );
     expect(select).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses explicit share access for shared only text exports", async () => {
+    const where = vi.fn(() => ({
+      limit: vi.fn().mockResolvedValue([]),
+    }));
+
+    getCurrentUser.mockResolvedValue({
+      id: "auth_user_123",
+      email: "reader@partner.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({
+      teamId: "guest_team_123",
+      userId: "user_123",
+      domain: "partner.com",
+      canCreateMeetings: false,
+    });
+    select.mockReturnValueOnce({
+      from: () => ({
+        where,
+      }),
+    });
+
+    const response = await getMeetingExport();
+
+    expect(response.status).toBe(404);
+    const query = toQuery(where.mock.calls[0][0] as SQL);
+    expect(query.sql).not.toContain('"meetings"."team_id" =');
+    expect(query.sql).toContain('"meeting_access"');
+    expect(query.params).toEqual([
+      "11111111-1111-4111-8111-111111111111",
+      "user_123",
+    ]);
   });
 
   it("redirects MP3 exports to the authenticated meeting audio route", async () => {

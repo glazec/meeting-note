@@ -135,7 +135,7 @@ describe("getWorkspaceMeetingTranscript", () => {
     });
   });
 
-  it("hides audio for transcripts shared from another workspace", async () => {
+  it("exposes audio for transcripts shared from another workspace", async () => {
     getWorkspace.mockResolvedValue({ teamId: "team_123", userId: "user_123" });
     select
       .mockReturnValueOnce({
@@ -214,7 +214,8 @@ describe("getWorkspaceMeetingTranscript", () => {
           name: "Shared User",
         },
       ],
-      audioUrl: null,
+      audioUrl:
+        "/api/meetings/11111111-1111-4111-8111-111111111111/audio",
     });
   });
 });
