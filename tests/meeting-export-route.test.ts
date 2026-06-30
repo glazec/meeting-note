@@ -134,7 +134,7 @@ describe("GET /api/meetings/[meetingId]/export", () => {
     expect(segmentQuery.sql).toContain('"transcript_jobs"."status" = \'completed\'');
   });
 
-  it("exports Chinese transcript text when requested", async () => {
+  it("keeps text export raw when a language query is present", async () => {
     getCurrentUser.mockResolvedValue({
       id: "user_123",
       email: "user@example.com",
@@ -186,11 +186,16 @@ describe("GET /api/meetings/[meetingId]/export", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-disposition")).toContain(
-      "Nascent Sync Chinese transcript.txt",
+      "Nascent Sync transcript.txt",
     );
-    await expect(response.text()).resolves.toContain(
-      "[0:20] Speaker 1 | emotion: Neutral | wpm: 40: 第一句。",
+    const body = await response.text();
+
+    expect(body).toContain("Raw Transcript");
+    expect(body).toContain(
+      "[0:20] Speaker 1 | emotion: Neutral | wpm: 40: First line.",
     );
+    expect(body).not.toContain("Chinese Transcript");
+    expect(body).not.toContain("第一句。");
   });
 
   it("uses the next segment timestamp for wpm when segment end time is missing", async () => {

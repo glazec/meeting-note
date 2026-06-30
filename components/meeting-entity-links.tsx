@@ -6,12 +6,46 @@ export type MeetingEntityLink = {
   value: string;
 };
 
+const entitySections = [
+  {
+    label: "Organizations",
+    type: "organization",
+  },
+  {
+    label: "Money amounts",
+    type: "money",
+  },
+  {
+    label: "Names",
+    type: "name",
+  },
+];
+
+const organizationLogoDomains: Record<string, string> = {
+  arbitrum: "arbitrum.io",
+  babylon: "babylonlabs.io",
+  circle: "circle.com",
+  coinbase: "coinbase.com",
+  github: "github.com",
+  robinhood: "robinhood.com",
+  slack: "slack.com",
+  solana: "solana.com",
+  zcash: "z.cash",
+};
+
 export function MeetingEntityLinks({
   entities,
 }: {
   entities: MeetingEntityLink[];
 }) {
-  if (entities.length === 0) {
+  const sections = entitySections
+    .map((section) => ({
+      ...section,
+      entities: entities.filter((entity) => entity.type === section.type),
+    }))
+    .filter((section) => section.entities.length > 0);
+
+  if (sections.length === 0) {
     return null;
   }
 
@@ -20,45 +54,63 @@ export function MeetingEntityLinks({
       <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
         Detected entities
       </p>
-      <div className="mt-2 flex min-w-0 flex-wrap gap-2">
-        {entities.map((entity) => (
-          <Link
-            className="inline-flex h-9 min-w-0 max-w-full items-center gap-2 rounded-md border bg-background px-2 text-sm font-medium text-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
-            href={getEntityDashboardHref(entity.normalizedValue)}
-            key={`${entity.type}:${entity.normalizedValue}`}
-          >
-            <span
-              aria-hidden="true"
-              className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-[11px] font-semibold text-muted-foreground"
-            >
-              {getEntityMark(entity)}
-            </span>
-            <span className="truncate">{entity.value}</span>
-            <span className="shrink-0 text-xs font-medium text-muted-foreground">
-              {formatEntityType(entity.type)}
-            </span>
-          </Link>
+      <div className="mt-3 space-y-3">
+        {sections.map((section) => (
+          <div key={section.type}>
+            <p className="text-xs font-medium text-muted-foreground">
+              {section.label}
+            </p>
+            <p className="mt-1 text-sm leading-6 text-foreground">
+              {section.entities.map((entity, index) => (
+                <span key={`${entity.type}:${entity.normalizedValue}`}>
+                  {index > 0 ? <span className="text-muted-foreground">, </span> : null}
+                  <Link
+                    className="inline-flex items-center gap-1.5 align-baseline font-medium text-foreground underline decoration-border underline-offset-4 hover:text-primary hover:decoration-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                    href={getEntityDashboardHref(entity.normalizedValue)}
+                  >
+                    {section.type === "organization" ? (
+                      <OrganizationLogo entity={entity} />
+                    ) : null}
+                    {entity.value}
+                  </Link>
+                </span>
+              ))}
+            </p>
+          </div>
         ))}
       </div>
     </div>
   );
 }
 
-function getEntityMark(entity: MeetingEntityLink) {
-  if (entity.type === "money") {
-    return "$";
+function OrganizationLogo({ entity }: { entity: MeetingEntityLink }) {
+  const domain = organizationLogoDomains[entity.normalizedValue];
+
+  if (!domain) {
+    return null;
   }
 
-  const words = entity.value
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-  const letters =
-    words.length > 1
-      ? words.map((word) => Array.from(word)[0]).join("")
-      : Array.from(words[0] ?? entity.type).slice(0, 2).join("");
+  return (
+    <img
+      alt=""
+      aria-hidden="true"
+      className="size-4 rounded-sm"
+      height={16}
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      src={getFaviconUrl(domain)}
+      width={16}
+    />
+  );
+}
 
-  return letters.slice(0, 2).toUpperCase();
+function getFaviconUrl(domain: string) {
+  const url = new URL("https://www.google.com/s2/favicons");
+
+  url.searchParams.set("sz", "64");
+  url.searchParams.set("domain_url", `https://${domain}`);
+
+  return url.toString();
 }
 
 function getEntityDashboardHref(normalizedValue: string) {
@@ -70,12 +122,4 @@ function getEntityDashboardHref(normalizedValue: string) {
   });
 
   return `/dashboard?${params.toString()}`;
-}
-
-function formatEntityType(type: string) {
-  return type
-    .split("_")
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
 }

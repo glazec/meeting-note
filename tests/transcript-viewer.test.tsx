@@ -355,7 +355,7 @@ describe("TranscriptViewer", () => {
     ]);
   });
 
-  it("shows Chinese translation first with original text on hover", () => {
+  it("shows polished text first with original text on hover", () => {
     const html = renderToStaticMarkup(
       <TranscriptViewer
         segments={[
@@ -367,7 +367,8 @@ describe("TranscriptViewer", () => {
       />,
     );
 
-    expect(html).toContain("中文");
+    expect(html).toContain("Polished");
+    expect(html).toContain("Original");
     expect(html).toContain("大家");
     expect(html).toContain("好");
     expect(html).toContain('role="tooltip"');

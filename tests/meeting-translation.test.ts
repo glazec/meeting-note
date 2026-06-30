@@ -6,7 +6,7 @@ import {
 } from "@/lib/meeting-translation";
 
 describe("meeting translation", () => {
-  it("builds a compact Chinese translation prompt from transcript rows", () => {
+  it("builds a concise polished Chinese translation prompt from transcript rows", () => {
     expect(
       buildChineseTranslationMessages([
         { id: "segment_1", text: "Hello team" },
@@ -16,7 +16,7 @@ describe("meeting translation", () => {
       {
         role: "system",
         content:
-          "Translate meeting transcript segments into concise Chinese. Preserve product names, company names, numbers, and tickers. Return only JSON. Do not wrap the JSON in markdown fences.",
+          "Translate meeting transcript segments into polished, concise Chinese. Remove filler words such as 然后 when they do not change meaning. Preserve speaker intent, team tone, product names, company names, numbers, and tickers. Return only JSON. Do not wrap the JSON in markdown fences.",
       },
       {
         role: "user",

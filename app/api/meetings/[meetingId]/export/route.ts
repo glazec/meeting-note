@@ -11,7 +11,6 @@ import { getOrCreateWorkspaceForSessionUser } from "@/lib/workspace";
 export const runtime = "nodejs";
 
 const meetingIdSchema = z.string().uuid();
-const transcriptLanguageSchema = z.enum(["original", "zh"]);
 const transcriptFallbackWordPattern = /[A-Za-z0-9]+(?:['\u2019][A-Za-z0-9]+)?/g;
 const transcriptCjkCharacterPattern = /[\u3400-\u9fff\uf900-\ufaff]/g;
 const transcriptWordSegmenter = createTranscriptWordSegmenter();
@@ -52,17 +51,6 @@ export async function GET(
     );
   }
 
-  const parsedLanguage = transcriptLanguageSchema.safeParse(
-    searchParams.get("language") ?? "original",
-  );
-
-  if (!parsedLanguage.success) {
-    return Response.json(
-      { error: "Unsupported transcript language" },
-      { status: 400 },
-    );
-  }
-
   const workspace = await getOrCreateWorkspaceForSessionUser(user);
   const meetingRows = await db
     .select({
@@ -89,7 +77,6 @@ export async function GET(
       startMs: transcriptSegments.startMs,
       endMs: transcriptSegments.endMs,
       text: transcriptSegments.text,
-      translatedText: transcriptSegments.translatedText,
       emotionLabel: transcriptSegments.emotionLabel,
     })
     .from(transcriptSegments)
@@ -100,10 +87,10 @@ export async function GET(
       ),
     )
     .orderBy(asc(transcriptSegments.startMs));
-  const filename = getTranscriptFilename(meeting.title, parsedLanguage.data);
+  const filename = getTranscriptFilename(meeting.title);
 
   return new Response(
-    formatTranscriptExport(meeting.title, segments, parsedLanguage.data),
+    formatTranscriptExport(meeting.title, segments),
     {
       headers: {
         "content-disposition": `attachment; filename="${filename}"`,
@@ -120,39 +107,20 @@ function formatTranscriptExport(
     startMs: number;
     endMs: number | null;
     text: string;
-    translatedText: string | null;
     emotionLabel: string | null;
   }>,
-  language: z.infer<typeof transcriptLanguageSchema>,
 ) {
   const lines = [
     title,
-    getTranscriptExportLabel(language),
+    "Raw Transcript",
     "",
     ...segments.map(
       (segment, index) =>
-        `[${formatTimestamp(segment.startMs)}] ${segment.speaker ?? "Unknown speaker"} | emotion: ${formatEmotionLabel(segment.emotionLabel)} | wpm: ${formatWordsPerMinute(segment, segments[index + 1])}: ${getTranscriptText(segment, language)}`,
+        `[${formatTimestamp(segment.startMs)}] ${segment.speaker ?? "Unknown speaker"} | emotion: ${formatEmotionLabel(segment.emotionLabel)} | wpm: ${formatWordsPerMinute(segment, segments[index + 1])}: ${segment.text}`,
     ),
   ];
 
   return `${lines.join("\n")}\n`;
-}
-
-function getTranscriptExportLabel(
-  language: z.infer<typeof transcriptLanguageSchema>,
-) {
-  return language === "zh" ? "Chinese Transcript" : "Raw Transcript";
-}
-
-function getTranscriptText(
-  segment: { text: string; translatedText: string | null },
-  language: z.infer<typeof transcriptLanguageSchema>,
-) {
-  if (language === "zh") {
-    return segment.translatedText?.trim() || segment.text;
-  }
-
-  return segment.text;
 }
 
 function formatEmotionLabel(label: string | null) {
@@ -235,13 +203,8 @@ function createTranscriptWordSegmenter() {
   return new Intl.Segmenter(undefined, { granularity: "word" });
 }
 
-function getTranscriptFilename(
-  title: string,
-  language: z.infer<typeof transcriptLanguageSchema>,
-) {
-  const languageLabel = language === "zh" ? " Chinese" : "";
-
-  return `${sanitizeFilename(title)}${languageLabel} transcript.txt`;
+function getTranscriptFilename(title: string) {
+  return `${sanitizeFilename(title)} transcript.txt`;
 }
 
 function formatTimestamp(startMs: number) {

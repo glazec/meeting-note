@@ -4,26 +4,52 @@ import { describe, expect, it } from "vitest";
 import { MeetingEntityLinks } from "@/components/meeting-entity-links";
 
 describe("MeetingEntityLinks", () => {
-  it("links detected entities to matching dashboard search", () => {
+  it("groups detected entities as text links by category", () => {
     const html = renderToStaticMarkup(
       <MeetingEntityLinks
         entities={[
           {
-            normalizedValue: "nascent",
+            normalizedValue: "darko",
+            type: "name",
+            value: "Darko",
+          },
+          {
+            normalizedValue: "20 million",
+            type: "money",
+            value: "20 million",
+          },
+          {
+            normalizedValue: "babylon",
             type: "organization",
-            value: "Nascent",
+            value: "Babylon",
+          },
+          {
+            normalizedValue: "etf",
+            type: "organization",
+            value: "ETF",
           },
         ]}
       />,
     );
 
     expect(html).toContain("Detected entities");
-    expect(html).toContain("Nascent");
-    expect(html).toContain("Organization");
+    expect(html.indexOf("Organizations")).toBeLessThan(html.indexOf("Money"));
+    expect(html.indexOf("Money")).toBeLessThan(html.indexOf("Names"));
+    expect(html).toContain("Babylon");
+    expect(html).toContain("ETF");
+    expect(html).toContain("20 million");
+    expect(html).toContain("Darko");
+    expect(html).toContain('alt=""');
+    expect(html).toContain("babylonlabs.io");
+    expect(html).not.toContain("domain_url=https%3A%2F%2Fetf");
     expect(html).toContain(
-      "/dashboard?q=nascent&amp;scope=all&amp;status=all&amp;sort=smart",
+      "/dashboard?q=babylon&amp;scope=all&amp;status=all&amp;sort=smart",
     );
-    expect(html).toContain(">NA<");
+    expect(html).not.toContain(">Organization<");
+    expect(html).not.toContain(">Money<");
+    expect(html).not.toContain(">Name<");
+    expect(html).not.toContain(">BA<");
+    expect(html).not.toContain(">$<");
   });
 
   it("renders name and money entities on the detail page", () => {
@@ -45,10 +71,11 @@ describe("MeetingEntityLinks", () => {
     );
 
     expect(html).toContain("Darko");
-    expect(html).toContain("Name");
+    expect(html).toContain("Names");
     expect(html).toContain("20 million");
     expect(html).toContain("Money");
-    expect(html).toContain(">$<");
+    expect(html).not.toContain(">Name<");
+    expect(html).not.toContain(">$<");
   });
 
   it("stays hidden when no displayable entities exist", () => {

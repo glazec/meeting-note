@@ -27,7 +27,7 @@ describe("MeetingActions", () => {
     expect(html).toContain("Delete");
   });
 
-  it("asks for transcript language when translations are available", () => {
+  it("keeps transcript export raw when translations are available", () => {
     const html = renderToStaticMarkup(
       <MeetingActions
         hasTranslations
@@ -35,8 +35,8 @@ describe("MeetingActions", () => {
       />,
     );
 
-    expect(html).toContain("Transcript language");
-    expect(html).toContain("中文");
-    expect(html).toContain("Original");
+    expect(html).not.toContain("Transcript language");
+    expect(html).not.toContain("中文");
+    expect(html).not.toContain("language=");
   });
 });

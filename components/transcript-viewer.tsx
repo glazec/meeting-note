@@ -267,8 +267,8 @@ export function TranscriptViewer({
           status: "queued" as const,
         }
       : translationSummary;
-  const [textVersion, setTextVersion] = useState<"zh" | "original">(
-    hasTranslations ? "zh" : "original",
+  const [textVersion, setTextVersion] = useState<"polished" | "original">(
+    hasTranslations ? "polished" : "original",
   );
   const canSeekTranscript = Boolean(audioUrl);
   const rawDisplaySegments = useMemo(
@@ -612,19 +612,21 @@ export function TranscriptViewer({
             {hasTranslations ? (
               <div className="inline-flex w-fit rounded-md border bg-background p-0.5">
                 <button
-                  aria-pressed={textVersion === "zh"}
+                  aria-label="Show polished transcript"
+                  aria-pressed={textVersion === "polished"}
                   className={cn(
                     "h-7 rounded px-2 text-xs font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-                    textVersion === "zh"
+                    textVersion === "polished"
                       ? "bg-muted text-foreground"
                       : "text-muted-foreground hover:text-foreground",
                   )}
-                  onClick={() => setTextVersion("zh")}
+                  onClick={() => setTextVersion("polished")}
                   type="button"
                 >
-                  中文
+                  Polished
                 </button>
                 <button
+                  aria-label="Show original transcript"
                   aria-pressed={textVersion === "original"}
                   className={cn(
                     "h-7 rounded px-2 text-xs font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
@@ -790,7 +792,7 @@ export function TranscriptViewer({
                 const isActive = activeSegmentId === segment.id;
                 const translatedText = segment.translatedText?.trim();
                 const shouldShowTranslation =
-                  textVersion === "zh" && Boolean(translatedText);
+                  textVersion === "polished" && Boolean(translatedText);
                 const displayedText = shouldShowTranslation
                   ? translatedText ?? ""
                   : segment.text;
