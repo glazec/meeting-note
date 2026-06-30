@@ -1135,6 +1135,7 @@ async function getPrimaryEntitiesForMeetings(meetingIds: string[]) {
     .select({
       meetingId: meetingEntities.meetingId,
       normalizedValue: meetingEntities.normalizedValue,
+      type: meetingEntities.type,
     })
     .from(meetingEntities)
     .where(inArray(meetingEntities.meetingId, meetingIds))
@@ -1142,10 +1143,12 @@ async function getPrimaryEntitiesForMeetings(meetingIds: string[]) {
 
   for (const row of rows) {
     const normalizedValue = row.normalizedValue.trim().toLowerCase();
+    const type = row.type.trim().toLowerCase();
 
     if (
       !primaryEntityByMeetingId.has(row.meetingId) &&
       normalizedValue &&
+      isDisplayableMeetingEntityType(type) &&
       !nonInformativePrimaryEntities.has(normalizedValue)
     ) {
       primaryEntityByMeetingId.set(row.meetingId, normalizedValue);

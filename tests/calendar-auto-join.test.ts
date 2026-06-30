@@ -110,6 +110,19 @@ describe("calendar auto join", () => {
     ).toBe("https://meet.google.com/abc-defg-hij");
   });
 
+  it("normalizes bare Zoom links from calendar text", async () => {
+    const { findCalendarMeetingUrl } = await import("@/lib/calendar-auto-join");
+
+    expect(
+      findCalendarMeetingUrl({
+        externalEventId: "google_event_123",
+        title: "Partner sync",
+        startsAt: "2026-06-30T12:00:00.000Z",
+        description: "Join Zoom.us/j/8436420171",
+      }),
+    ).toBe("https://zoom.us/j/8436420171");
+  });
+
   it("ignores physical map URLs in the calendar location", async () => {
     const { findCalendarMeetingUrl } = await import("@/lib/calendar-auto-join");
 

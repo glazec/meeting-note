@@ -757,18 +757,27 @@ describe("listMeetingsForWorkspace", () => {
             orderBy: vi.fn().mockResolvedValue([
               {
                 meetingId: "11111111-1111-4111-8111-111111111111",
+                type: "organization",
                 normalizedValue: "iosg",
               },
               {
                 meetingId: "11111111-1111-4111-8111-111111111111",
+                type: "organization",
                 normalizedValue: "nascent",
               },
               {
                 meetingId: "22222222-2222-4222-8222-222222222222",
+                type: "organization",
                 normalizedValue: "iosg",
               },
               {
                 meetingId: "22222222-2222-4222-8222-222222222222",
+                type: "meeting_link",
+                normalizedValue: "zoom.us/j/8436420171",
+              },
+              {
+                meetingId: "22222222-2222-4222-8222-222222222222",
+                type: "organization",
                 normalizedValue: "nascent",
               },
             ]),

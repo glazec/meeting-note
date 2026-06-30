@@ -20,6 +20,15 @@ test("redirects anonymous meeting transcript visitors to sign in", async ({
   ).toBeVisible();
 });
 
+test("redirects anonymous new meeting visitors to sign in", async ({ page }) => {
+  await page.goto("/meetings/new");
+
+  await expect(page).toHaveURL("/auth/sign-in");
+  await expect(
+    page.getByRole("button", { name: "Continue with Google" }),
+  ).toBeVisible();
+});
+
 test("redirects anonymous team settings visitors to sign in", async ({
   page,
 }) => {

@@ -906,13 +906,44 @@ function getConferenceEntryPointUris(event: SyncedCalendarEvent) {
 }
 
 function extractUrls(value?: string | null) {
-  return Array.from(value?.matchAll(/https?:\/\/[^\s<>"']+/g) ?? [], (match) =>
-    trimUrlPunctuation(match[0]),
-  );
+  const urls = new Set<string>();
+
+  for (const match of value?.matchAll(/https?:\/\/[^\s<>"']+/g) ?? []) {
+    urls.add(trimUrlPunctuation(match[0]));
+  }
+
+  for (const match of value?.matchAll(
+    /(?:https?:\/\/)?(?:[a-z0-9-]+\.)*zoom\.us\/j\/[^\s<>"']+/gi,
+  ) ?? []) {
+    const normalized = normalizeExtractedMeetingUrl(match[0]);
+
+    if (normalized) {
+      urls.add(normalized);
+    }
+  }
+
+  return Array.from(urls);
 }
 
 function trimUrlPunctuation(value: string) {
   return value.replace(/[),.;\]]+$/, "");
+}
+
+function normalizeExtractedMeetingUrl(value: string) {
+  const candidate = trimUrlPunctuation(value);
+  const withProtocol = /^https?:\/\//i.test(candidate)
+    ? candidate
+    : `https://${candidate}`;
+
+  try {
+    const url = new URL(withProtocol);
+    url.protocol = "https:";
+    url.hostname = url.hostname.toLowerCase();
+
+    return isSupportedMeetingUrl(url.toString()) ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 function isSupportedMeetingUrl(value?: string | null): value is string {
