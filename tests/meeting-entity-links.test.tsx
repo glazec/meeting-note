@@ -30,6 +30,21 @@ describe("MeetingEntityLinks", () => {
             value: "Solana",
           },
           {
+            normalizedValue: "revolut",
+            type: "organization",
+            value: "Revolut",
+          },
+          {
+            normalizedValue: "stripe",
+            type: "organization",
+            value: "Stripe",
+          },
+          {
+            normalizedValue: "surf ai",
+            type: "organization",
+            value: "Surf AI",
+          },
+          {
             normalizedValue: "etf",
             type: "organization",
             value: "ETF",
@@ -43,12 +58,18 @@ describe("MeetingEntityLinks", () => {
     expect(html.indexOf("Money")).toBeLessThan(html.indexOf("Names"));
     expect(html).toContain("Babylon");
     expect(html).toContain("Solana");
+    expect(html).toContain("Revolut");
+    expect(html).toContain("Stripe");
+    expect(html).toContain("Surf AI");
     expect(html).toContain("ETF");
     expect(html).toContain("20 million");
     expect(html).toContain("Darko");
     expect(html).toContain('alt=""');
     expect(html).toContain("crm-babylon.example");
     expect(html).toContain("solana.com");
+    expect(html).toContain("revolut.com");
+    expect(html).toContain("stripe.com");
+    expect(html).toContain("surfai.com");
     expect(html).not.toContain("babylonlabs.io");
     expect(html).not.toContain("domain_url=https%3A%2F%2Fetf");
     expect(html).toContain("flex flex-wrap items-center");

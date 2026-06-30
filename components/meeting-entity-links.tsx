@@ -24,11 +24,19 @@ const entitySections = [
 ];
 
 const organizationLogoDomains: Record<string, string> = {
+  aave: "aave.com",
   arbitrum: "arbitrum.io",
   babylon: "babylonlabs.io",
+  claude: "claude.ai",
   circle: "circle.com",
   coinbase: "coinbase.com",
+  dune: "dune.com",
   github: "github.com",
+  "google workspace": "workspace.google.com",
+  "google workspaces": "workspace.google.com",
+  klarna: "klarna.com",
+  "near protocol": "near.org",
+  polymarket: "polymarket.com",
   robinhood: "robinhood.com",
   slack: "slack.com",
   solana: "solana.com",
@@ -93,7 +101,7 @@ export function MeetingEntityLinks({
 function OrganizationLogo({ entity }: { entity: MeetingEntityLink }) {
   const domain =
     getLogoDomainFromAliases(entity.aliases) ??
-    organizationLogoDomains[entity.normalizedValue];
+    getLogoDomainFromEntity(entity);
 
   if (!domain) {
     return null;
@@ -112,6 +120,37 @@ function OrganizationLogo({ entity }: { entity: MeetingEntityLink }) {
       width={16}
     />
   );
+}
+
+function getLogoDomainFromEntity(entity: MeetingEntityLink) {
+  const normalizedKey = normalizeLogoDomainKey(entity.normalizedValue);
+  const displayKey = normalizeLogoDomainKey(entity.value);
+
+  return (
+    organizationLogoDomains[normalizedKey] ??
+    organizationLogoDomains[displayKey] ??
+    getGuessedLogoDomain(normalizedKey) ??
+    getGuessedLogoDomain(displayKey)
+  );
+}
+
+function normalizeLogoDomainKey(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getGuessedLogoDomain(value: string) {
+  const domainLabel = value.replace(/\s+/g, "");
+
+  if (domainLabel.length < 4 || !/[a-z]/.test(domainLabel)) {
+    return null;
+  }
+
+  return `${domainLabel}.com`;
 }
 
 function getFaviconUrl(domain: string) {

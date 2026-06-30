@@ -13,6 +13,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import {
+  ChevronDown,
   Check,
   Languages,
   LoaderCircle,
@@ -140,6 +141,21 @@ type TranscriptTextToken = {
   isWordLike: boolean;
   text: string;
   wordIndex: number | null;
+};
+
+const transcriptLanguageOptions = [
+  { label: "Original language", value: "original" },
+  { label: "Chinese", value: "zh" },
+] as const;
+
+const transcriptStyleOptions = [
+  { label: "Polished", value: "polished" },
+  { label: "Raw", value: "raw" },
+] as const;
+
+type TranscriptSelectOption = {
+  label: string;
+  value: string;
 };
 
 function formatTimestamp(startMs: number) {
@@ -620,76 +636,31 @@ export function TranscriptViewer({
             {hasOriginalPolish || hasTranslations ? (
               <div className="flex flex-wrap items-center gap-2">
                 {hasTranslations ? (
-                  <div className="inline-flex w-fit rounded-md border bg-background p-0.5">
-                    <button
-                      aria-label="Show original language transcript"
-                      aria-pressed={transcriptLanguage === "original"}
-                      className={cn(
-                        "h-7 rounded px-2 text-xs font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-                        transcriptLanguage === "original"
-                          ? "bg-muted text-foreground"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                      onClick={() => {
-                        setTranscriptLanguage("original");
-                        if (!hasOriginalPolish) {
-                          setTextVersion("raw");
-                        }
-                      }}
-                      type="button"
-                    >
-                      Original language
-                    </button>
-                    <button
-                      aria-label="Show Chinese transcript"
-                      aria-pressed={transcriptLanguage === "zh"}
-                      className={cn(
-                        "h-7 rounded px-2 text-xs font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-                        transcriptLanguage === "zh"
-                          ? "bg-muted text-foreground"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                      onClick={() => {
-                        setTranscriptLanguage("zh");
+                  <TranscriptControlSelect
+                    ariaLabel="Transcript language"
+                    onChange={(value) => {
+                      const language = value === "zh" ? "zh" : "original";
+
+                      setTranscriptLanguage(language);
+                      if (language === "zh") {
                         setTextVersion("polished");
-                      }}
-                      type="button"
-                    >
-                      Chinese
-                    </button>
-                  </div>
+                      } else if (!hasOriginalPolish) {
+                        setTextVersion("raw");
+                      }
+                    }}
+                    options={transcriptLanguageOptions}
+                    value={transcriptLanguage}
+                  />
                 ) : null}
                 {transcriptLanguage === "original" && hasOriginalPolish ? (
-                  <div className="inline-flex w-fit rounded-md border bg-background p-0.5">
-                    <button
-                      aria-label="Show polished transcript"
-                      aria-pressed={textVersion === "polished"}
-                      className={cn(
-                        "h-7 rounded px-2 text-xs font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-                        textVersion === "polished"
-                          ? "bg-muted text-foreground"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                      onClick={() => setTextVersion("polished")}
-                      type="button"
-                    >
-                      Polished
-                    </button>
-                    <button
-                      aria-label="Show raw transcript"
-                      aria-pressed={textVersion === "raw"}
-                      className={cn(
-                        "h-7 rounded px-2 text-xs font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-                        textVersion === "raw"
-                          ? "bg-muted text-foreground"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                      onClick={() => setTextVersion("raw")}
-                      type="button"
-                    >
-                      Raw
-                    </button>
-                  </div>
+                  <TranscriptControlSelect
+                    ariaLabel="Transcript style"
+                    onChange={(value) =>
+                      setTextVersion(value === "raw" ? "raw" : "polished")
+                    }
+                    options={transcriptStyleOptions}
+                    value={textVersion}
+                  />
                 ) : null}
               </div>
             ) : null}
@@ -1028,6 +999,41 @@ export function TranscriptViewer({
         />
       ) : null}
     </>
+  );
+}
+
+function TranscriptControlSelect({
+  ariaLabel,
+  onChange,
+  options,
+  value,
+}: {
+  ariaLabel: string;
+  onChange: (value: string) => void;
+  options: readonly TranscriptSelectOption[];
+  value: string;
+}) {
+  return (
+    <label className="relative inline-flex max-w-full">
+      <select
+        aria-label={ariaLabel}
+        className="h-8 max-w-full appearance-none rounded-md border bg-background py-1 pr-8 pl-3 text-sm font-medium text-foreground shadow-xs outline-none transition hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
+        onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+          onChange(event.currentTarget.value)
+        }
+        value={value}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <ChevronDown
+        aria-hidden="true"
+        className="pointer-events-none absolute top-1/2 right-2 size-3.5 -translate-y-1/2 text-muted-foreground"
+      />
+    </label>
   );
 }
 

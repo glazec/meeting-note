@@ -381,6 +381,11 @@ describe("TranscriptViewer", () => {
     expect(html).toContain("Raw");
     expect(html).toContain("Original language");
     expect(html).toContain("Chinese");
+    expect(html).toContain('aria-label="Transcript language"');
+    expect(html).toContain('aria-label="Transcript style"');
+    expect(html).toContain("<select");
+    expect(html).not.toContain("Show original language transcript");
+    expect(html).not.toContain("Show polished transcript");
     expect(html).toContain("Hello,");
     expect(html).toContain("team.");
     expect(html).toContain('role="tooltip"');
@@ -408,6 +413,7 @@ describe("TranscriptViewer", () => {
 
     expect(html).toContain("Polished");
     expect(html).toContain("Raw");
+    expect(html).toContain('aria-label="Transcript style"');
     expect(html).toContain("我们先看");
     expect(html).toContain("pipeline。");
     expect(html).toContain("然后我们先看一下 pipeline。");
