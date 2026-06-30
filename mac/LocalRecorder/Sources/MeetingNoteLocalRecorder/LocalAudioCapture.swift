@@ -74,8 +74,7 @@ final class LocalRecordingCaptureSession {
     private let systemRecorder: SystemAudioTrackRecorder
 
     init(fallbackIntentId: String, appVersion: String) throws {
-        let directoryURL = FileManager.default.temporaryDirectory
-            .appending(path: "meeting-note-local-recorder", directoryHint: .isDirectory)
+        let directoryURL = LocalRecorderFileLocations.recordingsDirectoryURL()
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(
             at: directoryURL,
@@ -143,6 +142,19 @@ final class LocalRecordingCaptureSession {
             cleanupDirectoryURL: payload.computerAudioURL.deletingLastPathComponent(),
             payload: payload
         )
+    }
+}
+
+enum LocalRecorderFileLocations {
+    static func recordingsDirectoryURL() -> URL {
+        let baseURL = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? FileManager.default.temporaryDirectory
+
+        return baseURL
+            .appending(path: "MeetingNoteLocalRecorder", directoryHint: .isDirectory)
+            .appending(path: "Recordings", directoryHint: .isDirectory)
     }
 }
 

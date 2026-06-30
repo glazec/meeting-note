@@ -194,3 +194,108 @@ import Testing
     #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
     #expect(body.contains("Screen recording denied"))
 }
+
+@Test func keychainCredentialStoreSavesLoadsReplacesAndDeletes() throws {
+    let store = LocalRecorderKeychainCredentialStore(
+        service: "tech.inevitable.meeting-note.local-recorder.tests.\(UUID().uuidString)",
+        account: "device-session"
+    )
+    defer {
+        try? store.delete()
+    }
+
+    try store.save(
+        LocalRecorderCredentials(
+            serverURLText: "https://app.example.com",
+            bearerToken: "token_123"
+        )
+    )
+    #expect(
+        try store.load() == LocalRecorderCredentials(
+            serverURLText: "https://app.example.com",
+            bearerToken: "token_123"
+        )
+    )
+
+    try store.save(
+        LocalRecorderCredentials(
+            serverURLText: "https://app.example.com",
+            bearerToken: "token_456"
+        )
+    )
+    #expect(try store.load()?.bearerToken == "token_456")
+
+    try store.delete()
+    #expect(try store.load() == nil)
+}
+
+@Test func uploadQueuePersistsPayloadsOldestFirstAndRemovesThem() throws {
+    let temporaryDirectory = FileManager.default.temporaryDirectory
+        .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    let queueDirectory = temporaryDirectory.appending(path: "queue", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(
+        at: temporaryDirectory,
+        withIntermediateDirectories: true
+    )
+    defer {
+        try? FileManager.default.removeItem(at: temporaryDirectory)
+    }
+
+    let queue = LocalRecordingUploadQueue(directoryURL: queueDirectory)
+    let newerPayload = makeUploadPayload(
+        clientRecordingId: "recording_new",
+        recordingStartedAt: Date(timeIntervalSince1970: 20),
+        directoryURL: temporaryDirectory.appending(path: "new", directoryHint: .isDirectory)
+    )
+    let olderPayload = makeUploadPayload(
+        clientRecordingId: "recording_old",
+        recordingStartedAt: Date(timeIntervalSince1970: 10),
+        directoryURL: temporaryDirectory.appending(path: "old", directoryHint: .isDirectory)
+    )
+
+    try queue.save(newerPayload)
+    try queue.save(olderPayload)
+
+    let queued = try queue.load()
+    #expect(queued.map(\.clientRecordingId) == ["recording_old", "recording_new"])
+    #expect(queued.first?.computerAudioURL == olderPayload.computerAudioURL)
+
+    try queue.remove(clientRecordingId: "recording_old")
+    #expect(try queue.load().map(\.clientRecordingId) == ["recording_new"])
+}
+
+private func makeUploadPayload(
+    clientRecordingId: String,
+    recordingStartedAt: Date,
+    directoryURL: URL
+) -> LocalRecordingUploadPayload {
+    LocalRecordingUploadPayload(
+        fallbackIntentId: "intent_123",
+        clientRecordingId: clientRecordingId,
+        recordingStartedAt: recordingStartedAt,
+        recordingStoppedAt: recordingStartedAt.addingTimeInterval(60),
+        computerAudioURL: directoryURL.appending(path: "computer.wav"),
+        microphoneAudioURL: directoryURL.appending(path: "microphone.wav"),
+        manifest: RecordingManifest(
+            appVersion: "0.1.0",
+            computerAudio: .init(
+                captureStartedAt: recordingStartedAt,
+                captureStoppedAt: recordingStartedAt.addingTimeInterval(60),
+                sampleRate: 48_000,
+                channelCount: 2,
+                codec: "pcm_s16le",
+                container: "wav",
+                firstSampleTime: 0
+            ),
+            microphoneAudio: .init(
+                captureStartedAt: recordingStartedAt,
+                captureStoppedAt: recordingStartedAt.addingTimeInterval(60),
+                sampleRate: 48_000,
+                channelCount: 1,
+                codec: "pcm_s16le",
+                container: "wav",
+                firstSampleTime: 0
+            )
+        )
+    )
+}

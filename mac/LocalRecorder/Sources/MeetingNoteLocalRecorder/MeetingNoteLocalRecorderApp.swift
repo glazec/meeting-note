@@ -39,20 +39,29 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
 
     private let appVersion = "0.1.0"
     private let captureController = LocalRecordingCaptureController()
-    private let credentialStore: LocalRecorderCredentialStore
+    private let credentialStore: LocalRecorderKeychainCredentialStore
     private let deviceIdStore = DeviceIdStore()
     private let notificationCenter = UNUserNotificationCenter.current()
+    private let uploadQueue: LocalRecordingUploadQueue
     private var activeClient: LocalRecorderAPIClient?
+    private var isUploadingQueuedRecordings = false
 
     override init() {
-        let credentialStore = LocalRecorderCredentialStore()
+        let credentialStore = LocalRecorderKeychainCredentialStore()
+        let credentials = try? credentialStore.load()
         self.credentialStore = credentialStore
-        self.serverURLText = credentialStore.serverURLText ?? Self.defaultServerURLText
-        self.bearerToken = credentialStore.bearerToken ?? ""
+        self.uploadQueue = LocalRecordingUploadQueue(
+            directoryURL: Self.uploadQueueDirectoryURL()
+        )
+        self.serverURLText = credentials?.serverURLText ?? Self.defaultServerURLText
+        self.bearerToken = credentials?.bearerToken ?? ""
         super.init()
         notificationCenter.delegate = self
         if !bearerToken.isEmpty {
             statusText = "Grant permissions to start monitoring"
+            Task {
+                await retryQueuedUploadsIfPossible()
+            }
         }
     }
 
@@ -91,14 +100,93 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
             let callback = try LocalRecorderLoginCallback(url: url)
             serverURLText = callback.serverURL.absoluteString
             bearerToken = callback.token
-            credentialStore.save(
-                serverURLText: callback.serverURL.absoluteString,
-                bearerToken: callback.token
+            try credentialStore.save(
+                LocalRecorderCredentials(
+                    serverURLText: callback.serverURL.absoluteString,
+                    bearerToken: callback.token
+                )
             )
             statusText = "Grant permissions to start monitoring"
+            Task {
+                await retryQueuedUploadsIfPossible()
+            }
         } catch {
             statusText = "Could not finish login"
         }
+    }
+
+    private static func uploadQueueDirectoryURL() -> URL {
+        let baseURL = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? FileManager.default.temporaryDirectory
+
+        return baseURL
+            .appending(path: "MeetingNoteLocalRecorder", directoryHint: .isDirectory)
+            .appending(path: "PendingUploads", directoryHint: .isDirectory)
+    }
+
+    private func makeClient() -> LocalRecorderAPIClient? {
+        guard let serverURL = URL(string: serverURLText) else {
+            return nil
+        }
+
+        return LocalRecorderAPIClient(
+            serverURL: serverURL,
+            bearerToken: bearerToken,
+            deviceId: deviceIdStore.deviceId
+        )
+    }
+
+    private func retryQueuedUploadsIfPossible() async {
+        guard let client = makeClient() else {
+            return
+        }
+
+        await uploadQueuedRecordings(client: client)
+    }
+
+    private func uploadQueuedRecordings(client: LocalRecorderAPIClient) async {
+        guard !isUploadingQueuedRecordings else {
+            return
+        }
+
+        let queuedPayloads: [LocalRecordingUploadPayload]
+        do {
+            queuedPayloads = try uploadQueue.load()
+        } catch {
+            statusText = "Could not read saved recordings"
+            return
+        }
+
+        guard !queuedPayloads.isEmpty else {
+            return
+        }
+
+        isUploadingQueuedRecordings = true
+        defer {
+            isUploadingQueuedRecordings = false
+        }
+
+        statusText = "Uploading saved recordings"
+        for payload in queuedPayloads {
+            do {
+                try await uploadWithRetry(client: client, payload: payload)
+                try uploadQueue.remove(clientRecordingId: payload.clientRecordingId)
+                cleanupRecordingFiles(for: payload)
+            } catch {
+                statusText = "Could not upload saved recording"
+                return
+            }
+        }
+
+        statusText = "Saved recordings uploaded"
+    }
+
+    private func cleanupRecordingFiles(for payload: LocalRecordingUploadPayload) {
+        try? FileManager.default.removeItem(
+            at: payload.computerAudioURL.deletingLastPathComponent()
+        )
     }
 
     func requestPermissions() {
@@ -157,6 +245,7 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
                     bearerToken: bearerToken,
                     deviceId: deviceIdStore.deviceId
                 )
+                await uploadQueuedRecordings(client: client)
                 pendingMeetings = try await client.fetchMissedMeetings()
                 statusText = pendingMeetings.isEmpty
                     ? "No missed bot meetings"
@@ -241,10 +330,12 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
                     throw LocalRecorderAPIError.invalidResponse
                 }
 
+                try uploadQueue.save(result.payload)
                 try await uploadWithRetry(
                     client: client,
                     payload: result.payload
                 )
+                try uploadQueue.remove(clientRecordingId: result.payload.clientRecordingId)
                 try? FileManager.default.removeItem(at: result.cleanupDirectoryURL)
                 activeClient = nil
                 statusText = "Recording uploaded"
@@ -435,23 +526,5 @@ struct DeviceIdStore {
         let value = UUID().uuidString
         UserDefaults.standard.set(value, forKey: defaultsKey)
         return value
-    }
-}
-
-struct LocalRecorderCredentialStore {
-    private let tokenKey = "meeting-note-local-recorder-token"
-    private let serverURLKey = "meeting-note-local-recorder-server-url"
-
-    var bearerToken: String? {
-        UserDefaults.standard.string(forKey: tokenKey)
-    }
-
-    var serverURLText: String? {
-        UserDefaults.standard.string(forKey: serverURLKey)
-    }
-
-    func save(serverURLText: String, bearerToken: String) {
-        UserDefaults.standard.set(serverURLText, forKey: serverURLKey)
-        UserDefaults.standard.set(bearerToken, forKey: tokenKey)
     }
 }

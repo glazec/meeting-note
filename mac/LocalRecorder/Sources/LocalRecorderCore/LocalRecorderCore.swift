@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 public enum PermissionGrant: Sendable {
     case unknown
@@ -240,6 +241,90 @@ public struct LocalRecorderLoginCallback: Equatable, Sendable {
     }
 }
 
+public struct LocalRecorderCredentials: Codable, Equatable, Sendable {
+    public var serverURLText: String
+    public var bearerToken: String
+
+    public init(serverURLText: String, bearerToken: String) {
+        self.serverURLText = serverURLText
+        self.bearerToken = bearerToken
+    }
+}
+
+public enum LocalRecorderKeychainCredentialStoreError: Error, Equatable {
+    case invalidKeychainData
+    case keychainStatus(OSStatus)
+}
+
+public struct LocalRecorderKeychainCredentialStore: Sendable {
+    public var service: String
+    public var account: String
+
+    public init(
+        service: String = "tech.inevitable.meeting-note.local-recorder",
+        account: String = "device-session"
+    ) {
+        self.service = service
+        self.account = account
+    }
+
+    public func load() throws -> LocalRecorderCredentials? {
+        var query = baseQuery()
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+
+        if status == errSecItemNotFound {
+            return nil
+        }
+
+        guard status == errSecSuccess else {
+            throw LocalRecorderKeychainCredentialStoreError.keychainStatus(status)
+        }
+
+        guard let data = item as? Data else {
+            throw LocalRecorderKeychainCredentialStoreError.invalidKeychainData
+        }
+
+        do {
+            return try JSONDecoder.localRecorder.decode(LocalRecorderCredentials.self, from: data)
+        } catch {
+            throw LocalRecorderKeychainCredentialStoreError.invalidKeychainData
+        }
+    }
+
+    public func save(_ credentials: LocalRecorderCredentials) throws {
+        let data = try JSONEncoder.localRecorder.encode(credentials)
+        try delete()
+
+        var attributes = baseQuery()
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        attributes[kSecValueData as String] = data
+
+        let status = SecItemAdd(attributes as CFDictionary, nil)
+        guard status == errSecSuccess else {
+            throw LocalRecorderKeychainCredentialStoreError.keychainStatus(status)
+        }
+    }
+
+    public func delete() throws {
+        let status = SecItemDelete(baseQuery() as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw LocalRecorderKeychainCredentialStoreError.keychainStatus(status)
+        }
+    }
+
+    private func baseQuery() -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+    }
+}
+
 public struct MissedMeetingsResponse: Codable, Equatable, Sendable {
     public var meetings: [MissedMeeting]
 }
@@ -264,7 +349,7 @@ public struct ClaimIntentResponse: Codable, Equatable, Sendable {
     public var reason: String?
 }
 
-public struct LocalRecordingUploadPayload: Equatable, Sendable {
+public struct LocalRecordingUploadPayload: Codable, Equatable, Sendable {
     public var fallbackIntentId: String
     public var clientRecordingId: String
     public var recordingStartedAt: Date
@@ -289,6 +374,66 @@ public struct LocalRecordingUploadPayload: Equatable, Sendable {
         self.computerAudioURL = computerAudioURL
         self.microphoneAudioURL = microphoneAudioURL
         self.manifest = manifest
+    }
+}
+
+public struct LocalRecordingUploadQueue: Sendable {
+    public var directoryURL: URL
+
+    public init(directoryURL: URL) {
+        self.directoryURL = directoryURL
+    }
+
+    public func save(_ payload: LocalRecordingUploadPayload) throws {
+        try FileManager.default.createDirectory(
+            at: directoryURL,
+            withIntermediateDirectories: true
+        )
+        try JSONEncoder.localRecorder
+            .encode(payload)
+            .write(to: itemURL(clientRecordingId: payload.clientRecordingId), options: .atomic)
+    }
+
+    public func load() throws -> [LocalRecordingUploadPayload] {
+        guard FileManager.default.fileExists(atPath: directoryURL.path()) else {
+            return []
+        }
+
+        let itemURLs = try FileManager.default.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: nil
+        )
+        let payloads = try itemURLs
+            .filter { $0.pathExtension == "json" }
+            .map { url in
+                try JSONDecoder.localRecorder.decode(
+                    LocalRecordingUploadPayload.self,
+                    from: Data(contentsOf: url)
+                )
+            }
+
+        return payloads.sorted {
+            $0.recordingStartedAt < $1.recordingStartedAt
+        }
+    }
+
+    public func remove(clientRecordingId: String) throws {
+        let url = itemURL(clientRecordingId: clientRecordingId)
+        guard FileManager.default.fileExists(atPath: url.path()) else {
+            return
+        }
+
+        try FileManager.default.removeItem(at: url)
+    }
+
+    private func itemURL(clientRecordingId: String) -> URL {
+        let allowed = CharacterSet.alphanumerics.union(
+            CharacterSet(charactersIn: "-_")
+        )
+        let filename = clientRecordingId.unicodeScalars
+            .map { allowed.contains($0) ? String($0) : "_" }
+            .joined()
+        return directoryURL.appending(path: "\(filename.isEmpty ? "recording" : filename).json")
     }
 }
 
