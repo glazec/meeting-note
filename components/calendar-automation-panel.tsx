@@ -11,6 +11,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { CalendarSyncButton } from "@/components/calendar-sync-button";
+import { LocalDateTime } from "@/components/local-date-time";
 import type { CalendarConnectionSummary } from "@/lib/calendar-connection-queries";
 
 type CalendarAutomationPanelProps = {
@@ -93,7 +94,7 @@ function StatusRow({
 }: {
   icon: ReactNode;
   label: string;
-  value: string;
+  value: ReactNode;
 }) {
   return (
     <div className="grid grid-cols-[1.5rem_1fr] gap-x-2">
@@ -113,10 +114,5 @@ function formatLastSynced(value: string | null) {
     return "No sync yet";
   }
 
-  return new Intl.DateTimeFormat("en", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(value));
+  return <LocalDateTime value={value} />;
 }

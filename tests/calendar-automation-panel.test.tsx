@@ -34,6 +34,37 @@ describe("CalendarAutomationPanel", () => {
     expect(html).toContain("Sync calendar");
   });
 
+  it("defers last checked formatting to the browser timezone", () => {
+    const originalTimeZone = process.env.TZ;
+    process.env.TZ = "UTC";
+
+    try {
+      const html = renderToStaticMarkup(
+        <CalendarAutomationPanel
+          accountLabel="member@iosg.vc"
+          autoSync={false}
+          status={{
+            connected: true,
+            autoJoinEnabled: true,
+            recallCalendarStatus: "connected",
+            recallCalendarLastSyncedAt: "2026-06-30T01:54:11.846Z",
+          }}
+        />,
+      );
+
+      expect(html).toContain(
+        '<time dateTime="2026-06-30T01:54:11.846Z">',
+      );
+      expect(html).not.toContain("Jun 30, 1:54 AM");
+    } finally {
+      if (originalTimeZone === undefined) {
+        delete process.env.TZ;
+      } else {
+        process.env.TZ = originalTimeZone;
+      }
+    }
+  });
+
   it("shows a connect action when Recall Calendar is not connected", () => {
     const html = renderToStaticMarkup(
       <CalendarAutomationPanel

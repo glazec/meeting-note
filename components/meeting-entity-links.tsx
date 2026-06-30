@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 
 export type MeetingEntityLink = {
   normalizedValue: string;
@@ -91,7 +92,7 @@ function OrganizationLogo({ entity }: { entity: MeetingEntityLink }) {
   }
 
   return (
-    <img
+    <Image
       alt=""
       aria-hidden="true"
       className="size-4 rounded-sm"
@@ -99,6 +100,7 @@ function OrganizationLogo({ entity }: { entity: MeetingEntityLink }) {
       loading="lazy"
       referrerPolicy="no-referrer"
       src={getFaviconUrl(domain)}
+      unoptimized
       width={16}
     />
   );

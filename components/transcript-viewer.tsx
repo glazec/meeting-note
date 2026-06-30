@@ -51,6 +51,8 @@ export type TranscriptSegment = {
   emotionReason?: string | null;
 };
 
+type TranscriptTextVersion = "polished" | "original";
+
 export type SpeakerSuggestion = {
   email: string;
   name: string;
@@ -250,6 +252,7 @@ export function TranscriptViewer({
   >(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const segmentRefs = useRef(new Map<string, HTMLLIElement>());
+  const previousHasTranslationsRef = useRef(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -267,7 +270,7 @@ export function TranscriptViewer({
           status: "queued" as const,
         }
       : translationSummary;
-  const [textVersion, setTextVersion] = useState<"polished" | "original">(
+  const [textVersion, setTextVersion] = useState<TranscriptTextVersion>(
     hasTranslations ? "polished" : "original",
   );
   const canSeekTranscript = Boolean(audioUrl);
@@ -292,6 +295,26 @@ export function TranscriptViewer({
 
     return statsByRawKey;
   }, [speakerStats]);
+
+  useEffect(() => {
+    setSegments((currentSegments) =>
+      mergeIncomingTranscriptSegments(currentSegments, initialSegments),
+    );
+  }, [initialSegments]);
+
+  useEffect(() => {
+    const hadTranslations = previousHasTranslationsRef.current;
+
+    setTextVersion((currentTextVersion) =>
+      getNextTranscriptTextVersion({
+        currentTextVersion,
+        hadTranslations,
+        hasTranslations,
+      }),
+    );
+    previousHasTranslationsRef.current = hasTranslations;
+  }, [hasTranslations]);
+
   const displaySegments = useMemo(
     () =>
       rawDisplaySegments.map((segment) => ({
