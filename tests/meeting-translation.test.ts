@@ -86,4 +86,14 @@ describe("meeting translation", () => {
       }),
     ).toEqual([{ id: "segment_1", text: "我们先看 pipeline。" }]);
   });
+
+  it("ignores blank original-language polish rows", () => {
+    expect(
+      parseOriginalTranscriptPolishResponse({
+        content:
+          '{"segments":[{"id":"segment_1","text":""},{"id":"segment_2","text":"Review API cost."}]}',
+        segmentIds: ["segment_1", "segment_2"],
+      }),
+    ).toEqual([{ id: "segment_2", text: "Review API cost." }]);
+  });
 });

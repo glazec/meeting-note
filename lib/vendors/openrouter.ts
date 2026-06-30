@@ -144,11 +144,18 @@ export async function polishTranscriptSegmentsInOriginalLanguage(
       temperature: 0.1,
     });
 
-    polishedSegments.push(
-      ...parseOriginalTranscriptPolishResponse({
+    const polishedTextById = new Map(
+      parseOriginalTranscriptPolishResponse({
         content,
         segmentIds: batch.map((segment) => segment.id),
-      }),
+      }).map((segment) => [segment.id, segment.text]),
+    );
+
+    polishedSegments.push(
+      ...batch.map((segment) => ({
+        id: segment.id,
+        text: polishedTextById.get(segment.id) ?? segment.text,
+      })),
     );
   }
 

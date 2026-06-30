@@ -87,6 +87,46 @@ describe("OpenRouter translation", () => {
     expect(body.response_format).toEqual({ type: "json_object" });
   });
 
+  it("falls back to original text for blank or missing polished rows", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "openrouter-key");
+    vi.stubEnv("OPENROUTER_MODEL", "qwen/qwen3.7-plus");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content:
+                  '{"segments":[{"id":"segment_1","text":""},{"id":"segment_2","text":"Review API cost."}]}',
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { polishTranscriptSegmentsInOriginalLanguage } = await import(
+      "@/lib/vendors/openrouter"
+    );
+
+    await expect(
+      polishTranscriptSegmentsInOriginalLanguage([
+        { id: "segment_1", text: "Um hello." },
+        { id: "segment_2", text: "Um review API cost." },
+        { id: "segment_3", text: "Then ship it." },
+      ]),
+    ).resolves.toEqual([
+      { id: "segment_1", text: "Um hello." },
+      { id: "segment_2", text: "Review API cost." },
+      { id: "segment_3", text: "Then ship it." },
+    ]);
+  });
+
   it("translates long transcripts in bounded batches", async () => {
     vi.stubEnv("OPENROUTER_API_KEY", "openrouter-key");
     vi.stubEnv("OPENROUTER_MODEL", "anthropic/claude-sonnet-4.5");

@@ -5,13 +5,6 @@ type SegmentForTranslation = {
   text: string;
 };
 
-const translatedRowsSchema = z.array(
-  z.object({
-    id: z.string().min(1),
-    text: z.string().trim().min(1),
-  }),
-);
-
 export function buildChineseTranslationMessages(
   segments: SegmentForTranslation[],
 ) {
@@ -58,25 +51,30 @@ export function parseChineseTranslationResponse(input: {
   content: string;
   segmentIds: string[];
 }) {
-  return parseTranscriptTextRows(input);
+  return parseTranscriptTextRows({ ...input, allowBlankText: false });
 }
 
 export function parseOriginalTranscriptPolishResponse(input: {
   content: string;
   segmentIds: string[];
 }) {
-  return parseTranscriptTextRows(input);
+  return parseTranscriptTextRows({ ...input, allowBlankText: true });
 }
 
 function parseTranscriptTextRows(input: {
   content: string;
   segmentIds: string[];
+  allowBlankText: boolean;
 }) {
   const allowedIds = new Set(input.segmentIds);
   const parsedJson = JSON.parse(extractJsonObject(input.content));
-  const transcriptRows = getTranscriptRows(parsedJson);
+  const transcriptRows = getTranscriptRows(parsedJson, {
+    allowBlankText: input.allowBlankText,
+  });
 
-  return transcriptRows.filter((row) => allowedIds.has(row.id));
+  return transcriptRows.filter(
+    (row) => allowedIds.has(row.id) && Boolean(row.text.trim()),
+  );
 }
 
 function extractJsonObject(content: string) {
@@ -103,11 +101,20 @@ function extractJsonObject(content: string) {
   return trimmedContent;
 }
 
-function getTranscriptRows(input: unknown) {
+function getTranscriptRows(
+  input: unknown,
+  options: { allowBlankText: boolean },
+) {
+  const rowSchema = z.object({
+    id: z.string().min(1),
+    text: options.allowBlankText
+      ? z.string().trim()
+      : z.string().trim().min(1),
+  });
   const parsedObject = z
     .object({
-      translations: translatedRowsSchema.optional(),
-      segments: translatedRowsSchema.optional(),
+      translations: z.array(rowSchema).optional(),
+      segments: z.array(rowSchema).optional(),
     })
     .parse(input);
 
