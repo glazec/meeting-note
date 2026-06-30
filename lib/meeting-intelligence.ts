@@ -5,6 +5,9 @@ type VocabularyTerm = {
   hint?: string | null;
 };
 
+const ELEVENLABS_BATCH_KEYTERM_LIMIT = 1000;
+const ELEVENLABS_BATCH_KEYTERM_MAX_LENGTH = 50;
+
 type EntitySegment = {
   id: string;
   text: string;
@@ -86,19 +89,31 @@ const hardSignals = [
 const chillSignals = ["chill", "cool", "easy", "fine", "relaxed", "steady"];
 
 export function buildTeamVocabularyKeyterms(terms: VocabularyTerm[]) {
+  return buildTranscriptionKeyterms(terms.map((item) => item.term));
+}
+
+export function buildTranscriptionKeyterms(...termGroups: string[][]) {
   const seen = new Set<string>();
   const keyterms: string[] = [];
 
-  for (const item of terms) {
-    const term = item.term.replace(/\s+/g, " ").trim();
+  for (const rawTerm of termGroups.flat()) {
+    const term = rawTerm.replace(/\s+/g, " ").trim();
     const key = term.toLowerCase();
 
-    if (!term || seen.has(key)) {
+    if (
+      !term ||
+      term.length > ELEVENLABS_BATCH_KEYTERM_MAX_LENGTH ||
+      seen.has(key)
+    ) {
       continue;
     }
 
     seen.add(key);
     keyterms.push(term);
+
+    if (keyterms.length >= ELEVENLABS_BATCH_KEYTERM_LIMIT) {
+      break;
+    }
   }
 
   return keyterms;

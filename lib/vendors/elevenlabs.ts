@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { buildTranscriptionKeyterms } from "@/lib/meeting-intelligence";
+
 const oldElevenLabsWebhookSchema = z.object({
   event: z.string().min(1),
   transcript_id: z.string().min(1).optional().nullable(),
@@ -126,7 +128,7 @@ export async function createElevenLabsTranscriptJob(input: {
   body.append("diarize", "true");
   body.append("detect_entities", "true");
   body.append("timestamps_granularity", "word");
-  for (const keyterm of parsedInput.keyterms ?? []) {
+  for (const keyterm of buildTranscriptionKeyterms(parsedInput.keyterms ?? [])) {
     body.append("keyterms", keyterm);
   }
   // ElevenLabs delivers webhooks to workspace configured endpoints. This metadata only correlates the request with our app URL.

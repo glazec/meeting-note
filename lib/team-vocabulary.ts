@@ -2,21 +2,31 @@ import { and, asc, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { meetings, teamVocabularyTerms } from "@/db/schema";
-import { buildTeamVocabularyKeyterms } from "@/lib/meeting-intelligence";
+import {
+  buildTranscriptionKeyterms,
+  buildTeamVocabularyKeyterms,
+} from "@/lib/meeting-intelligence";
+import { getTwentyCrmKeyterms } from "@/lib/vendors/twenty";
 
 export async function getTeamVocabularyKeyterms(teamId: string) {
-  const rows = await db
-    .select({ term: teamVocabularyTerms.term })
-    .from(teamVocabularyTerms)
-    .where(
-      and(
-        eq(teamVocabularyTerms.teamId, teamId),
-        eq(teamVocabularyTerms.enabled, true),
-      ),
-    )
-    .orderBy(asc(teamVocabularyTerms.term));
+  const [rows, crmKeyterms] = await Promise.all([
+    db
+      .select({ term: teamVocabularyTerms.term })
+      .from(teamVocabularyTerms)
+      .where(
+        and(
+          eq(teamVocabularyTerms.teamId, teamId),
+          eq(teamVocabularyTerms.enabled, true),
+        ),
+      )
+      .orderBy(asc(teamVocabularyTerms.term)),
+    getTwentyCrmKeyterms(),
+  ]);
 
-  return buildTeamVocabularyKeyterms(rows);
+  return buildTranscriptionKeyterms(
+    buildTeamVocabularyKeyterms(rows),
+    crmKeyterms,
+  );
 }
 
 export async function getMeetingVocabularyKeyterms(meetingId: string) {

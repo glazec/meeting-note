@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildSmartMeetingTitle,
   buildTeamVocabularyKeyterms,
+  buildTranscriptionKeyterms,
   classifySegmentEmotion,
   extractMeetingEntities,
   groupRelatedMeetings,
@@ -18,6 +19,21 @@ describe("meeting intelligence helpers", () => {
         { term: "" },
       ]),
     ).toEqual(["IOSG", "TCG platform"]);
+  });
+
+  it("keeps transcription keyterms inside provider limits", () => {
+    const oversizedTerm = "a".repeat(51);
+    const keyterms = buildTranscriptionKeyterms(
+      [" IOSG ", oversizedTerm, "iosg"],
+      Array.from({ length: 1005 }, (_, index) => `Project ${index}`),
+    );
+
+    expect(keyterms).toHaveLength(1000);
+    expect(keyterms[0]).toBe("IOSG");
+    expect(keyterms).not.toContain(oversizedTerm);
+    expect(keyterms.filter((term) => term.toLowerCase() === "iosg")).toHaveLength(
+      1,
+    );
   });
 
   it("uses the event title unless it is a generic online meeting title", () => {
