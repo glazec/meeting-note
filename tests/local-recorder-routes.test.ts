@@ -4,6 +4,7 @@ const createLocalRecorderDeviceSession = vi.fn();
 const getLocalRecorderWorkspace = vi.fn();
 const listMissedLocalRecorderMeetings = vi.fn();
 const claimLocalRecorderIntent = vi.fn();
+const failLocalRecorderIntent = vi.fn();
 const createLocalRecorderRecording = vi.fn();
 
 vi.mock("@/lib/local-recorder-auth", () => ({
@@ -14,6 +15,7 @@ vi.mock("@/lib/local-recorder-auth", () => ({
 vi.mock("@/lib/local-recorder-records", () => ({
   claimLocalRecorderIntent,
   createLocalRecorderRecording,
+  failLocalRecorderIntent,
   listMissedLocalRecorderMeetings,
 }));
 
@@ -23,6 +25,7 @@ describe("local recorder API routes", () => {
     getLocalRecorderWorkspace.mockReset();
     listMissedLocalRecorderMeetings.mockReset();
     claimLocalRecorderIntent.mockReset();
+    failLocalRecorderIntent.mockReset();
     createLocalRecorderRecording.mockReset();
     vi.resetModules();
   });
@@ -105,6 +108,44 @@ describe("local recorder API routes", () => {
     await expect(response.json()).resolves.toEqual({
       claimed: true,
       meetingTitle: "Weekly sync",
+    });
+  });
+
+  it("marks a claimed fallback intent failed when local capture cannot start", async () => {
+    getLocalRecorderWorkspace.mockResolvedValue({
+      teamId: "team_123",
+      userId: "user_123",
+    });
+    failLocalRecorderIntent.mockResolvedValue({
+      failed: true,
+    });
+
+    const { POST } = await import(
+      "@/app/api/local-recorder/intents/[fallbackIntentId]/fail/route"
+    );
+    const response = await POST(
+      new Request(
+        "https://app.example.com/api/local-recorder/intents/intent_123/fail",
+        {
+          method: "POST",
+          body: JSON.stringify({ errorMessage: "Screen recording denied" }),
+          headers: { "x-local-recorder-device-id": "mac_123" },
+        },
+      ),
+      { params: Promise.resolve({ fallbackIntentId: "intent_123" }) },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ failed: true });
+    expect(failLocalRecorderIntent).toHaveBeenCalledWith({
+      deviceId: "mac_123",
+      errorMessage: "Screen recording denied",
+      fallbackIntentId: "intent_123",
+      now: expect.any(Date),
+      workspace: {
+        teamId: "team_123",
+        userId: "user_123",
+      },
     });
   });
 

@@ -252,6 +252,46 @@ export async function claimLocalRecorderIntent(input: {
   return { claimed: true, meetingTitle: attempt.title };
 }
 
+export async function failLocalRecorderIntent(input: {
+  deviceId: string;
+  errorMessage: string | null;
+  fallbackIntentId: string;
+  now: Date;
+  workspace: WorkspaceContext;
+}) {
+  const deviceIdHash = await hashLocalRecorderValue(input.deviceId);
+  const fallbackIntentIdHash = await hashLocalRecorderValue(
+    input.fallbackIntentId,
+  );
+  const [attempt] = await db
+    .select({ id: localRecordingAttempts.id })
+    .from(localRecordingAttempts)
+    .where(
+      and(
+        eq(localRecordingAttempts.userId, input.workspace.userId),
+        eq(localRecordingAttempts.deviceIdHash, deviceIdHash),
+        eq(localRecordingAttempts.fallbackIntentIdHash, fallbackIntentIdHash),
+        inArray(localRecordingAttempts.attemptState, ["started", "uploading"]),
+      ),
+    )
+    .limit(1);
+
+  if (!attempt) {
+    return { failed: false, reason: "expired_or_missing" as const };
+  }
+
+  await db
+    .update(localRecordingAttempts)
+    .set({
+      attemptState: "failed",
+      errorMessage: input.errorMessage?.slice(0, 500) ?? null,
+      updatedAt: input.now,
+    })
+    .where(eq(localRecordingAttempts.id, attempt.id));
+
+  return { failed: true };
+}
+
 export async function createLocalRecorderRecording(input: {
   clientRecordingId: string;
   computerAudio: File;

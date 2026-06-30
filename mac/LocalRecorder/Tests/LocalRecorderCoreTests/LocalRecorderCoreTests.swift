@@ -155,3 +155,42 @@ import Testing
     #expect(body.contains("microphone"))
     #expect(body.contains("\"appVersion\":\"0.1.0\""))
 }
+
+@Test func loginCallbackParsesTokenAndServerURL() throws {
+    let callback = try LocalRecorderLoginCallback(
+        url: URL(
+            string: "meetingnote-local-recorder://login?token=token_123&server=https%3A%2F%2Fapp.example.com"
+        )!
+    )
+
+    #expect(callback.token == "token_123")
+    #expect(callback.serverURL.absoluteString == "https://app.example.com")
+}
+
+@Test func loginCallbackRejectsUnexpectedScheme() {
+    #expect(throws: LocalRecorderLoginCallbackError.self) {
+        _ = try LocalRecorderLoginCallback(
+            url: URL(string: "https://app.example.com/login?token=token_123")!
+        )
+    }
+}
+
+@Test func failIntentRequestIncludesRecorderHeadersAndReason() throws {
+    let client = LocalRecorderAPIClient(
+        serverURL: URL(string: "https://app.example.com")!,
+        bearerToken: "token_123",
+        deviceId: "device_123"
+    )
+    let request = try client.failIntentRequest(
+        fallbackIntentId: "intent_123",
+        errorMessage: "Screen recording denied"
+    )
+    let body = String(decoding: request.httpBody ?? Data(), as: UTF8.self)
+
+    #expect(request.url?.absoluteString == "https://app.example.com/api/local-recorder/intents/intent_123/fail")
+    #expect(request.httpMethod == "POST")
+    #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer token_123")
+    #expect(request.value(forHTTPHeaderField: "x-local-recorder-device-id") == "device_123")
+    #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
+    #expect(body.contains("Screen recording denied"))
+}

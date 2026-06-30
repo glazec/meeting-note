@@ -96,6 +96,36 @@ public struct LocalRecorderAPIClient: Sendable {
         return try JSONDecoder.localRecorder.decode(ClaimIntentResponse.self, from: data)
     }
 
+    public func failIntentRequest(
+        fallbackIntentId: String,
+        errorMessage: String
+    ) throws -> URLRequest {
+        var request = URLRequest(
+            url: serverURL.appending(
+                path: "/api/local-recorder/intents/\(fallbackIntentId)/fail"
+            )
+        )
+        request.httpMethod = "POST"
+        applyRecorderHeaders(to: &request)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder.localRecorder.encode(
+            FailIntentRequest(errorMessage: errorMessage)
+        )
+        return request
+    }
+
+    public func failIntent(
+        fallbackIntentId: String,
+        errorMessage: String
+    ) async throws {
+        let request = try failIntentRequest(
+            fallbackIntentId: fallbackIntentId,
+            errorMessage: errorMessage
+        )
+        let (_, response) = try await URLSession.shared.data(for: request)
+        try validateHTTPResponse(response)
+    }
+
     public func uploadRecordingRequest(
         payload: LocalRecordingUploadPayload,
         boundary: String? = nil
@@ -170,6 +200,46 @@ public enum LocalRecorderAPIError: Error, Equatable {
     case httpStatus(Int)
 }
 
+public enum LocalRecorderLoginCallbackError: Error, Equatable {
+    case invalidCallback
+}
+
+public struct LocalRecorderLoginCallback: Equatable, Sendable {
+    public var serverURL: URL
+    public var token: String
+
+    public init(url: URL) throws {
+        guard
+            url.scheme == "meetingnote-local-recorder",
+            url.host == "login",
+            let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        else {
+            throw LocalRecorderLoginCallbackError.invalidCallback
+        }
+
+        let queryItems = components.queryItems ?? []
+        let token = queryItems.first { $0.name == "token" }?.value?.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let server = queryItems.first { $0.name == "server" }?.value?.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+
+        guard
+            let token,
+            !token.isEmpty,
+            let server,
+            let serverURL = URL(string: server),
+            serverURL.scheme == "https"
+        else {
+            throw LocalRecorderLoginCallbackError.invalidCallback
+        }
+
+        self.serverURL = serverURL
+        self.token = token
+    }
+}
+
 public struct MissedMeetingsResponse: Codable, Equatable, Sendable {
     public var meetings: [MissedMeeting]
 }
@@ -226,6 +296,10 @@ public struct LocalRecordingUploadResponse: Codable, Equatable, Sendable {
     public var localRecordingId: String?
     public var meetingId: String
     public var queued: Bool
+}
+
+private struct FailIntentRequest: Codable {
+    var errorMessage: String
 }
 
 public struct RecordingManifest: Codable, Equatable, Sendable {

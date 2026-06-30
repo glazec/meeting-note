@@ -13,6 +13,9 @@ struct MeetingNoteLocalRecorderApp: App {
     var body: some Scene {
         MenuBarExtra("Meeting Note Recorder", systemImage: model.menuBarImage) {
             RecorderMenuView(model: model)
+                .onOpenURL { url in
+                    model.handleLoginCallback(url)
+                }
         }
         .menuBarExtraStyle(.window)
     }
@@ -20,6 +23,8 @@ struct MeetingNoteLocalRecorderApp: App {
 
 @MainActor
 final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
+    private static let defaultServerURLText = "https://meeting-note-swart.vercel.app"
+
     @Published var permissionChecklist = PermissionChecklist(
         microphone: .unknown,
         screenCapture: .unknown,
@@ -27,20 +32,28 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
         startAtLogin: .unknown
     )
     @Published var statusText = "Sign in to start monitoring"
-    @Published var serverURLText = "https://meeting-note-swart.vercel.app"
-    @Published var bearerToken = ""
+    @Published var serverURLText: String
+    @Published var bearerToken: String
     @Published var isRecording = false
     @Published var pendingMeetings: [MissedMeeting] = []
 
     private let appVersion = "0.1.0"
     private let captureController = LocalRecordingCaptureController()
+    private let credentialStore: LocalRecorderCredentialStore
     private let deviceIdStore = DeviceIdStore()
     private let notificationCenter = UNUserNotificationCenter.current()
     private var activeClient: LocalRecorderAPIClient?
 
     override init() {
+        let credentialStore = LocalRecorderCredentialStore()
+        self.credentialStore = credentialStore
+        self.serverURLText = credentialStore.serverURLText ?? Self.defaultServerURLText
+        self.bearerToken = credentialStore.bearerToken ?? ""
         super.init()
         notificationCenter.delegate = self
+        if !bearerToken.isEmpty {
+            statusText = "Grant permissions to start monitoring"
+        }
     }
 
     var menuBarImage: String {
@@ -70,6 +83,21 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
         if let url = components?.url {
             NSWorkspace.shared.open(url)
             statusText = "Complete login in your browser"
+        }
+    }
+
+    func handleLoginCallback(_ url: URL) {
+        do {
+            let callback = try LocalRecorderLoginCallback(url: url)
+            serverURLText = callback.serverURL.absoluteString
+            bearerToken = callback.token
+            credentialStore.save(
+                serverURLText: callback.serverURL.absoluteString,
+                bearerToken: callback.token
+            )
+            statusText = "Grant permissions to start monitoring"
+        } catch {
+            statusText = "Could not finish login"
         }
     }
 
@@ -161,10 +189,19 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
                 return
             }
 
-            try await captureController.start(
-                fallbackIntentId: fallbackIntentId,
-                appVersion: appVersion
-            )
+            do {
+                try await captureController.start(
+                    fallbackIntentId: fallbackIntentId,
+                    appVersion: appVersion
+                )
+            } catch {
+                try? await client.failIntent(
+                    fallbackIntentId: fallbackIntentId,
+                    errorMessage: error.localizedDescription
+                )
+                statusText = "Could not start recording"
+                return
+            }
             activeClient = client
             isRecording = true
             statusText = "Recording \(claim.meetingTitle ?? title)"
@@ -398,5 +435,23 @@ struct DeviceIdStore {
         let value = UUID().uuidString
         UserDefaults.standard.set(value, forKey: defaultsKey)
         return value
+    }
+}
+
+struct LocalRecorderCredentialStore {
+    private let tokenKey = "meeting-note-local-recorder-token"
+    private let serverURLKey = "meeting-note-local-recorder-server-url"
+
+    var bearerToken: String? {
+        UserDefaults.standard.string(forKey: tokenKey)
+    }
+
+    var serverURLText: String? {
+        UserDefaults.standard.string(forKey: serverURLKey)
+    }
+
+    func save(serverURLText: String, bearerToken: String) {
+        UserDefaults.standard.set(serverURLText, forKey: serverURLKey)
+        UserDefaults.standard.set(bearerToken, forKey: tokenKey)
     }
 }

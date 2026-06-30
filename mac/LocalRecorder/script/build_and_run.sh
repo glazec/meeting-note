@@ -44,6 +44,17 @@ cat >"$INFO_PLIST" <<PLIST
   <string>NSApplication</string>
   <key>NSMicrophoneUsageDescription</key>
   <string>Meeting Note records your microphone as a separate local track.</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>$BUNDLE_ID.login</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>meetingnote-local-recorder</string>
+      </array>
+    </dict>
+  </array>
 </dict>
 </plist>
 PLIST
