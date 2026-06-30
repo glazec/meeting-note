@@ -14,6 +14,26 @@ type SyncFailure = {
   error: string;
 };
 
+type SyncAllResult = {
+  connectionCount: number;
+  failedConnectionCount: number;
+  failures: SyncFailure[];
+  syncedConnectionCount: number;
+  syncedEventCount: number;
+};
+
+export class RecallCalendarBulkSyncError extends Error {
+  readonly result: SyncAllResult;
+
+  constructor(result: SyncAllResult) {
+    super(
+      `Recall calendar sync failed for ${result.failedConnectionCount} of ${result.connectionCount} connections`,
+    );
+    this.name = "RecallCalendarBulkSyncError";
+    this.result = result;
+  }
+}
+
 type ConnectedCalendarConnection = {
   connectionId: string;
   teamId: string;
@@ -52,13 +72,19 @@ export async function syncRecallCalendarEventsForAllConnectedUsers(
     }
   }
 
-  return {
+  const result = {
     connectionCount: connections.length,
     failedConnectionCount: failures.length,
     failures,
     syncedConnectionCount,
     syncedEventCount,
   };
+
+  if (result.failedConnectionCount > 0) {
+    throw new RecallCalendarBulkSyncError(result);
+  }
+
+  return result;
 }
 
 async function listConnectedRecallCalendarConnections(): Promise<

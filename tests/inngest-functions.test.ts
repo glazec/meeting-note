@@ -70,7 +70,10 @@ describe("Inngest functions", () => {
       },
       {
         id: "send-location-reminders",
-        triggers: [{ event: "meeting/send.location-reminders" }],
+        triggers: [
+          { event: "meeting/send.location-reminders" },
+          { cron: "* * * * *" },
+        ],
       },
       {
         id: "sync-recall-calendars-hourly",

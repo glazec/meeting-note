@@ -346,6 +346,15 @@ describe("calendar auto join", () => {
         status: "pending",
       }),
     );
+    expect(reminderOnConflictDoUpdate).toHaveBeenCalledWith({
+      target: expect.any(Array),
+      set: expect.objectContaining({
+        errorMessage: null,
+        providerNotificationId: null,
+        sentAt: null,
+        status: "pending",
+      }),
+    });
   });
 
   it("stores the nested Recall Calendar V2 bot id instead of the calendar event id", async () => {

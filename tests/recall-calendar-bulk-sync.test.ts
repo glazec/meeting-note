@@ -87,7 +87,7 @@ describe("syncRecallCalendarEventsForAllConnectedUsers", () => {
     });
   });
 
-  it("keeps syncing other users when one connected calendar fails", async () => {
+  it("keeps syncing other users and reports a failed run when one connected calendar fails", async () => {
     mockConnectedCalendarRows([
       {
         connectionId: "connection_1",
@@ -112,9 +112,7 @@ describe("syncRecallCalendarEventsForAllConnectedUsers", () => {
       "@/lib/recall-calendar-bulk-sync"
     );
 
-    await expect(
-      syncRecallCalendarEventsForAllConnectedUsers(),
-    ).resolves.toEqual({
+    const expectedResult = {
       connectionCount: 2,
       failedConnectionCount: 1,
       failures: [
@@ -125,6 +123,13 @@ describe("syncRecallCalendarEventsForAllConnectedUsers", () => {
       ],
       syncedConnectionCount: 1,
       syncedEventCount: 4,
+    };
+
+    await expect(
+      syncRecallCalendarEventsForAllConnectedUsers(),
+    ).rejects.toMatchObject({
+      message: "Recall calendar sync failed for 1 of 2 connections",
+      result: expectedResult,
     });
     expect(syncRecallCalendarEventsForWorkspace).toHaveBeenCalledTimes(2);
   });

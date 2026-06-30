@@ -499,7 +499,10 @@ async function syncLocationCalendarMeeting(input: {
     .onConflictDoUpdate({
       target: [meetingReminders.meetingId, meetingReminders.userId],
       set: {
+        errorMessage: null,
+        providerNotificationId: null,
         scheduledFor: reminderScheduledFor,
+        sentAt: null,
         status: "pending",
         updatedAt: new Date(),
       },

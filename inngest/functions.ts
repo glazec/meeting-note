@@ -242,7 +242,10 @@ export const enrichTranscript = inngest.createFunction(
 export const sendLocationReminders = inngest.createFunction(
   {
     id: "send-location-reminders",
-    triggers: [{ event: "meeting/send.location-reminders" }],
+    triggers: [
+      { event: "meeting/send.location-reminders" },
+      { cron: "* * * * *" },
+    ],
   },
   async () => sendDueLocationReminders(),
 );
