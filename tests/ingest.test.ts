@@ -1041,7 +1041,7 @@ describe("vendor job creation", () => {
 
   it("gets meeting chat answers from OpenRouter", async () => {
     vi.stubEnv("OPENROUTER_API_KEY", "openrouter-key\n");
-    vi.stubEnv("OPENROUTER_MODEL", "z-ai/glm-5.2");
+    vi.stubEnv("OPENROUTER_MODEL", "qwen/qwen3.7-plus");
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com");
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -1078,7 +1078,7 @@ describe("vendor job creation", () => {
       },
     });
     expect(JSON.parse(String(init.body))).toMatchObject({
-      model: "z-ai/glm-5.2",
+      model: "qwen/qwen3.7-plus",
       messages: [
         expect.objectContaining({ role: "system" }),
         {

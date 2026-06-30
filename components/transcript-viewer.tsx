@@ -15,6 +15,7 @@ import { useRouter } from "next/navigation";
 import {
   Check,
   Languages,
+  LoaderCircle,
   Pause,
   Pencil,
   Play,
@@ -1206,8 +1207,8 @@ function TranscriptAudioPlayer({
 }) {
   const [waveformPeaks, setWaveformPeaks] = useState<number[]>([]);
   const [waveformStatus, setWaveformStatus] = useState<
-    "idle" | "loading" | "ready" | "fallback"
-  >("idle");
+    "loading" | "ready" | "fallback"
+  >("loading");
   const [hoveredWpmSnapshot, setHoveredWpmSnapshot] = useState<{
     leftPercent: number;
     timeSecond: number;
@@ -1270,6 +1271,7 @@ function TranscriptAudioPlayer({
   const progressPercent = timelineDuration
     ? clamp((currentTime / timelineDuration) * 100, 0, 100)
     : 0;
+  const isWaveformLoading = waveformStatus === "loading";
 
   useEffect(() => {
     let isCancelled = false;
@@ -1438,6 +1440,7 @@ function TranscriptAudioPlayer({
       />
       <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-3">
         <button
+          aria-busy={isWaveformLoading}
           aria-label={
             activeWaveformLabel
               ? `Audio waveform, ${activeWaveformLabel}`
@@ -1500,7 +1503,11 @@ function TranscriptAudioPlayer({
                 <span
                   className={cn(
                     "min-w-0 flex-1 rounded-[2px] transition-colors",
-                    isPast ? "bg-primary" : "bg-muted-foreground/40",
+                    isWaveformLoading
+                      ? "animate-pulse bg-muted-foreground/25 motion-reduce:animate-none"
+                      : isPast
+                        ? "bg-primary"
+                        : "bg-muted-foreground/40",
                   )}
                   key={`${index}-${waveformStatus}`}
                   style={{
@@ -1510,6 +1517,15 @@ function TranscriptAudioPlayer({
               );
             })}
           </span>
+          {isWaveformLoading ? (
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute left-1/2 top-1/2 z-40 inline-flex -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 rounded-full border bg-background/95 px-2.5 py-1 text-xs font-medium text-foreground shadow-sm ring-1 ring-border"
+            >
+              <LoaderCircle className="size-3.5 animate-spin text-primary motion-reduce:animate-none" />
+              Loading waveform
+            </span>
+          ) : null}
           {wpmLinePoints ? (
             <span
               aria-hidden="true"
@@ -1642,9 +1658,11 @@ function TranscriptAudioPlayer({
             </span>
           ) : null}
           <span aria-live="polite" className="sr-only">
-            {activeWaveformLabel
-              ? `Current section: ${activeWaveformLabel}`
-              : waveformStatus === "ready"
+            {waveformStatus === "loading"
+              ? "Audio waveform loading"
+              : activeWaveformLabel
+                ? `Current section: ${activeWaveformLabel}`
+                : waveformStatus === "ready"
                 ? "Audio waveform ready"
                 : "Transcript section waveform"}
           </span>

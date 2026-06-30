@@ -15,7 +15,7 @@ const baseEnv = {
   ELEVENLABS_API_KEY: "elevenlabs-key",
   ELEVENLABS_WEBHOOK_SECRET: "elevenlabs-secret",
   OPENROUTER_API_KEY: "openrouter-key",
-  OPENROUTER_MODEL: "z-ai/glm-5.2",
+  OPENROUTER_MODEL: "qwen/qwen3.7-plus",
   INNGEST_EVENT_KEY: "inngest-event-key",
   INNGEST_SIGNING_KEY: "inngest-signing-key",
   NEXT_PUBLIC_APP_URL: "https://app.example.com",

@@ -484,6 +484,10 @@ describe("TranscriptViewer", () => {
 
     expect(html).toContain("Speaker 1 · Hard");
     expect(html).toContain("120 wpm");
+    expect(html).toContain('aria-busy="true"');
+    expect(html).toContain("Loading waveform");
+    expect(html).toContain("Audio waveform loading");
+    expect(html).toContain("animate-spin");
     expect(html).toContain(
       'aria-label="Audio waveform, Speaker 1 · Hard, 120 wpm"',
     );
