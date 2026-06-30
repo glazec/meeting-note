@@ -103,6 +103,15 @@ describe("TranscriptViewer", () => {
     expect(html).toContain('data-transcript-word-index="1"');
   });
 
+  it("does not pad every clickable transcript word", () => {
+    const html = renderToStaticMarkup(
+      <TranscriptViewer audioUrl="/audio.mp3" segments={segments} />,
+    );
+
+    expect(html).toContain('data-transcript-word-index="0"');
+    expect(html).not.toContain("px-0.5");
+  });
+
   it("keeps dotted product names in one deterministic transcript token", () => {
     const html = renderToStaticMarkup(
       <TranscriptViewer

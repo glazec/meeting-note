@@ -1241,7 +1241,7 @@ function TranscriptText({
         token.isWordLike ? (
           <span
             className={cn(
-              "rounded-[3px] px-0.5 transition-colors",
+              "rounded-[3px] transition-colors",
               token.wordIndex === activeWordIndex
                 ? "bg-primary text-primary-foreground"
                 : isInteractive
