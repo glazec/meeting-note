@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
@@ -47,7 +47,10 @@ export async function GET(
     .from(meetings)
     .leftJoin(
       mediaAssets,
-      and(eq(mediaAssets.meetingId, meetings.id), eq(mediaAssets.type, "audio")),
+      and(
+        eq(mediaAssets.meetingId, meetings.id),
+        or(eq(mediaAssets.type, "synthesized_audio"), eq(mediaAssets.type, "audio")),
+      ),
     )
     .where(
       and(
@@ -55,7 +58,10 @@ export async function GET(
         getReadableMeetingsCondition(workspace),
       ),
     )
-    .orderBy(desc(mediaAssets.createdAt))
+    .orderBy(
+      desc(sql`case when ${mediaAssets.type} = 'synthesized_audio' then 1 else 0 end`),
+      desc(mediaAssets.createdAt),
+    )
     .limit(1);
   const meeting = rows[0];
   const objectKey = meeting?.objectKey;

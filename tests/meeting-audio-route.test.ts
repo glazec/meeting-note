@@ -126,6 +126,31 @@ describe("GET /api/meetings/[meetingId]/audio", () => {
     expect(retrieveRecallBot).not.toHaveBeenCalled();
   });
 
+  it("prefers synthesized local recorder audio over raw audio assets", async () => {
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({ teamId: "team_123" });
+    limit.mockResolvedValue([
+      {
+        objectKey: "teams/team_123/meetings/meeting_123/assets/synthesized.wav",
+      },
+    ]);
+    createReadUrl.mockResolvedValue("https://r2.example.com/synthesized.wav");
+
+    const response = await getMeetingAudio();
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://r2.example.com/synthesized.wav",
+    );
+    expect(createReadUrl).toHaveBeenCalledWith({
+      key: "teams/team_123/meetings/meeting_123/assets/synthesized.wav",
+    });
+  });
+
   it("uses explicit share access for shared only users", async () => {
     getCurrentUser.mockResolvedValue({
       id: "auth_user_123",

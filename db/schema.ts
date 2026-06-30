@@ -46,10 +46,14 @@ export const assetSource = pgEnum("asset_source", [
   "upload",
   "recall",
   "elevenlabs",
+  "local_recorder",
 ]);
 export const assetType = pgEnum("asset_type", [
   "audio",
+  "computer_audio",
+  "microphone_audio",
   "screenshot",
+  "synthesized_audio",
   "video_frame",
   "transcript_source",
 ]);
@@ -402,6 +406,136 @@ export const mediaAssets = pgTable(
     uniqueIndex("media_assets_bucket_object_unique").on(
       table.bucket,
       table.objectKey,
+    ),
+  ],
+);
+
+export const localRecorderDevices = pgTable(
+  "local_recorder_devices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    deviceIdHash: text("device_id_hash").notNull(),
+    appVersion: text("app_version"),
+    permissionReadiness: jsonb("permission_readiness")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("local_recorder_devices_team_user_device_unique").on(
+      table.teamId,
+      table.userId,
+      table.deviceIdHash,
+    ),
+  ],
+);
+
+export const localRecordingAttempts = pgTable(
+  "local_recording_attempts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    meetingId: uuid("meeting_id")
+      .notNull()
+      .references(() => meetings.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    deviceIdHash: text("device_id_hash").notNull(),
+    fallbackIntentIdHash: text("fallback_intent_id_hash").notNull(),
+    notificationState: text("notification_state").notNull().default("shown"),
+    attemptState: text("attempt_state").notNull().default("notified"),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    errorMessage: text("error_message"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("local_recording_attempts_intent_unique").on(
+      table.fallbackIntentIdHash,
+    ),
+    index("local_recording_attempts_meeting_index").on(table.meetingId),
+  ],
+);
+
+export const localRecorderDeviceSessions = pgTable(
+  "local_recorder_device_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    deviceIdHash: text("device_id_hash").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("local_recorder_device_sessions_token_unique").on(
+      table.tokenHash,
+    ),
+    index("local_recorder_device_sessions_user_device_index").on(
+      table.userId,
+      table.deviceIdHash,
+    ),
+  ],
+);
+
+export const localRecordings = pgTable(
+  "local_recordings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    meetingId: uuid("meeting_id")
+      .notNull()
+      .references(() => meetings.id, { onDelete: "cascade" }),
+    ownerUserId: uuid("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    localRecordingAttemptId: uuid("local_recording_attempt_id")
+      .notNull()
+      .references(() => localRecordingAttempts.id, { onDelete: "cascade" }),
+    clientRecordingId: text("client_recording_id").notNull(),
+    recordingStartedAt: timestamp("recording_started_at", {
+      withTimezone: true,
+    }).notNull(),
+    recordingStoppedAt: timestamp("recording_stopped_at", {
+      withTimezone: true,
+    }).notNull(),
+    computerAudioAssetId: uuid("computer_audio_asset_id")
+      .notNull()
+      .references(() => mediaAssets.id, { onDelete: "restrict" }),
+    microphoneAudioAssetId: uuid("microphone_audio_asset_id")
+      .notNull()
+      .references(() => mediaAssets.id, { onDelete: "restrict" }),
+    synthesizedAudioAssetId: uuid("synthesized_audio_asset_id")
+      .notNull()
+      .references(() => mediaAssets.id, { onDelete: "restrict" }),
+    manifest: jsonb("manifest").$type<unknown>().notNull().default({}),
+    synthesisStatus: text("synthesis_status").notNull().default("queued"),
+    synthesisErrorMessage: text("synthesis_error_message"),
+    isPrimary: boolean("is_primary").notNull().default(true),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("local_recordings_owner_client_unique").on(
+      table.ownerUserId,
+      table.clientRecordingId,
+    ),
+    uniqueIndex("local_recordings_attempt_unique").on(
+      table.localRecordingAttemptId,
     ),
   ],
 );
