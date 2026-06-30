@@ -13,7 +13,12 @@ type EntitySegment = {
   text: string;
 };
 
-export type MeetingEntityType = "meeting_link" | "organization" | "product";
+export type MeetingEntityType =
+  | "meeting_link"
+  | "money"
+  | "name"
+  | "organization"
+  | "product";
 export type MeetingEntitySource =
   | "calendar"
   | "elevenlabs"
@@ -362,8 +367,9 @@ function addOrMergeEntity(input: {
 
 function normalizeEntityValue(value: string) {
   return value
+    .normalize("NFKC")
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim()
     .replace(/\s+/g, " ");
 }
@@ -371,7 +377,12 @@ function normalizeEntityValue(value: string) {
 function isSupportedEntityType(type: string) {
   const normalized = type.toLowerCase();
 
-  return normalized === "organization" || normalized === "product";
+  return (
+    normalized === "money" ||
+    normalized === "name" ||
+    normalized === "organization" ||
+    normalized === "product"
+  );
 }
 
 function buildOrganizationAliases(value: string) {

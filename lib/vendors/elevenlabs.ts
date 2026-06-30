@@ -30,9 +30,12 @@ const transcriptionWordSchema = z
 
 const transcriptionEntitySchema = z
   .object({
+    entity_type: z.string().optional().nullable(),
+    end_char: z.number().optional().nullable(),
     text: z.string().optional().nullable(),
-    value: z.string().optional().nullable(),
     type: z.string().optional().nullable(),
+    start_char: z.number().optional().nullable(),
+    value: z.string().optional().nullable(),
     start: z.number().optional().nullable(),
     end: z.number().optional().nullable(),
   })
@@ -126,7 +129,7 @@ export async function createElevenLabsTranscriptJob(input: {
   body.append("source_url", parsedInput.audioUrl);
   body.append("webhook", "true");
   body.append("diarize", "true");
-  body.append("detect_entities", "true");
+  body.append("entity_detection", "all");
   body.append("timestamps_granularity", "word");
   for (const keyterm of buildTranscriptionKeyterms(parsedInput.keyterms ?? [])) {
     body.append("keyterms", keyterm);
@@ -197,7 +200,7 @@ function normalizeTranscriptionEntities(entities: unknown) {
       }
 
       const value = parsed.data.text ?? parsed.data.value;
-      const type = parsed.data.type;
+      const type = parsed.data.entity_type ?? parsed.data.type;
 
       if (!value || !type) {
         return null;
@@ -207,8 +210,8 @@ function normalizeTranscriptionEntities(entities: unknown) {
         source: "elevenlabs" as const,
         type,
         value,
-        start: parsed.data.start ?? null,
-        end: parsed.data.end ?? null,
+        start: parsed.data.start_char ?? parsed.data.start ?? null,
+        end: parsed.data.end_char ?? parsed.data.end ?? null,
       };
     })
     .filter((entity) => entity !== null);

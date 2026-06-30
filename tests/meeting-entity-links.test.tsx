@@ -23,7 +23,7 @@ describe("MeetingEntityLinks", () => {
     expect(html).toContain(
       "/dashboard?q=nascent&amp;scope=all&amp;status=all&amp;sort=smart",
     );
-    expect(html).toContain(">N<");
+    expect(html).toContain(">NA<");
   });
 
   it("renders name and money entities on the detail page", () => {

@@ -1135,7 +1135,11 @@ function normalizeMeetingTranscriptEntities(rows: MeetingTranscriptEntity[]) {
 }
 
 function isDisplayableMeetingEntityType(type: string) {
-  return type === "organization" || type === "product";
+  return type === "organization" || type === "name" || type === "money";
+}
+
+function isDashboardPrimaryEntityType(type: string) {
+  return type === "organization";
 }
 
 async function getPrimaryEntitiesForMeetings(meetingIds: string[]) {
@@ -1162,7 +1166,7 @@ async function getPrimaryEntitiesForMeetings(meetingIds: string[]) {
     if (
       !primaryEntityByMeetingId.has(row.meetingId) &&
       normalizedValue &&
-      isDisplayableMeetingEntityType(type) &&
+      isDashboardPrimaryEntityType(type) &&
       !nonInformativePrimaryEntities.has(normalizedValue)
     ) {
       primaryEntityByMeetingId.set(row.meetingId, normalizedValue);
