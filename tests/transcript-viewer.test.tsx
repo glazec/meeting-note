@@ -260,6 +260,47 @@ describe("TranscriptViewer", () => {
     expect(html).not.toContain(">Momir<");
   });
 
+  it("merges saved team speaker aliases into their canonical speaker", () => {
+    const html = renderToStaticMarkup(
+      <TranscriptViewer
+        audioUrl="/audio.mp3"
+        meetingId="11111111-1111-4111-8111-111111111111"
+        speakerAliases={[
+          { alias: "Yi Xiao", canonicalName: "Yiping Lu" },
+          { alias: "Ether C", canonicalName: "Ethan Chen" },
+        ]}
+        segments={[
+          {
+            id: "segment_yiping",
+            speaker: "Yiping Lu",
+            startMs: 0,
+            endMs: 1000,
+            text: "Hello",
+          },
+          {
+            id: "segment_yi_alias",
+            speaker: "Yi Xiao",
+            startMs: 1000,
+            endMs: 2000,
+            text: "Hi",
+          },
+          {
+            id: "segment_ethan_alias",
+            speaker: "Ether C",
+            startMs: 2000,
+            endMs: 3000,
+            text: "Yes",
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain("Yiping Lu");
+    expect(html).toContain("Ethan Chen");
+    expect(html).not.toContain("Yi Xiao");
+    expect(html).not.toContain("Ether C");
+  });
+
   it("does not merge a first name when multiple full names share it", () => {
     const html = renderToStaticMarkup(
       <TranscriptViewer

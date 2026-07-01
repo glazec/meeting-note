@@ -109,6 +109,30 @@ export const teamVocabularyTerms = pgTable(
   ],
 );
 
+export const teamSpeakerAliases = pgTable(
+  "team_speaker_aliases",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    aliasKey: text("alias_key").notNull(),
+    alias: text("alias").notNull(),
+    canonicalName: text("canonical_name").notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("team_speaker_aliases_team_alias_key_unique").on(
+      table.teamId,
+      table.aliasKey,
+    ),
+    index("team_speaker_aliases_team_canonical_index").on(
+      table.teamId,
+      table.canonicalName,
+    ),
+  ],
+);
+
 export const teamMeetingBotProfiles = pgTable(
   "team_meeting_bot_profiles",
   {

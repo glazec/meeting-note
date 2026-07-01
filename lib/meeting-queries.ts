@@ -57,6 +57,13 @@ import {
   getUniqueFullNameForFirstNameAlias,
 } from "@/lib/speaker-labels";
 import {
+  applySpeakerAliasesToSegments,
+  type SpeakerAlias,
+} from "@/lib/speaker-alias-normalization";
+import {
+  listTeamSpeakerAliases,
+} from "@/lib/speaker-aliases";
+import {
   getOrCreateWorkspaceForSessionUser,
   type WorkspaceContext,
 } from "@/lib/workspace";
@@ -94,6 +101,7 @@ export type MeetingTranscript = {
   audioUrl: string | null;
   visualAssets: MeetingVisualAsset[];
   segments: TranscriptSegment[];
+  speakerAliases: SpeakerAlias[];
   speakerSuggestions: SpeakerSuggestion[];
   accessScope: "workspace" | "shared";
   accessPeople: MeetingAccessPerson[];
@@ -1030,8 +1038,14 @@ export async function getMeetingTranscriptForWorkspace(
   }
 
   const accessScope = getMeetingAccessScope(meeting.teamId, workspace);
-  const [segments, speakerSuggestions, accessPeople, entities, visualAssets] =
-    await Promise.all([
+  const [
+    segments,
+    speakerSuggestions,
+    accessPeople,
+    entities,
+    visualAssets,
+    speakerAliases,
+  ] = await Promise.all([
     db
       .select({
         id: transcriptSegments.id,
@@ -1088,7 +1102,14 @@ export async function getMeetingTranscriptForWorkspace(
         ),
       )
       .orderBy(asc(mediaAssets.timestampMs), asc(mediaAssets.createdAt)),
+    accessScope === "workspace"
+      ? listTeamSpeakerAliases(meeting.teamId)
+      : Promise.resolve([]),
   ]);
+  const displaySegments = applySpeakerAliasesToSegments(
+    segments,
+    speakerAliases,
+  );
 
   return {
     id: meeting.id,
@@ -1099,8 +1120,8 @@ export async function getMeetingTranscriptForWorkspace(
     translationSummary: buildMeetingTranslationSummary({
       errorMessage: meeting.translationErrorMessage,
       status: meeting.translationStatus,
-      totalSegments: segments.length,
-      translatedSegments: segments.filter((segment) =>
+      totalSegments: displaySegments.length,
+      translatedSegments: displaySegments.filter((segment) =>
         Boolean(segment.translatedText?.trim()),
       ).length,
     }),
@@ -1114,10 +1135,11 @@ export async function getMeetingTranscriptForWorkspace(
       timestampMs: asset.timestampMs,
       url: `/api/meetings/${meeting.id}/images/${asset.id}`,
     })),
-    segments: segments.map((segment) => ({
+    segments: displaySegments.map((segment) => ({
       ...segment,
       emotionLabel: normalizeEmotionLabel(segment.emotionLabel),
     })),
+    speakerAliases,
     speakerSuggestions,
     accessScope,
     accessPeople,

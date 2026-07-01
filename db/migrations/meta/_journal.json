@@ -134,6 +134,13 @@
       "when": 1784100000000,
       "tag": "0018_allowed_domain_global_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1784200000000,
+      "tag": "0019_team_speaker_aliases",
+      "breakpoints": true
     }
   ]
 }

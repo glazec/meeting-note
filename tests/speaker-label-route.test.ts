@@ -1,10 +1,24 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { getCurrentUser, getWorkspace, limit, set, where } = vi.hoisted(() => ({
+const {
+  getCurrentUser,
+  getWorkspace,
+  insert,
+  limit,
+  onConflictDoUpdate,
+  set,
+  update,
+  values,
+  where,
+} = vi.hoisted(() => ({
   getCurrentUser: vi.fn(),
   getWorkspace: vi.fn(),
+  insert: vi.fn(),
   limit: vi.fn(),
+  onConflictDoUpdate: vi.fn(),
   set: vi.fn(),
+  update: vi.fn(),
+  values: vi.fn(),
   where: vi.fn(),
 }));
 
@@ -18,6 +32,7 @@ vi.mock("@/lib/workspace", () => ({
 
 vi.mock("@/db/client", () => ({
   db: {
+    insert,
     select: () => ({
       from: () => ({
         where: () => ({
@@ -25,9 +40,7 @@ vi.mock("@/db/client", () => ({
         }),
       }),
     }),
-    update: () => ({
-      set,
-    }),
+    update,
   },
 }));
 
@@ -57,8 +70,12 @@ describe("PATCH /api/meetings/[meetingId]/speakers", () => {
   afterEach(() => {
     getCurrentUser.mockReset();
     getWorkspace.mockReset();
+    insert.mockReset();
     limit.mockReset();
+    onConflictDoUpdate.mockReset();
     set.mockReset();
+    update.mockReset();
+    values.mockReset();
     where.mockReset();
     vi.resetModules();
   });
@@ -71,6 +88,7 @@ describe("PATCH /api/meetings/[meetingId]/speakers", () => {
     });
     getWorkspace.mockResolvedValue({ teamId: "team_123" });
     limit.mockResolvedValue([{ id: "11111111-1111-4111-8111-111111111111" }]);
+    update.mockReturnValue({ set });
     set.mockReturnValue({ where });
     where.mockResolvedValue(undefined);
 
@@ -100,6 +118,7 @@ describe("PATCH /api/meetings/[meetingId]/speakers", () => {
     });
     getWorkspace.mockResolvedValue({ teamId: "team_123" });
     limit.mockResolvedValue([{ id: "11111111-1111-4111-8111-111111111111" }]);
+    update.mockReturnValue({ set });
     set.mockReturnValue({ where });
     where.mockResolvedValue(undefined);
 
@@ -131,6 +150,7 @@ describe("PATCH /api/meetings/[meetingId]/speakers", () => {
     });
     getWorkspace.mockResolvedValue({ teamId: "team_123" });
     limit.mockResolvedValue([{ id: "11111111-1111-4111-8111-111111111111" }]);
+    update.mockReturnValue({ set });
     set.mockReturnValue({ where });
     where.mockResolvedValue(undefined);
 
@@ -153,6 +173,48 @@ describe("PATCH /api/meetings/[meetingId]/speakers", () => {
       updatedAt: expect.any(Date),
     });
     expect(where).toHaveBeenCalledTimes(1);
+  });
+
+  it("stores team speaker aliases so future meetings use the same name", async () => {
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({ teamId: "team_123" });
+    limit.mockResolvedValue([{ id: "11111111-1111-4111-8111-111111111111" }]);
+    update.mockReturnValue({ set });
+    set.mockReturnValue({ where });
+    where.mockResolvedValue(undefined);
+    insert.mockReturnValue({ values });
+    values.mockReturnValue({ onConflictDoUpdate });
+    onConflictDoUpdate.mockResolvedValue(undefined);
+
+    const response = await patchSpeakerLabel({
+      applyTo: "matching_speaker",
+      currentSpeaker: "Yi Xiao",
+      currentSpeakerAliases: ["Yiping Lu"],
+      speaker: "Yiping Lu",
+    });
+
+    expect(response.status).toBe(200);
+    expect(insert).toHaveBeenCalledTimes(1);
+    expect(values).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          alias: "Yi Xiao",
+          aliasKey: "yi xiao",
+          canonicalName: "Yiping Lu",
+          teamId: "team_123",
+        }),
+        expect.objectContaining({
+          alias: "Yiping Lu",
+          aliasKey: "yiping lu",
+          canonicalName: "Yiping Lu",
+          teamId: "team_123",
+        }),
+      ]),
+    );
   });
 
   it("rejects segment scoped updates without a segment id", async () => {

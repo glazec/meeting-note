@@ -114,6 +114,13 @@ describe("getWorkspaceMeetingTranscript", () => {
             orderBy: vi.fn().mockResolvedValue([]),
           }),
         }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: vi.fn().mockResolvedValue([]),
+          }),
+        }),
       });
     const { getWorkspaceMeetingTranscript } = await import(
       "@/lib/meeting-queries"
@@ -264,6 +271,13 @@ describe("getWorkspaceMeetingTranscript", () => {
                 timestampMs: 65000,
               },
             ]),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: vi.fn().mockResolvedValue([]),
           }),
         }),
       });

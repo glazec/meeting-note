@@ -5,6 +5,7 @@ import { db } from "@/db/client";
 import { meetings, transcriptSegments } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { currentTranscriptJobIdSubquery } from "@/lib/current-transcript-job";
+import { upsertTeamSpeakerAliases } from "@/lib/speaker-aliases";
 import { getOrCreateWorkspaceForSessionUser } from "@/lib/workspace";
 
 export const runtime = "nodejs";
@@ -92,6 +93,17 @@ export async function PATCH(
         targetFilter,
       ),
     );
+
+  if (result.data.applyTo === "matching_speaker") {
+    await upsertTeamSpeakerAliases({
+      aliases: [
+        result.data.currentSpeaker,
+        ...result.data.currentSpeakerAliases,
+      ],
+      canonicalName: result.data.speaker,
+      teamId: workspace.teamId,
+    });
+  }
 
   return Response.json({
     applyTo: result.data.applyTo,

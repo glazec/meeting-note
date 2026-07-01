@@ -128,6 +128,7 @@ export default async function MeetingPage({
                   meeting.accessScope === "workspace" ? meetingId : null
                 }
                 segments={meeting.segments}
+                speakerAliases={meeting.speakerAliases}
                 speakerSuggestions={meeting.speakerSuggestions}
                 translationSummary={meeting.translationSummary}
                 visualAssets={meeting.visualAssets}

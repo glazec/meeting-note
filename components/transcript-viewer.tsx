@@ -38,6 +38,11 @@ import {
   isCleanSpeakerFullName,
   isEmailLikeSpeakerLabel,
 } from "@/lib/speaker-labels";
+import {
+  applySpeakerAliasesToSegments,
+  groupSpeakerAliasesByCanonicalKey,
+  type SpeakerAlias,
+} from "@/lib/speaker-alias-normalization";
 import { cn } from "@/lib/utils";
 
 export type TranscriptSegment = {
@@ -96,6 +101,7 @@ type TranscriptViewerProps = {
   audioUrl?: string | null;
   meetingId?: string | null;
   segments: TranscriptSegment[];
+  speakerAliases?: SpeakerAlias[];
   speakerSuggestions?: SpeakerSuggestion[];
   translationSummary?: MeetingTranslationSummary;
   visualAssets?: MeetingVisualAsset[];
@@ -244,6 +250,7 @@ export function TranscriptViewer({
   audioUrl,
   meetingId,
   segments: initialSegments,
+  speakerAliases = [],
   speakerSuggestions = [],
   translationSummary,
   visualAssets = [],
@@ -295,8 +302,11 @@ export function TranscriptViewer({
   );
   const canSeekTranscript = Boolean(audioUrl);
   const rawDisplaySegments = useMemo(
-    () => getTranscriptDisplaySegments(segments),
-    [segments],
+    () =>
+      getTranscriptDisplaySegments(
+        applySpeakerAliasesToSegments(segments, speakerAliases),
+      ),
+    [segments, speakerAliases],
   );
   const speakerStats = useMemo(
     () => buildSpeakerStats(rawDisplaySegments),
@@ -315,6 +325,10 @@ export function TranscriptViewer({
 
     return statsByRawKey;
   }, [speakerStats]);
+  const savedAliasesByCanonicalKey = useMemo(
+    () => groupSpeakerAliasesByCanonicalKey(speakerAliases),
+    [speakerAliases],
+  );
   const displaySegments = useMemo(
     () =>
       rawDisplaySegments.map((segment) => ({
@@ -357,7 +371,14 @@ export function TranscriptViewer({
     setEditingSpeaker({
       allowSegmentScope: Boolean(segmentId),
       currentSpeaker: speaker,
-      speakerAliases: speakerStat?.aliases ?? [],
+      speakerAliases: Array.from(
+        new Set([
+          ...(speakerStat?.aliases ?? []),
+          ...(savedAliasesByCanonicalKey.get(
+            getNormalizedSpeakerKey(speakerStat?.speaker ?? speaker),
+          ) ?? []),
+        ]),
+      ),
       segmentId: targetSegmentId,
       speakerKey,
     });
