@@ -86,7 +86,7 @@ import Testing
     #expect(decoded.microphoneAudio.channelCount == 1)
 }
 
-@Test func uploadRecordingRequestBuildsMultipartFormWithTwoTracks() throws {
+@Test func prepareUploadRequestBuildsJSONBodyForThreeAudioAssets() throws {
     let temporaryDirectory = FileManager.default.temporaryDirectory
         .appending(path: UUID().uuidString, directoryHint: .isDirectory)
     try FileManager.default.createDirectory(
@@ -99,8 +99,10 @@ import Testing
 
     let computerAudioURL = temporaryDirectory.appending(path: "computer.wav")
     let microphoneAudioURL = temporaryDirectory.appending(path: "microphone.wav")
+    let synthesizedAudioURL = temporaryDirectory.appending(path: "synthesized.wav")
     try Data("computer".utf8).write(to: computerAudioURL)
     try Data("microphone".utf8).write(to: microphoneAudioURL)
+    try Data("synthesized".utf8).write(to: synthesizedAudioURL)
 
     let payload = LocalRecordingUploadPayload(
         fallbackIntentId: "intent_123",
@@ -109,6 +111,7 @@ import Testing
         recordingStoppedAt: Date(timeIntervalSince1970: 20),
         computerAudioURL: computerAudioURL,
         microphoneAudioURL: microphoneAudioURL,
+        synthesizedAudioURL: synthesizedAudioURL,
         manifest: RecordingManifest(
             appVersion: "0.1.0",
             computerAudio: .init(
@@ -136,24 +139,49 @@ import Testing
         bearerToken: "token_123",
         deviceId: "device_123"
     )
-    let request = try client.uploadRecordingRequest(
-        payload: payload,
-        boundary: "boundary_123"
-    )
-    let body = String(decoding: request.httpBody ?? Data(), as: UTF8.self)
+    let request = try client.prepareUploadRequest(payload: payload)
+    let body = try #require(request.httpBody)
+    let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
 
-    #expect(request.url?.absoluteString == "https://app.example.com/api/local-recorder/recordings")
+    #expect(request.url?.absoluteString == "https://app.example.com/api/local-recorder/recordings/prepare")
     #expect(request.httpMethod == "POST")
     #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer token_123")
     #expect(request.value(forHTTPHeaderField: "x-local-recorder-device-id") == "device_123")
-    #expect(request.value(forHTTPHeaderField: "Content-Type") == "multipart/form-data; boundary=boundary_123")
-    #expect(body.contains("name=\"fallbackIntentId\""))
-    #expect(body.contains("intent_123"))
-    #expect(body.contains("name=\"computerAudio\"; filename=\"computer.wav\""))
-    #expect(body.contains("computer"))
-    #expect(body.contains("name=\"microphoneAudio\"; filename=\"microphone.wav\""))
-    #expect(body.contains("microphone"))
-    #expect(body.contains("\"appVersion\":\"0.1.0\""))
+    #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
+    #expect(json?["fallbackIntentId"] as? String == "intent_123")
+    #expect(json?["clientRecordingId"] as? String == "recording_123")
+    #expect((json?["manifest"] as? [String: Any])?["appVersion"] as? String == "0.1.0")
+}
+
+@Test func completeUploadRequestIncludesPreparedAssetIds() throws {
+    let payload = makeUploadPayload(
+        clientRecordingId: "recording_123",
+        recordingStartedAt: Date(timeIntervalSince1970: 10),
+        directoryURL: FileManager.default.temporaryDirectory,
+        uploadAssets: LocalRecordingUploadAssetIds(
+            computerAudioAssetId: "asset_computer",
+            microphoneAudioAssetId: "asset_microphone",
+            synthesizedAudioAssetId: "asset_synthesized"
+        )
+    )
+    let client = LocalRecorderAPIClient(
+        serverURL: URL(string: "https://app.example.com")!,
+        bearerToken: "token_123",
+        deviceId: "device_123"
+    )
+    let request = try client.completeUploadRequest(payload: payload)
+    let body = try #require(request.httpBody)
+    let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+    let assets = json?["assets"] as? [String: String]
+
+    #expect(request.url?.absoluteString == "https://app.example.com/api/local-recorder/recordings/complete")
+    #expect(request.httpMethod == "POST")
+    #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer token_123")
+    #expect(request.value(forHTTPHeaderField: "x-local-recorder-device-id") == "device_123")
+    #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
+    #expect(assets?["computerAudioAssetId"] == "asset_computer")
+    #expect(assets?["microphoneAudioAssetId"] == "asset_microphone")
+    #expect(assets?["synthesizedAudioAssetId"] == "asset_synthesized")
 }
 
 @Test func loginCallbackParsesTokenAndServerURL() throws {
@@ -259,6 +287,7 @@ import Testing
     let queued = try queue.load()
     #expect(queued.map(\.clientRecordingId) == ["recording_old", "recording_new"])
     #expect(queued.first?.computerAudioURL == olderPayload.computerAudioURL)
+    #expect(queued.first?.uploadAssets?.computerAudioAssetId == "asset_recording_old_computer")
 
     try queue.remove(clientRecordingId: "recording_old")
     #expect(try queue.load().map(\.clientRecordingId) == ["recording_new"])
@@ -267,7 +296,8 @@ import Testing
 private func makeUploadPayload(
     clientRecordingId: String,
     recordingStartedAt: Date,
-    directoryURL: URL
+    directoryURL: URL,
+    uploadAssets: LocalRecordingUploadAssetIds? = nil
 ) -> LocalRecordingUploadPayload {
     LocalRecordingUploadPayload(
         fallbackIntentId: "intent_123",
@@ -276,6 +306,12 @@ private func makeUploadPayload(
         recordingStoppedAt: recordingStartedAt.addingTimeInterval(60),
         computerAudioURL: directoryURL.appending(path: "computer.wav"),
         microphoneAudioURL: directoryURL.appending(path: "microphone.wav"),
+        synthesizedAudioURL: directoryURL.appending(path: "synthesized.wav"),
+        uploadAssets: uploadAssets ?? LocalRecordingUploadAssetIds(
+            computerAudioAssetId: "asset_\(clientRecordingId)_computer",
+            microphoneAudioAssetId: "asset_\(clientRecordingId)_microphone",
+            synthesizedAudioAssetId: "asset_\(clientRecordingId)_synthesized"
+        ),
         manifest: RecordingManifest(
             appVersion: "0.1.0",
             computerAudio: .init(

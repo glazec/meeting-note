@@ -421,11 +421,12 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
         client: LocalRecorderAPIClient,
         payload: LocalRecordingUploadPayload
     ) async throws {
+        var payload = payload
         var lastError: Error?
 
         for attempt in 1...3 {
             do {
-                _ = try await client.uploadRecording(payload: payload)
+                payload = try await uploadOnce(client: client, payload: payload)
                 return
             } catch {
                 lastError = error
@@ -436,6 +437,40 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
         }
 
         throw lastError ?? LocalRecorderAPIError.invalidResponse
+    }
+
+    private func uploadOnce(
+        client: LocalRecorderAPIClient,
+        payload: LocalRecordingUploadPayload
+    ) async throws -> LocalRecordingUploadPayload {
+        var payload = payload
+
+        if payload.uploadAssets != nil {
+            do {
+                _ = try await client.completeRecordingUpload(payload: payload)
+                return payload
+            } catch LocalRecorderAPIError.httpStatus(409) {
+                payload.uploadAssets = nil
+                try uploadQueue.save(payload)
+            }
+        }
+
+        let preparedUpload = try await client.prepareRecordingUpload(payload: payload)
+        payload.uploadAssets = preparedUpload.assets.assetIds
+        try uploadQueue.save(payload)
+        try await client.uploadPreparedRecordingAssets(
+            payload: payload,
+            preparedUpload: preparedUpload
+        )
+
+        do {
+            _ = try await client.completeRecordingUpload(payload: payload)
+            return payload
+        } catch LocalRecorderAPIError.httpStatus(409) {
+            payload.uploadAssets = nil
+            try uploadQueue.save(payload)
+            throw LocalRecorderAPIError.httpStatus(409)
+        }
     }
 }
 

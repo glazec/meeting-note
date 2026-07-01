@@ -71,6 +71,7 @@ final class LocalRecordingCaptureSession {
     private let microphoneAudioURL: URL
     private let microphoneRecorder: MicrophoneTrackRecorder
     private let startedAt: Date
+    private let synthesizedAudioURL: URL
     private let systemRecorder: SystemAudioTrackRecorder
 
     init(fallbackIntentId: String, appVersion: String) throws {
@@ -87,6 +88,7 @@ final class LocalRecordingCaptureSession {
         self.fallbackIntentId = fallbackIntentId
         self.microphoneAudioURL = directoryURL.appending(path: "microphone.wav")
         self.startedAt = Date()
+        self.synthesizedAudioURL = directoryURL.appending(path: "synthesized.wav")
         self.microphoneRecorder = try MicrophoneTrackRecorder(outputURL: microphoneAudioURL)
         self.systemRecorder = try SystemAudioTrackRecorder(outputURL: computerAudioURL)
     }
@@ -106,6 +108,11 @@ final class LocalRecordingCaptureSession {
         let stoppedAt = Date()
         await systemRecorder.stop()
         microphoneRecorder.stop()
+        try LocalTrackSynthesizer.synthesize(
+            computerAudioURL: computerAudioURL,
+            microphoneAudioURL: microphoneAudioURL,
+            outputURL: synthesizedAudioURL
+        )
 
         let manifest = RecordingManifest(
             appVersion: appVersion,
@@ -135,6 +142,7 @@ final class LocalRecordingCaptureSession {
             recordingStoppedAt: stoppedAt,
             computerAudioURL: computerAudioURL,
             microphoneAudioURL: microphoneAudioURL,
+            synthesizedAudioURL: synthesizedAudioURL,
             manifest: manifest
         )
 
@@ -178,6 +186,146 @@ enum LocalTrackAudioFormat {
             channels: AVAudioChannelCount(channelCount),
             interleaved: false
         )!
+    }
+}
+
+enum LocalTrackSynthesizer {
+    private static let frameCapacity: AVAudioFrameCount = 4096
+
+    static func synthesize(
+        computerAudioURL: URL,
+        microphoneAudioURL: URL,
+        outputURL: URL
+    ) throws {
+        if FileManager.default.fileExists(atPath: outputURL.path()) {
+            try FileManager.default.removeItem(at: outputURL)
+        }
+
+        let computerFile = try AVAudioFile(forReading: computerAudioURL)
+        let microphoneFile = try AVAudioFile(forReading: microphoneAudioURL)
+        let writer = try PCM16WavWriter(outputURL: outputURL)
+        defer {
+            writer.close()
+        }
+
+        let mixFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: LocalTrackAudioFormat.sampleRate,
+            channels: AVAudioChannelCount(LocalTrackAudioFormat.channelCount),
+            interleaved: false
+        )!
+
+        while true {
+            let computerBuffer = try readChunk(from: computerFile, format: mixFormat)
+            let microphoneBuffer = try readChunk(from: microphoneFile, format: mixFormat)
+            guard computerBuffer != nil || microphoneBuffer != nil else {
+                break
+            }
+
+            let mixed = try mix(
+                computerBuffer: computerBuffer,
+                microphoneBuffer: microphoneBuffer,
+                format: mixFormat
+            )
+            writer.write(mixed)
+        }
+
+        try writer.finish()
+    }
+
+    private static func readChunk(
+        from file: AVAudioFile,
+        format: AVAudioFormat
+    ) throws -> AVAudioPCMBuffer? {
+        guard let buffer = AVAudioPCMBuffer(
+            pcmFormat: file.processingFormat,
+            frameCapacity: frameCapacity
+        ) else {
+            throw LocalRecordingCaptureError.audioBufferUnavailable
+        }
+
+        try file.read(into: buffer, frameCount: frameCapacity)
+        guard buffer.frameLength > 0 else {
+            return nil
+        }
+
+        return try LocalAudioBufferConverter.convert(buffer, to: format)
+    }
+
+    private static func mix(
+        computerBuffer: AVAudioPCMBuffer?,
+        microphoneBuffer: AVAudioPCMBuffer?,
+        format: AVAudioFormat
+    ) throws -> AVAudioPCMBuffer {
+        let frameLength = max(
+            computerBuffer?.frameLength ?? 0,
+            microphoneBuffer?.frameLength ?? 0
+        )
+        guard
+            frameLength > 0,
+            let mixed = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: frameLength
+            ),
+            let mixedChannels = mixed.floatChannelData
+        else {
+            throw LocalRecordingCaptureError.audioBufferUnavailable
+        }
+
+        mixed.frameLength = frameLength
+        for channel in 0..<Int(format.channelCount) {
+            let output = mixedChannels[channel]
+            let computerChannel = channelData(from: computerBuffer, channel: channel)
+            let microphoneChannel = channelData(from: microphoneBuffer, channel: channel)
+
+            for frame in 0..<Int(frameLength) {
+                let computerSample = sample(
+                    from: computerChannel,
+                    frame: frame,
+                    frameLength: computerBuffer?.frameLength
+                )
+                let microphoneSample = sample(
+                    from: microphoneChannel,
+                    frame: frame,
+                    frameLength: microphoneBuffer?.frameLength
+                )
+                output[frame] = max(-1, min(1, computerSample + microphoneSample))
+            }
+        }
+
+        return mixed
+    }
+
+    private static func channelData(
+        from buffer: AVAudioPCMBuffer?,
+        channel: Int
+    ) -> UnsafeMutablePointer<Float>? {
+        guard
+            let buffer,
+            let channels = buffer.floatChannelData,
+            buffer.format.channelCount > 0
+        else {
+            return nil
+        }
+
+        let clampedChannel = min(channel, Int(buffer.format.channelCount) - 1)
+        return channels[clampedChannel]
+    }
+
+    private static func sample(
+        from channelData: UnsafeMutablePointer<Float>?,
+        frame: Int,
+        frameLength: AVAudioFrameCount?
+    ) -> Float {
+        guard
+            let channelData,
+            let frameLength,
+            frame < Int(frameLength)
+        else {
+            return 0
+        }
+
+        return channelData[frame]
     }
 }
 
@@ -322,7 +470,27 @@ final class PCM16WavWriter: @unchecked Sendable {
         lock.unlock()
     }
 
+    func finish() throws {
+        lock.lock()
+        isClosed = true
+        let recordedError = error
+        lock.unlock()
+
+        if let recordedError {
+            throw recordedError
+        }
+    }
+
     private func convert(_ buffer: AVAudioPCMBuffer) throws -> AVAudioPCMBuffer? {
+        try LocalAudioBufferConverter.convert(buffer, to: outputFormat)
+    }
+}
+
+enum LocalAudioBufferConverter {
+    static func convert(
+        _ buffer: AVAudioPCMBuffer,
+        to outputFormat: AVAudioFormat
+    ) throws -> AVAudioPCMBuffer {
         if buffer.format == outputFormat {
             return buffer
         }

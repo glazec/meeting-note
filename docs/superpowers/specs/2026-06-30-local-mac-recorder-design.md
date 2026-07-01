@@ -16,9 +16,9 @@ The user experience stays colleague first. The website shows one meeting, one tr
 6. If a meeting with a link is one minute past start time and has no successful Recall recording evidence, the Mac app shows a local macOS notification.
 7. Clicking the notification claims the local fallback intent and starts recording immediately when the primary claim succeeds.
 8. The recorder captures two local tracks, one for computer audio and one for the user's microphone.
-9. When the user stops recording, the app uploads both tracks automatically.
+9. When the user stops recording, the app synthesizes one mixed audio file locally, then uploads the two raw tracks and the synthesized file automatically.
 10. The server attaches the local recording to the same meeting by matching the recording time to eligible missed meetings, then confirming the match with an opaque fallback intent.
-11. The server creates one synthesized audio file from both tracks.
+11. The server stores the two raw tracks and the synthesized audio file as assets on the same meeting.
 12. Export returns the synthesized audio file, not the separate technical tracks.
 
 ## Out Of Scope
@@ -48,8 +48,8 @@ The Mac app is a signed SwiftUI menu bar app.
 2. `PermissionController` checks and requests microphone, screen audio capture, notifications, and start at login permission.
 3. `MeetingMonitor` polls the server while the app is active and logged in. It can poll every minute normally, then increase to every 30 seconds when an upcoming meeting is within five minutes of the fallback window.
 4. `NotificationController` shows local macOS notifications for eligible missed bot meetings.
-5. `Recorder` starts only after notification click and writes two local audio files.
-6. `UploadQueue` uploads completed recordings and retries failed uploads.
+5. `Recorder` starts only after notification click and writes two raw local audio files plus one synthesized local file.
+6. `UploadQueue` prepares signed upload URLs, uploads completed recordings directly to R2, completes the server record, and retries failed uploads.
 7. `MenuBarStatus` shows login state, permission state, monitoring state, recording state, and upload retry state.
 
 The app uses [ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit/) for system audio capture and [AVAudioEngine](https://developer.apple.com/documentation/avfaudio/avaudioengine) for microphone capture. Notifications use [UserNotifications](https://developer.apple.com/documentation/usernotifications). Start at login uses [SMAppService](https://developer.apple.com/documentation/servicemanagement/smappservice).
@@ -101,10 +101,11 @@ If the user ignores or dismisses the notification, the meeting remains in the me
 
 ## Recording Behavior
 
-The recorder writes two files in a local app data folder:
+The recorder writes three files in a local app data folder:
 
 1. Computer audio track.
 2. User microphone track.
+3. Synthesized audio track for transcription and export.
 
 The local recording session stores:
 
@@ -130,9 +131,9 @@ Start request:
 
 The server marks the user's attempt as `started` only if the meeting still has no successful Recall recording evidence and no other active primary local recorder. If the claim is accepted, the app starts recording. If the claim is rejected because another user is already recording, the app shows that state and does not start a competing primary recording.
 
-Upload request:
+Upload prepare request:
 
-`POST /api/local-recorder/recordings`
+`POST /api/local-recorder/recordings/prepare`
 
 The request includes:
 
@@ -140,9 +141,21 @@ The request includes:
 2. Client generated recording id for retry dedupe.
 3. Recording start time.
 4. Recording stop time.
-5. Computer audio file.
-6. Microphone audio file.
-7. Recording manifest.
+5. Recording manifest.
+
+The response includes signed R2 upload URLs and asset ids for:
+
+1. Computer audio.
+2. Microphone audio.
+3. Synthesized audio.
+
+The Mac app uploads each local file directly to its signed R2 URL.
+
+Upload complete request:
+
+`POST /api/local-recorder/recordings/complete`
+
+The request includes the same recording metadata plus the three prepared asset ids. The server verifies the uploaded objects exist before attaching the local recording to the meeting and queueing transcription.
 
 The recording manifest includes:
 
@@ -173,7 +186,7 @@ Recommended schema additions:
 2. Add `computer_audio`, `microphone_audio`, and `synthesized_audio` to `asset_type`, or add an `audio_role` field if keeping `asset_type = audio` is cleaner.
 3. Add a `local_recorder_devices` table with user id, workspace id, device id hash, last seen time, app version, and permission readiness.
 4. Add a `local_recording_attempts` table with meeting id, user id, device id hash, fallback intent id hash, notification state, attempt state, claim time, expiry time, and error message. Attempt states are `notified`, `started`, `uploading`, `uploaded`, `discarded`, `expired`, and `failed`.
-5. Add a `local_recordings` table with meeting id, owner user id, local recording attempt id, client recording id, recording start time, recording stop time, computer audio asset id, microphone audio asset id, synthesized audio asset id, manifest JSON, synthesis status, synthesis error message, and primary source flag.
+5. Add a `local_recordings` table with meeting id, owner user id, local recording attempt id, client recording id, recording start time, recording stop time, computer audio asset id, microphone audio asset id, synthesized audio asset id, manifest JSON, synthesis status, synthesis error message, and primary source flag. The first version marks synthesis completed because the Mac app uploads the synthesized file directly.
 6. Add a unique constraint on client recording id per user device so upload retries are idempotent.
 7. Store all three files in R2.
 
@@ -183,17 +196,16 @@ Only one local recording is primary for a meeting. If more than one user records
 
 ## Processing Flow
 
-1. Mac app uploads computer audio and microphone audio.
-2. Server stores both tracks in R2.
-3. Server creates or updates a local recording row for the existing meeting.
-4. Server validates manifest metadata, including track duration, sample rate, channel count, codec, and alignment markers.
-5. Server synthesizes one audio file from both tracks by aligning track start timestamps and mixing computer audio plus microphone audio into a single exportable file.
-6. Server stores synthesized audio in R2.
-7. Server creates one transcription job using the synthesized audio.
-8. Transcript, summary, share, and search use the same existing meeting surfaces.
-9. Export uses the synthesized audio asset.
+1. Mac app records computer audio and microphone audio.
+2. Mac app synthesizes one mixed audio file from both tracks.
+3. Mac app prepares signed upload URLs and uploads computer audio, microphone audio, and synthesized audio directly to R2.
+4. Server creates or updates a local recording row for the existing meeting.
+5. Server validates manifest metadata, including track duration, sample rate, channel count, codec, and alignment markers.
+6. Server creates one transcription job using the synthesized audio.
+7. Transcript, summary, share, and search use the same existing meeting surfaces.
+8. Export uses the synthesized audio asset.
 
-If track clocks drift beyond the accepted tolerance, synthesis fails with a repair state instead of producing misleading transcript or export audio.
+If local synthesis fails, upload is blocked and the files remain local for retry or repair instead of producing misleading transcript or export audio.
 
 The two original tracks remain available for future diarization and speaker matching.
 
@@ -226,8 +238,8 @@ The page does not show meeting ids or two technical track files to normal users.
 3. If the bot later joins successfully before any local claim starts, the server stops returning the meeting as eligible.
 4. If the bot joins after local recording starts, the Mac app continues recording because the local recording has become the fallback primary source.
 5. If recording is active and the app quits, it should recover any closed files on next launch and offer upload.
-6. If upload fails, both tracks stay local and retry later.
-7. If synthesis fails, the meeting shows a repair state and export remains unavailable until synthesis succeeds.
+6. If upload fails, all three files stay local and retry later.
+7. If local synthesis fails, the recording is not completed in the cloud and export remains unavailable until a valid synthesized file exists.
 8. If matching is ambiguous, the app asks the user to choose from candidate meetings.
 
 ## Verification
@@ -245,8 +257,8 @@ Implementation should prove:
 9. Conflict retry uses opaque candidate tokens.
 10. Computer and microphone tracks are stored separately.
 11. The local recording row links computer audio, microphone audio, and synthesized audio assets.
-12. Synthesis validates the recording manifest before creating export audio.
-13. Synthesis creates one exportable audio asset.
+12. The Mac app creates one synthesized exportable audio asset.
+13. The server queues transcription from the synthesized audio asset only after all three uploaded objects exist.
 14. Export returns synthesized audio for locally recorded meetings.
 15. A late Recall recording does not create a second transcript after local recording starts.
 16. Failed uploads stay retryable from local disk.

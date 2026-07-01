@@ -5,7 +5,8 @@ const getLocalRecorderDeviceRequestContext = vi.fn();
 const listMissedLocalRecorderMeetings = vi.fn();
 const claimLocalRecorderIntent = vi.fn();
 const failLocalRecorderIntent = vi.fn();
-const createLocalRecorderRecording = vi.fn();
+const completeLocalRecorderRecordingUpload = vi.fn();
+const prepareLocalRecorderRecordingUpload = vi.fn();
 
 vi.mock("@/lib/local-recorder-auth", () => ({
   createLocalRecorderDeviceSession,
@@ -14,9 +15,10 @@ vi.mock("@/lib/local-recorder-auth", () => ({
 
 vi.mock("@/lib/local-recorder-records", () => ({
   claimLocalRecorderIntent,
-  createLocalRecorderRecording,
+  completeLocalRecorderRecordingUpload,
   failLocalRecorderIntent,
   listMissedLocalRecorderMeetings,
+  prepareLocalRecorderRecordingUpload,
 }));
 
 function mockSignedInDevice() {
@@ -37,7 +39,8 @@ describe("local recorder API routes", () => {
     listMissedLocalRecorderMeetings.mockReset();
     claimLocalRecorderIntent.mockReset();
     failLocalRecorderIntent.mockReset();
-    createLocalRecorderRecording.mockReset();
+    completeLocalRecorderRecordingUpload.mockReset();
+    prepareLocalRecorderRecordingUpload.mockReset();
     vi.resetModules();
   });
 
@@ -151,49 +154,69 @@ describe("local recorder API routes", () => {
     });
   });
 
-  it("uploads two tracks and queues local recording processing", async () => {
+  it("prepares direct upload URLs for all local recorder audio assets", async () => {
     mockSignedInDevice();
-    createLocalRecorderRecording.mockResolvedValue({
-      meetingId: "11111111-1111-4111-8111-111111111111",
-      queued: true,
+    prepareLocalRecorderRecordingUpload.mockResolvedValue({
+      assets: {
+        computerAudio: {
+          assetId: "asset_computer",
+          contentType: "audio/wav",
+          uploadUrl: "https://r2.example.com/computer",
+        },
+        microphoneAudio: {
+          assetId: "asset_microphone",
+          contentType: "audio/wav",
+          uploadUrl: "https://r2.example.com/microphone",
+        },
+        synthesizedAudio: {
+          assetId: "asset_synthesized",
+          contentType: "audio/wav",
+          uploadUrl: "https://r2.example.com/synthesized",
+        },
+      },
     });
 
-    const formData = new FormData();
-    formData.set("fallbackIntentId", "intent_123");
-    formData.set("clientRecordingId", "recording_123");
-    formData.set("recordingStartedAt", "2026-06-30T12:02:00.000Z");
-    formData.set("recordingStoppedAt", "2026-06-30T13:00:00.000Z");
-    formData.set("manifest", JSON.stringify({ appVersion: "0.1.0" }));
-    formData.set(
-      "computerAudio",
-      new File(["computer"], "computer.wav", { type: "audio/wav" }),
+    const { POST } = await import(
+      "@/app/api/local-recorder/recordings/prepare/route"
     );
-    formData.set(
-      "microphoneAudio",
-      new File(["microphone"], "microphone.wav", { type: "audio/wav" }),
-    );
-
-    const { POST } = await import("@/app/api/local-recorder/recordings/route");
     const response = await POST(
-      new Request("https://app.example.com/api/local-recorder/recordings", {
+      new Request("https://app.example.com/api/local-recorder/recordings/prepare", {
         method: "POST",
-        body: formData,
-        headers: { "x-local-recorder-device-id": "mac_123" },
+        body: JSON.stringify({
+          fallbackIntentId: "intent_123",
+          clientRecordingId: "recording_123",
+          recordingStartedAt: "2026-06-30T12:02:00.000Z",
+          recordingStoppedAt: "2026-06-30T13:00:00.000Z",
+          manifest: { appVersion: "0.1.0" },
+        }),
       }),
     );
 
-    expect(response.status).toBe(202);
+    expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      meetingId: "11111111-1111-4111-8111-111111111111",
-      queued: true,
+      assets: {
+        computerAudio: {
+          assetId: "asset_computer",
+          contentType: "audio/wav",
+          uploadUrl: "https://r2.example.com/computer",
+        },
+        microphoneAudio: {
+          assetId: "asset_microphone",
+          contentType: "audio/wav",
+          uploadUrl: "https://r2.example.com/microphone",
+        },
+        synthesizedAudio: {
+          assetId: "asset_synthesized",
+          contentType: "audio/wav",
+          uploadUrl: "https://r2.example.com/synthesized",
+        },
+      },
     });
-    expect(createLocalRecorderRecording).toHaveBeenCalledWith({
+    expect(prepareLocalRecorderRecordingUpload).toHaveBeenCalledWith({
       clientRecordingId: "recording_123",
-      computerAudio: expect.any(File),
       deviceId: "mac_123",
       fallbackIntentId: "intent_123",
       manifest: { appVersion: "0.1.0" },
-      microphoneAudio: expect.any(File),
       recordingStartedAt: new Date("2026-06-30T12:02:00.000Z"),
       recordingStoppedAt: new Date("2026-06-30T13:00:00.000Z"),
       workspace: {
@@ -203,38 +226,84 @@ describe("local recorder API routes", () => {
     });
   });
 
-  it("returns 400 when the local recording manifest is invalid JSON", async () => {
+  it("completes a direct local recorder upload and queues processing", async () => {
+    mockSignedInDevice();
+    completeLocalRecorderRecordingUpload.mockResolvedValue({
+      meetingId: "11111111-1111-4111-8111-111111111111",
+      queued: true,
+    });
+
+    const { POST } = await import(
+      "@/app/api/local-recorder/recordings/complete/route"
+    );
+    const response = await POST(
+      new Request("https://app.example.com/api/local-recorder/recordings/complete", {
+        method: "POST",
+        body: JSON.stringify({
+          fallbackIntentId: "intent_123",
+          clientRecordingId: "recording_123",
+          recordingStartedAt: "2026-06-30T12:02:00.000Z",
+          recordingStoppedAt: "2026-06-30T13:00:00.000Z",
+          manifest: { appVersion: "0.1.0" },
+          assets: {
+            computerAudioAssetId: "asset_computer",
+            microphoneAudioAssetId: "asset_microphone",
+            synthesizedAudioAssetId: "asset_synthesized",
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      meetingId: "11111111-1111-4111-8111-111111111111",
+      queued: true,
+    });
+    expect(completeLocalRecorderRecordingUpload).toHaveBeenCalledWith({
+      assets: {
+        computerAudioAssetId: "asset_computer",
+        microphoneAudioAssetId: "asset_microphone",
+        synthesizedAudioAssetId: "asset_synthesized",
+      },
+      clientRecordingId: "recording_123",
+      deviceId: "mac_123",
+      fallbackIntentId: "intent_123",
+      manifest: { appVersion: "0.1.0" },
+      recordingStartedAt: new Date("2026-06-30T12:02:00.000Z"),
+      recordingStoppedAt: new Date("2026-06-30T13:00:00.000Z"),
+      workspace: {
+        teamId: "team_123",
+        userId: "user_123",
+      },
+    });
+  });
+
+  it("returns 400 when direct local recorder upload completion is invalid", async () => {
     mockSignedInDevice();
 
-    const formData = new FormData();
-    formData.set("fallbackIntentId", "intent_123");
-    formData.set("clientRecordingId", "recording_123");
-    formData.set("recordingStartedAt", "2026-06-30T12:02:00.000Z");
-    formData.set("recordingStoppedAt", "2026-06-30T13:00:00.000Z");
-    formData.set("manifest", "{");
-    formData.set(
-      "computerAudio",
-      new File(["computer"], "computer.wav", { type: "audio/wav" }),
+    const { POST } = await import(
+      "@/app/api/local-recorder/recordings/complete/route"
     );
-    formData.set(
-      "microphoneAudio",
-      new File(["microphone"], "microphone.wav", { type: "audio/wav" }),
-    );
-
-    const { POST } = await import("@/app/api/local-recorder/recordings/route");
     const response = await POST(
-      new Request("https://app.example.com/api/local-recorder/recordings", {
+      new Request("https://app.example.com/api/local-recorder/recordings/complete", {
         method: "POST",
-        body: formData,
-        headers: { "x-local-recorder-device-id": "mac_123" },
+        body: JSON.stringify({
+          fallbackIntentId: "intent_123",
+          clientRecordingId: "recording_123",
+          recordingStartedAt: "2026-06-30T12:02:00.000Z",
+          recordingStoppedAt: "2026-06-30T13:00:00.000Z",
+          assets: {
+            computerAudioAssetId: "asset_computer",
+          },
+        }),
       }),
     );
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: "Invalid local recording upload",
+      error: "Invalid local recording completion",
     });
-    expect(createLocalRecorderRecording).not.toHaveBeenCalled();
+    expect(completeLocalRecorderRecordingUpload).not.toHaveBeenCalled();
   });
 
   it("redirects signed in web users back to the Mac app with a device token", async () => {

@@ -15,11 +15,11 @@ import {
   getLocalRecorderEligibility,
   type LocalRecorderCandidate,
 } from "@/lib/local-recorder-policy";
-import { mixLocalRecorderWavTracks } from "@/lib/local-recorder-wav";
 import {
   buildMeetingObjectKey,
+  createUploadUrl,
+  getObjectMetadata,
   parseR2Env,
-  putObject,
 } from "@/lib/r2";
 import type { WorkspaceContext } from "@/lib/workspace";
 
@@ -33,8 +33,37 @@ export type LocalRecorderMeetingItem = {
   title: string;
 };
 
+export type LocalRecorderUploadAssetIds = {
+  computerAudioAssetId: string;
+  microphoneAudioAssetId: string;
+  synthesizedAudioAssetId: string;
+};
+
+type LocalRecorderTranscriptionEventInput = {
+  mediaAssetId: string;
+  meetingId: string;
+  objectKey: string;
+  transcriptJobId: string;
+};
+
 const intentTokenBytes = 18;
 const activeAttemptStates = ["started", "uploading", "uploaded"];
+const localRecorderAudioContentType = "audio/wav";
+
+export function buildLocalRecorderTranscriptionEvent(
+  input: LocalRecorderTranscriptionEventInput,
+) {
+  return {
+    id: `local-recorder-transcribe-${input.transcriptJobId}`,
+    name: "meeting/transcribe.audio" as const,
+    data: {
+      mediaAssetId: input.mediaAssetId,
+      meetingId: input.meetingId,
+      objectKey: input.objectKey,
+      transcriptJobId: input.transcriptJobId,
+    },
+  };
+}
 
 export async function listMissedLocalRecorderMeetings(input: {
   deviceId: string;
@@ -292,18 +321,296 @@ export async function failLocalRecorderIntent(input: {
   return { failed: true };
 }
 
-export async function createLocalRecorderRecording(input: {
+export async function prepareLocalRecorderRecordingUpload(input: {
   clientRecordingId: string;
-  computerAudio: File;
   deviceId: string;
   fallbackIntentId: string;
   manifest: unknown;
-  microphoneAudio: File;
   recordingStartedAt: Date;
   recordingStoppedAt: Date;
   workspace: WorkspaceContext;
 }) {
   const now = new Date();
+  const attempt = await getUploadableLocalRecorderAttempt(input);
+
+  if (await findExistingLocalRecording({
+    clientRecordingId: input.clientRecordingId,
+    ownerUserId: input.workspace.userId,
+  })) {
+    throw new LocalRecorderUploadError("Local recording already uploaded");
+  }
+
+  await db
+    .update(localRecordingAttempts)
+    .set({ attemptState: "uploading", updatedAt: now })
+    .where(eq(localRecordingAttempts.id, attempt.id));
+
+  const assetIds = createLocalRecorderAssetIds();
+  const keys = buildLocalRecorderObjectKeys({
+    assetIds,
+    meetingId: attempt.meetingId,
+    teamId: input.workspace.teamId,
+  });
+
+  const [computerUploadUrl, microphoneUploadUrl, synthesizedUploadUrl] =
+    await Promise.all([
+      createUploadUrl({
+        contentType: localRecorderAudioContentType,
+        key: keys.computerAudioKey,
+      }),
+      createUploadUrl({
+        contentType: localRecorderAudioContentType,
+        key: keys.microphoneAudioKey,
+      }),
+      createUploadUrl({
+        contentType: localRecorderAudioContentType,
+        key: keys.synthesizedAudioKey,
+      }),
+    ]);
+
+  return {
+    assets: {
+      computerAudio: {
+        assetId: assetIds.computerAudioAssetId,
+        contentType: localRecorderAudioContentType,
+        uploadUrl: computerUploadUrl,
+      },
+      microphoneAudio: {
+        assetId: assetIds.microphoneAudioAssetId,
+        contentType: localRecorderAudioContentType,
+        uploadUrl: microphoneUploadUrl,
+      },
+      synthesizedAudio: {
+        assetId: assetIds.synthesizedAudioAssetId,
+        contentType: localRecorderAudioContentType,
+        uploadUrl: synthesizedUploadUrl,
+      },
+    },
+  };
+}
+
+export async function completeLocalRecorderRecordingUpload(input: {
+  assets: LocalRecorderUploadAssetIds;
+  clientRecordingId: string;
+  deviceId: string;
+  fallbackIntentId: string;
+  manifest: unknown;
+  recordingStartedAt: Date;
+  recordingStoppedAt: Date;
+  workspace: WorkspaceContext;
+}) {
+  const now = new Date();
+  const attempt = await getUploadableLocalRecorderAttempt(input);
+  const existingRecording = await findExistingLocalRecording({
+    clientRecordingId: input.clientRecordingId,
+    ownerUserId: input.workspace.userId,
+  });
+
+  if (existingRecording) {
+    if (existingRecording.meetingId !== attempt.meetingId) {
+      throw new LocalRecorderUploadError(
+        "Local recording already belongs to another meeting",
+      );
+    }
+
+    await queueLocalRecorderTranscriptionForRecording({
+      localRecordingId: existingRecording.id,
+    });
+
+    return {
+      localRecordingId: existingRecording.id,
+      meetingId: existingRecording.meetingId,
+      queued: true,
+    };
+  }
+
+  const keys = buildLocalRecorderObjectKeys({
+    assetIds: input.assets,
+    meetingId: attempt.meetingId,
+    teamId: input.workspace.teamId,
+  });
+  const [
+    computerAudioMetadata,
+    microphoneAudioMetadata,
+    synthesizedAudioMetadata,
+  ] = await Promise.all([
+    getObjectMetadata({ key: keys.computerAudioKey }),
+    getObjectMetadata({ key: keys.microphoneAudioKey }),
+    getObjectMetadata({ key: keys.synthesizedAudioKey }),
+  ]).catch(() => {
+    throw new LocalRecorderUploadError("Uploaded local recording audio not found");
+  });
+  const env = parseR2Env(process.env);
+
+  await db.insert(mediaAssets).values([
+    {
+      bucket: env.R2_BUCKET,
+      fileSizeBytes: normalizeLocalRecorderFileSizeBytes(
+        computerAudioMetadata.contentLength,
+      ),
+      id: input.assets.computerAudioAssetId,
+      meetingId: attempt.meetingId,
+      mimeType:
+        computerAudioMetadata.contentType ?? localRecorderAudioContentType,
+      objectKey: keys.computerAudioKey,
+      source: "local_recorder",
+      type: "computer_audio",
+    },
+    {
+      bucket: env.R2_BUCKET,
+      fileSizeBytes: normalizeLocalRecorderFileSizeBytes(
+        microphoneAudioMetadata.contentLength,
+      ),
+      id: input.assets.microphoneAudioAssetId,
+      meetingId: attempt.meetingId,
+      mimeType:
+        microphoneAudioMetadata.contentType ?? localRecorderAudioContentType,
+      objectKey: keys.microphoneAudioKey,
+      source: "local_recorder",
+      type: "microphone_audio",
+    },
+    {
+      bucket: env.R2_BUCKET,
+      fileSizeBytes: normalizeLocalRecorderFileSizeBytes(
+        synthesizedAudioMetadata.contentLength,
+      ),
+      id: input.assets.synthesizedAudioAssetId,
+      meetingId: attempt.meetingId,
+      mimeType:
+        synthesizedAudioMetadata.contentType ?? localRecorderAudioContentType,
+      objectKey: keys.synthesizedAudioKey,
+      source: "local_recorder",
+      type: "synthesized_audio",
+    },
+  ]);
+
+  const [recording] = await db
+    .insert(localRecordings)
+    .values({
+      clientRecordingId: input.clientRecordingId,
+      computerAudioAssetId: input.assets.computerAudioAssetId,
+      isPrimary: true,
+      localRecordingAttemptId: attempt.id,
+      manifest: input.manifest,
+      meetingId: attempt.meetingId,
+      microphoneAudioAssetId: input.assets.microphoneAudioAssetId,
+      ownerUserId: input.workspace.userId,
+      recordingStartedAt: input.recordingStartedAt,
+      recordingStoppedAt: input.recordingStoppedAt,
+      synthesizedAudioAssetId: input.assets.synthesizedAudioAssetId,
+      synthesisStatus: "completed",
+    })
+    .onConflictDoUpdate({
+      target: [localRecordings.ownerUserId, localRecordings.clientRecordingId],
+      set: {
+        updatedAt: now,
+      },
+    })
+    .returning({ id: localRecordings.id });
+  const transcriptionEventInput =
+    await getOrCreateLocalRecorderTranscriptionEventInput({
+      localRecordingId: recording.id,
+    });
+
+  await db
+    .update(localRecordingAttempts)
+    .set({ attemptState: "uploaded", updatedAt: now })
+    .where(eq(localRecordingAttempts.id, attempt.id));
+
+  await queueLocalRecorderTranscription(transcriptionEventInput);
+
+  return {
+    localRecordingId: recording.id,
+    meetingId: attempt.meetingId,
+    queued: true,
+  };
+}
+
+async function queueLocalRecorderTranscriptionForRecording(input: {
+  localRecordingId: string;
+}) {
+  const eventInput = await getOrCreateLocalRecorderTranscriptionEventInput(input);
+  await queueLocalRecorderTranscription(eventInput);
+}
+
+async function getOrCreateLocalRecorderTranscriptionEventInput(input: {
+  localRecordingId: string;
+}): Promise<LocalRecorderTranscriptionEventInput> {
+  const [recording] = await db
+    .select({
+      mediaAssetId: mediaAssets.id,
+      meetingId: localRecordings.meetingId,
+      objectKey: mediaAssets.objectKey,
+      transcriptJobId: transcriptJobs.id,
+    })
+    .from(localRecordings)
+    .innerJoin(
+      mediaAssets,
+      eq(mediaAssets.id, localRecordings.synthesizedAudioAssetId),
+    )
+    .leftJoin(
+      transcriptJobs,
+      and(
+        eq(transcriptJobs.mediaAssetId, mediaAssets.id),
+        eq(transcriptJobs.meetingId, localRecordings.meetingId),
+      ),
+    )
+    .where(eq(localRecordings.id, input.localRecordingId))
+    .orderBy(desc(transcriptJobs.createdAt))
+    .limit(1);
+
+  if (!recording) {
+    throw new LocalRecorderUploadError("Local recording audio not found");
+  }
+
+  if (recording.transcriptJobId) {
+    return {
+      mediaAssetId: recording.mediaAssetId,
+      meetingId: recording.meetingId,
+      objectKey: recording.objectKey,
+      transcriptJobId: recording.transcriptJobId,
+    };
+  }
+
+  const [job] = await db
+    .insert(transcriptJobs)
+    .values({
+      mediaAssetId: recording.mediaAssetId,
+      meetingId: recording.meetingId,
+      provider: "elevenlabs",
+      status: "queued",
+    })
+    .returning({ id: transcriptJobs.id });
+
+  return {
+    mediaAssetId: recording.mediaAssetId,
+    meetingId: recording.meetingId,
+    objectKey: recording.objectKey,
+    transcriptJobId: job.id,
+  };
+}
+
+async function queueLocalRecorderTranscription(
+  input: LocalRecorderTranscriptionEventInput,
+) {
+  await inngest.send(buildLocalRecorderTranscriptionEvent(input));
+}
+
+function normalizeLocalRecorderFileSizeBytes(value: number | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+
+  return value;
+}
+
+async function getUploadableLocalRecorderAttempt(input: {
+  clientRecordingId: string;
+  deviceId: string;
+  fallbackIntentId: string;
+  recordingStartedAt: Date;
+  workspace: WorkspaceContext;
+}) {
   const deviceIdHash = await hashLocalRecorderValue(input.deviceId);
   const fallbackIntentIdHash = await hashLocalRecorderValue(
     input.fallbackIntentId,
@@ -329,25 +636,6 @@ export async function createLocalRecorderRecording(input: {
     throw new LocalRecorderUploadError("No matching local recording intent");
   }
 
-  const existingRecording = await findExistingLocalRecording({
-    clientRecordingId: input.clientRecordingId,
-    ownerUserId: input.workspace.userId,
-  });
-
-  if (existingRecording) {
-    if (existingRecording.meetingId !== attempt.meetingId) {
-      throw new LocalRecorderUploadError(
-        "Local recording already belongs to another meeting",
-      );
-    }
-
-    return {
-      localRecordingId: existingRecording.id,
-      meetingId: existingRecording.meetingId,
-      queued: true,
-    };
-  }
-
   if (
     !canUploadLocalRecorderAttempt({
       attemptState: attempt.attemptState,
@@ -360,145 +648,7 @@ export async function createLocalRecorderRecording(input: {
     throw new LocalRecorderUploadError("No matching local recording intent");
   }
 
-  await db
-    .update(localRecordingAttempts)
-    .set({ attemptState: "uploading", updatedAt: now })
-    .where(eq(localRecordingAttempts.id, attempt.id));
-
-  const computerAudioBytes = new Uint8Array(
-    await input.computerAudio.arrayBuffer(),
-  );
-  const microphoneAudioBytes = new Uint8Array(
-    await input.microphoneAudio.arrayBuffer(),
-  );
-  const synthesizedAudioBytes = mixLocalRecorderWavTracks(
-    computerAudioBytes,
-    microphoneAudioBytes,
-  );
-  const computerAssetId = crypto.randomUUID();
-  const microphoneAssetId = crypto.randomUUID();
-  const synthesizedAssetId = crypto.randomUUID();
-  const env = parseR2Env(process.env);
-  const computerKey = buildMeetingObjectKey({
-    assetId: computerAssetId,
-    extension: "wav",
-    meetingId: attempt.meetingId,
-    teamId: input.workspace.teamId,
-  });
-  const microphoneKey = buildMeetingObjectKey({
-    assetId: microphoneAssetId,
-    extension: "wav",
-    meetingId: attempt.meetingId,
-    teamId: input.workspace.teamId,
-  });
-  const synthesizedKey = buildMeetingObjectKey({
-    assetId: synthesizedAssetId,
-    extension: "wav",
-    meetingId: attempt.meetingId,
-    teamId: input.workspace.teamId,
-  });
-
-  await Promise.all([
-    putObject({
-      body: computerAudioBytes,
-      contentType: "audio/wav",
-      key: computerKey,
-    }),
-    putObject({
-      body: microphoneAudioBytes,
-      contentType: "audio/wav",
-      key: microphoneKey,
-    }),
-    putObject({
-      body: synthesizedAudioBytes,
-      contentType: "audio/wav",
-      key: synthesizedKey,
-    }),
-  ]);
-
-  await db.insert(mediaAssets).values([
-    {
-      bucket: env.R2_BUCKET,
-      id: computerAssetId,
-      meetingId: attempt.meetingId,
-      mimeType: "audio/wav",
-      objectKey: computerKey,
-      source: "local_recorder",
-      type: "computer_audio",
-    },
-    {
-      bucket: env.R2_BUCKET,
-      id: microphoneAssetId,
-      meetingId: attempt.meetingId,
-      mimeType: "audio/wav",
-      objectKey: microphoneKey,
-      source: "local_recorder",
-      type: "microphone_audio",
-    },
-    {
-      bucket: env.R2_BUCKET,
-      id: synthesizedAssetId,
-      meetingId: attempt.meetingId,
-      mimeType: "audio/wav",
-      objectKey: synthesizedKey,
-      source: "local_recorder",
-      type: "synthesized_audio",
-    },
-  ]);
-
-  const [recording] = await db
-    .insert(localRecordings)
-    .values({
-      clientRecordingId: input.clientRecordingId,
-      computerAudioAssetId: computerAssetId,
-      isPrimary: true,
-      localRecordingAttemptId: attempt.id,
-      manifest: input.manifest,
-      meetingId: attempt.meetingId,
-      microphoneAudioAssetId: microphoneAssetId,
-      ownerUserId: input.workspace.userId,
-      recordingStartedAt: input.recordingStartedAt,
-      recordingStoppedAt: input.recordingStoppedAt,
-      synthesizedAudioAssetId: synthesizedAssetId,
-      synthesisStatus: "completed",
-    })
-    .onConflictDoUpdate({
-      target: [localRecordings.ownerUserId, localRecordings.clientRecordingId],
-      set: {
-        updatedAt: now,
-      },
-    })
-    .returning({ id: localRecordings.id });
-  const [job] = await db
-    .insert(transcriptJobs)
-    .values({
-      mediaAssetId: synthesizedAssetId,
-      meetingId: attempt.meetingId,
-      provider: "elevenlabs",
-      status: "queued",
-    })
-    .returning({ id: transcriptJobs.id });
-
-  await db
-    .update(localRecordingAttempts)
-    .set({ attemptState: "uploaded", updatedAt: now })
-    .where(eq(localRecordingAttempts.id, attempt.id));
-
-  await inngest.send({
-    name: "meeting/transcribe.audio",
-    data: {
-      mediaAssetId: synthesizedAssetId,
-      meetingId: attempt.meetingId,
-      objectKey: synthesizedKey,
-      transcriptJobId: job.id,
-    },
-  });
-
-  return {
-    localRecordingId: recording.id,
-    meetingId: attempt.meetingId,
-    queued: true,
-  };
+  return attempt;
 }
 
 export class LocalRecorderUploadError extends Error {
@@ -553,6 +703,41 @@ async function findExistingLocalRecording(input: {
     .limit(1);
 
   return rows[0] ?? null;
+}
+
+function createLocalRecorderAssetIds(): LocalRecorderUploadAssetIds {
+  return {
+    computerAudioAssetId: crypto.randomUUID(),
+    microphoneAudioAssetId: crypto.randomUUID(),
+    synthesizedAudioAssetId: crypto.randomUUID(),
+  };
+}
+
+function buildLocalRecorderObjectKeys(input: {
+  assetIds: LocalRecorderUploadAssetIds;
+  meetingId: string;
+  teamId: string;
+}) {
+  return {
+    computerAudioKey: buildMeetingObjectKey({
+      assetId: input.assetIds.computerAudioAssetId,
+      extension: "wav",
+      meetingId: input.meetingId,
+      teamId: input.teamId,
+    }),
+    microphoneAudioKey: buildMeetingObjectKey({
+      assetId: input.assetIds.microphoneAudioAssetId,
+      extension: "wav",
+      meetingId: input.meetingId,
+      teamId: input.teamId,
+    }),
+    synthesizedAudioKey: buildMeetingObjectKey({
+      assetId: input.assetIds.synthesizedAudioAssetId,
+      extension: "wav",
+      meetingId: input.meetingId,
+      teamId: input.teamId,
+    }),
+  };
 }
 
 function createFallbackIntentId() {

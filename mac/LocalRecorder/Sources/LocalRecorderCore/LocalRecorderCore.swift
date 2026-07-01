@@ -127,50 +127,81 @@ public struct LocalRecorderAPIClient: Sendable {
         try validateHTTPResponse(response)
     }
 
-    public func uploadRecordingRequest(
-        payload: LocalRecordingUploadPayload,
-        boundary: String? = nil
-    ) throws -> URLRequest {
-        let boundary = boundary ?? MultipartForm.boundary()
+    public func prepareUploadRequest(payload: LocalRecordingUploadPayload) throws -> URLRequest {
         var request = URLRequest(
-            url: serverURL.appending(path: "/api/local-recorder/recordings")
+            url: serverURL.appending(path: "/api/local-recorder/recordings/prepare")
         )
         request.httpMethod = "POST"
         applyRecorderHeaders(to: &request)
-        request.setValue(
-            "multipart/form-data; boundary=\(boundary)",
-            forHTTPHeaderField: "Content-Type"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder.localRecorder.encode(
+            UploadMetadataRequest(payload: payload)
         )
-        request.httpBody = try MultipartForm(boundary: boundary)
-            .addingField(name: "fallbackIntentId", value: payload.fallbackIntentId)
-            .addingField(name: "clientRecordingId", value: payload.clientRecordingId)
-            .addingField(name: "recordingStartedAt", value: payload.recordingStartedAt.localRecorderISOString)
-            .addingField(name: "recordingStoppedAt", value: payload.recordingStoppedAt.localRecorderISOString)
-            .addingField(
-                name: "manifest",
-                value: String(
-                    decoding: JSONEncoder.localRecorder.encode(payload.manifest),
-                    as: UTF8.self
-                )
-            )
-            .addingFile(
-                name: "computerAudio",
-                fileURL: payload.computerAudioURL,
-                contentType: "audio/wav"
-            )
-            .addingFile(
-                name: "microphoneAudio",
-                fileURL: payload.microphoneAudioURL,
-                contentType: "audio/wav"
-            )
-            .data()
         return request
     }
 
-    public func uploadRecording(
+    public func prepareRecordingUpload(
+        payload: LocalRecordingUploadPayload
+    ) async throws -> PreparedLocalRecordingUploadResponse {
+        let request = try prepareUploadRequest(payload: payload)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validateHTTPResponse(response)
+
+        return try JSONDecoder.localRecorder.decode(
+            PreparedLocalRecordingUploadResponse.self,
+            from: data
+        )
+    }
+
+    public func directUploadRequest(
+        uploadURL: URL,
+        contentType: String
+    ) -> URLRequest {
+        var request = URLRequest(url: uploadURL)
+        request.httpMethod = "PUT"
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        return request
+    }
+
+    public func uploadPreparedRecordingAssets(
+        payload: LocalRecordingUploadPayload,
+        preparedUpload: PreparedLocalRecordingUploadResponse
+    ) async throws {
+        try await uploadPreparedAsset(
+            fileURL: payload.computerAudioURL,
+            asset: preparedUpload.assets.computerAudio
+        )
+        try await uploadPreparedAsset(
+            fileURL: payload.microphoneAudioURL,
+            asset: preparedUpload.assets.microphoneAudio
+        )
+        try await uploadPreparedAsset(
+            fileURL: payload.synthesizedAudioURL,
+            asset: preparedUpload.assets.synthesizedAudio
+        )
+    }
+
+    public func completeUploadRequest(payload: LocalRecordingUploadPayload) throws -> URLRequest {
+        guard let uploadAssets = payload.uploadAssets else {
+            throw LocalRecorderAPIError.missingPreparedUpload
+        }
+
+        var request = URLRequest(
+            url: serverURL.appending(path: "/api/local-recorder/recordings/complete")
+        )
+        request.httpMethod = "POST"
+        applyRecorderHeaders(to: &request)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder.localRecorder.encode(
+            CompleteUploadRequest(payload: payload, assets: uploadAssets)
+        )
+        return request
+    }
+
+    public func completeRecordingUpload(
         payload: LocalRecordingUploadPayload
     ) async throws -> LocalRecordingUploadResponse {
-        let request = try uploadRecordingRequest(payload: payload)
+        let request = try completeUploadRequest(payload: payload)
         let (data, response) = try await URLSession.shared.data(for: request)
         try validateHTTPResponse(response)
 
@@ -194,11 +225,27 @@ public struct LocalRecorderAPIClient: Sendable {
             throw LocalRecorderAPIError.httpStatus(httpResponse.statusCode)
         }
     }
+
+    private func uploadPreparedAsset(
+        fileURL: URL,
+        asset: PreparedLocalRecordingUploadAsset
+    ) async throws {
+        let request = directUploadRequest(
+            uploadURL: asset.uploadUrl,
+            contentType: asset.contentType
+        )
+        let (_, response) = try await URLSession.shared.upload(
+            for: request,
+            fromFile: fileURL
+        )
+        try validateHTTPResponse(response)
+    }
 }
 
 public enum LocalRecorderAPIError: Error, Equatable {
     case invalidResponse
     case httpStatus(Int)
+    case missingPreparedUpload
 }
 
 public enum LocalRecorderLoginCallbackError: Error, Equatable {
@@ -356,6 +403,8 @@ public struct LocalRecordingUploadPayload: Codable, Equatable, Sendable {
     public var recordingStoppedAt: Date
     public var computerAudioURL: URL
     public var microphoneAudioURL: URL
+    public var synthesizedAudioURL: URL
+    public var uploadAssets: LocalRecordingUploadAssetIds?
     public var manifest: RecordingManifest
 
     public init(
@@ -365,6 +414,8 @@ public struct LocalRecordingUploadPayload: Codable, Equatable, Sendable {
         recordingStoppedAt: Date,
         computerAudioURL: URL,
         microphoneAudioURL: URL,
+        synthesizedAudioURL: URL,
+        uploadAssets: LocalRecordingUploadAssetIds? = nil,
         manifest: RecordingManifest
     ) {
         self.fallbackIntentId = fallbackIntentId
@@ -373,6 +424,8 @@ public struct LocalRecordingUploadPayload: Codable, Equatable, Sendable {
         self.recordingStoppedAt = recordingStoppedAt
         self.computerAudioURL = computerAudioURL
         self.microphoneAudioURL = microphoneAudioURL
+        self.synthesizedAudioURL = synthesizedAudioURL
+        self.uploadAssets = uploadAssets
         self.manifest = manifest
     }
 }
@@ -443,6 +496,80 @@ public struct LocalRecordingUploadResponse: Codable, Equatable, Sendable {
     public var queued: Bool
 }
 
+public struct LocalRecordingUploadAssetIds: Codable, Equatable, Sendable {
+    public var computerAudioAssetId: String
+    public var microphoneAudioAssetId: String
+    public var synthesizedAudioAssetId: String
+
+    public init(
+        computerAudioAssetId: String,
+        microphoneAudioAssetId: String,
+        synthesizedAudioAssetId: String
+    ) {
+        self.computerAudioAssetId = computerAudioAssetId
+        self.microphoneAudioAssetId = microphoneAudioAssetId
+        self.synthesizedAudioAssetId = synthesizedAudioAssetId
+    }
+}
+
+public struct PreparedLocalRecordingUploadResponse: Codable, Equatable, Sendable {
+    public var assets: PreparedLocalRecordingUploadAssets
+}
+
+public struct PreparedLocalRecordingUploadAssets: Codable, Equatable, Sendable {
+    public var computerAudio: PreparedLocalRecordingUploadAsset
+    public var microphoneAudio: PreparedLocalRecordingUploadAsset
+    public var synthesizedAudio: PreparedLocalRecordingUploadAsset
+
+    public var assetIds: LocalRecordingUploadAssetIds {
+        LocalRecordingUploadAssetIds(
+            computerAudioAssetId: computerAudio.assetId,
+            microphoneAudioAssetId: microphoneAudio.assetId,
+            synthesizedAudioAssetId: synthesizedAudio.assetId
+        )
+    }
+}
+
+public struct PreparedLocalRecordingUploadAsset: Codable, Equatable, Sendable {
+    public var assetId: String
+    public var contentType: String
+    public var uploadUrl: URL
+}
+
+private struct UploadMetadataRequest: Codable {
+    var fallbackIntentId: String
+    var clientRecordingId: String
+    var recordingStartedAt: Date
+    var recordingStoppedAt: Date
+    var manifest: RecordingManifest
+
+    init(payload: LocalRecordingUploadPayload) {
+        self.fallbackIntentId = payload.fallbackIntentId
+        self.clientRecordingId = payload.clientRecordingId
+        self.recordingStartedAt = payload.recordingStartedAt
+        self.recordingStoppedAt = payload.recordingStoppedAt
+        self.manifest = payload.manifest
+    }
+}
+
+private struct CompleteUploadRequest: Codable {
+    var fallbackIntentId: String
+    var clientRecordingId: String
+    var recordingStartedAt: Date
+    var recordingStoppedAt: Date
+    var manifest: RecordingManifest
+    var assets: LocalRecordingUploadAssetIds
+
+    init(payload: LocalRecordingUploadPayload, assets: LocalRecordingUploadAssetIds) {
+        self.fallbackIntentId = payload.fallbackIntentId
+        self.clientRecordingId = payload.clientRecordingId
+        self.recordingStartedAt = payload.recordingStartedAt
+        self.recordingStoppedAt = payload.recordingStoppedAt
+        self.manifest = payload.manifest
+        self.assets = assets
+    }
+}
+
 private struct FailIntentRequest: Codable {
     var errorMessage: String
 }
@@ -504,69 +631,5 @@ public extension JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return decoder
-    }
-}
-
-private struct MultipartForm {
-    private var body = Data()
-    private let boundary: String
-
-    init(boundary: String) {
-        self.boundary = boundary
-    }
-
-    static func boundary() -> String {
-        "meeting-note-\(UUID().uuidString)"
-    }
-
-    func addingField(name: String, value: String) -> MultipartForm {
-        var copy = self
-        copy.appendBoundary()
-        copy.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n")
-        copy.append(value)
-        copy.append("\r\n")
-        return copy
-    }
-
-    func addingFile(
-        name: String,
-        fileURL: URL,
-        contentType: String
-    ) throws -> MultipartForm {
-        var copy = self
-        let fileName = fileURL.lastPathComponent
-        copy.appendBoundary()
-        copy.append(
-            "Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(fileName)\"\r\n"
-        )
-        copy.append("Content-Type: \(contentType)\r\n\r\n")
-        copy.body.append(try Data(contentsOf: fileURL))
-        copy.append("\r\n")
-        return copy
-    }
-
-    func data() -> Data {
-        var copy = self
-        copy.append("--\(boundary)--\r\n")
-        return copy.body
-    }
-
-    private mutating func appendBoundary() {
-        append("--\(boundary)\r\n")
-    }
-
-    private mutating func append(_ string: String) {
-        body.append(Data(string.utf8))
-    }
-}
-
-private extension Date {
-    var localRecorderISOString: String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [
-            .withInternetDateTime,
-            .withFractionalSeconds,
-        ]
-        return formatter.string(from: self)
     }
 }
