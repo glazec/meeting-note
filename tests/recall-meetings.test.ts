@@ -297,6 +297,34 @@ describe("applyRecallMeetingEvent", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("does not queue transcription for non recording completion assets", async () => {
+    update.mockReturnValue({
+      set: vi.fn().mockReturnValue({ where }),
+    });
+    select.mockReturnValue({ from: selectFrom });
+    selectFrom.mockReturnValue({ where: selectWhere });
+    selectWhere.mockReturnValue({ limit: selectLimit });
+    selectLimit.mockResolvedValue([]);
+
+    await applyRecallMeetingEvent({
+      eventType: "video_mixed.done",
+      botId: "bot_123",
+      recordingId: "recording_123",
+      meetingUrl: null,
+      statusCode: "done",
+      code: "done",
+      subCode: null,
+      updatedAt: "2026-06-23T12:00:00Z",
+      metadata: {
+        meetingId: "11111111-1111-4111-8111-111111111111",
+      },
+    });
+
+    expect(retrieveRecallBot).not.toHaveBeenCalled();
+    expect(createRecallRecordingTranscription).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("does not downgrade a recorded meeting to missed from a late call ended event", async () => {
     const updateSet = vi.fn().mockReturnValue({ where });
     update.mockReturnValue({ set: updateSet });

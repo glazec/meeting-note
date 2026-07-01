@@ -4,23 +4,105 @@ Team meeting transcript product.
 
 ## Stack
 
-1. Next.js on Vercel
-2. Neon Auth for Google OAuth
-3. Neon Postgres for product data
-4. Cloudflare R2 for media
-5. Recall.ai for Google Meet and Zoom capture
+1. [Next.js](https://nextjs.org) on [Vercel](https://vercel.com)
+2. [Neon Auth](https://neon.com/docs/auth/overview) for Google OAuth
+3. [Neon Postgres](https://neon.tech) for product data
+4. [Cloudflare R2](https://developers.cloudflare.com/r2/) for media
+5. [Recall.ai](https://www.recall.ai/) for Google Meet and Zoom capture
 6. [ElevenLabs](https://elevenlabs.io) for transcription
-7. Inngest style workers for long running jobs
-8. OneSignal for browser push subscriptions and meeting reminders
-9. [Twenty CRM](https://twenty.com) for optional CRM vocabulary enrichment
+7. [OpenRouter](https://openrouter.ai) for live chat answers and transcript translation
+8. [Inngest](https://www.inngest.com) style workers for long running jobs
+9. [OneSignal](https://onesignal.com) for browser push subscriptions and meeting reminders
+10. [Twenty CRM](https://twenty.com) for optional CRM vocabulary enrichment
 
 ## Local Setup
 
 1. Copy `.env.example` to `.env.local`.
-2. Fill in Neon, Google Calendar, R2, Recall, ElevenLabs, Inngest, OneSignal, and optional Twenty CRM credentials. `NEON_AUTH_BASE_URL` is optional when `NEON_AUTH_JWKS_URL` ends with `/.well-known/jwks.json`; generate `NEON_AUTH_COOKIE_SECRET` with `openssl rand -base64 32`.
+2. If an agent is helping with setup, complete the Agent Setup Interview below before editing `.env.local` or changing providers.
+3. Fill in Neon, R2, Recall, ElevenLabs, OpenRouter, Inngest, OneSignal, and optional Twenty CRM credentials. Google sign in is configured in Neon Auth. Calendar permission is owned by Recall Calendar V2, not by Google credentials in this app. `NEON_AUTH_BASE_URL` is optional when `NEON_AUTH_JWKS_URL` ends with `/.well-known/jwks.json`; generate `NEON_AUTH_COOKIE_SECRET` with `openssl rand -base64 32`.
    Set `RECALL_API_BASE_URL` to the region for the Recall API key, for example `https://ap-northeast-1.recall.ai`.
-3. Run `npm install`.
-4. Run `npm run dev`.
+4. Run `npm install`.
+5. Run `npm run dev`.
+
+## Agent Setup Interview
+
+Use this flow when a coding agent helps a human create `.env.local`.
+
+1. Ask about one provider at a time.
+2. For each provider, explain what the app currently uses, what feature is needed, where to get the key, and which env names will be filled.
+3. Let the human choose the current provider, skip an optional provider, or explore another provider.
+4. If the human names another provider, compare tradeoffs before changing code. Cover product fit, setup work, pricing shape, webhook support, data retention, region support, and migration risk.
+5. If the human still wants the new provider, write a provider replacement note and continue the remaining provider questions.
+6. Finish all provider questions first. Only then update `.env.local`, change adapters if needed, update `.env.example`, run migrations if schema changed, and run verification.
+7. Never print secrets back to the user. Confirm only that a value was received.
+
+Provider replacement note format:
+
+```text
+Area:
+Current provider:
+Requested provider:
+Decision:
+Required env names:
+Files that need migration:
+Verification plan:
+```
+
+Ask these questions in order.
+
+1. [Neon](https://neon.tech) database and auth
+
+   The app uses Neon Postgres for product data and Neon Auth for Google sign in. Get the database URL from the Neon project connection string. Get the auth URL and issuer from Neon Auth configuration. Generate the cookie secret locally with `openssl rand -base64 32`.
+
+   Prompt: Please provide `DATABASE_URL`, `NEON_AUTH_JWKS_URL`, `NEON_AUTH_ISSUER`, and `NEON_AUTH_COOKIE_SECRET`, or tell me if you want to use another database or auth provider.
+
+2. [Cloudflare R2](https://developers.cloudflare.com/r2/) media storage
+
+   The app stores uploaded MP3 files, Recall recordings, screenshots, and generated meeting media in R2 through the S3 compatible API. Get the account id, bucket name, access key id, and secret access key from the Cloudflare R2 dashboard.
+
+   Prompt: Please provide `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_BUCKET`. `R2_PUBLIC_BASE_URL` is optional. If you want S3, GCS, or another object store, tell me the provider name and I will compare the migration cost.
+
+3. [Recall.ai](https://www.recall.ai/) meeting capture
+
+   The app uses Recall.ai to schedule bots for Google Meet and Zoom, connect Recall Calendar V2, receive bot status webhooks, receive Calendar V2 webhooks, retrieve recording media, import screenshots, and receive realtime meeting chat events. Create an API key in the Recall dashboard for the same region as `RECALL_API_BASE_URL`. Create a workspace verification secret for webhook signatures.
+
+   Prompt: Please provide `RECALL_API_KEY`, `RECALL_API_BASE_URL`, and `RECALL_WEBHOOK_SECRET`, or name another meeting capture provider.
+
+4. [ElevenLabs](https://elevenlabs.io) transcription
+
+   The app uses ElevenLabs Speech to Text at `POST https://api.elevenlabs.io/v1/speech-to-text`. The current request uses model `scribe_v2`, async webhooks, diarization, entity detection, word timestamps, source URL input, webhook metadata, and team vocabulary keyterms. Get the API key from [ElevenLabs API keys](https://elevenlabs.io/app/developers/api-keys). Create or inspect the ElevenLabs workspace webhook and store its signing secret.
+
+   Prompt: For transcription, we currently use ElevenLabs Speech to Text with `scribe_v2`, diarization, word timestamps, entity detection, async webhooks, and keyterms. Please provide `ELEVENLABS_API_KEY` and `ELEVENLABS_WEBHOOK_SECRET`, or tell me another transcription provider to compare. If you choose another provider, I will explain the tradeoffs and, if you confirm, migrate `lib/vendors/elevenlabs.ts`, `app/api/elevenlabs/webhook/route.ts`, `lib/elevenlabs-transcripts.ts`, `lib/transcription-records.ts`, and the `meeting/transcribe.audio` worker after all provider questions are complete.
+
+5. [OpenRouter](https://openrouter.ai) model calls
+
+   The app uses OpenRouter chat completions for live Recall chat answers and transcript translation. The default model is `qwen/qwen3.7-plus` in `.env.example`. Create a key in [OpenRouter keys](https://openrouter.ai/settings/keys), then keep the model slug explicit.
+
+   Prompt: Please provide `OPENROUTER_API_KEY` and confirm `OPENROUTER_MODEL=qwen/qwen3.7-plus`, or name another model gateway or direct model provider.
+
+6. [Inngest](https://www.inngest.com) workers
+
+   The app uses Inngest for `meeting/transcribe.audio`, `meeting/schedule.bot`, transcript enrichment, location reminders, and hourly Recall Calendar repair. Create an event key for sending events and get the environment signing key for secure function sync.
+
+   Prompt: Please provide `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY`, or tell me if you want another background job system.
+
+7. [OneSignal](https://onesignal.com) push notifications
+
+   The app uses OneSignal for browser push subscriptions and location based meeting reminders. This can be skipped for a local transcript only setup. Get the app id and app API key from OneSignal Settings, Keys and IDs.
+
+   Prompt: Do you want push reminders enabled now? If yes, please provide `NEXT_PUBLIC_ONESIGNAL_APP_ID`, `NEXT_PUBLIC_ONESIGNAL_ALLOWED_ORIGINS`, and `ONESIGNAL_REST_API_KEY`. If no, I will leave the default app id and note reminders as not configured for this environment.
+
+8. [Twenty CRM](https://twenty.com) vocabulary enrichment
+
+   Twenty CRM is optional. When configured, the app reads people and company names through Twenty GraphQL and sends them to ElevenLabs as transcription keyterms after manual team vocabulary.
+
+   Prompt: Do you want Twenty CRM vocabulary enrichment? If yes, please provide `TWENTY_API_BASE_URL` and `TWENTY_API_KEY`. If no, transcription still works with manual team vocabulary.
+
+9. Local tunnel
+
+   Local Recall, ElevenLabs, and Inngest webhook testing needs a public app URL. This repo uses a Cloudflare tunnel through `./scripts/dev-tunnel.sh`.
+
+   Prompt: For local webhook testing, please provide `CLOUDFLARED_TOKEN` or confirm you will use another stable tunnel URL. Then set `NEXT_PUBLIC_APP_URL` to that public origin.
 
 ## Database Migrations
 

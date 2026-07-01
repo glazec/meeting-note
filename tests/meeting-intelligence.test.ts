@@ -23,14 +23,16 @@ describe("meeting intelligence helpers", () => {
 
   it("keeps transcription keyterms inside provider limits", () => {
     const oversizedTerm = "a".repeat(51);
+    const tooManyWords = "one two three four five six";
     const keyterms = buildTranscriptionKeyterms(
-      [" IOSG ", oversizedTerm, "iosg"],
+      [" IOSG ", oversizedTerm, tooManyWords, "iosg"],
       Array.from({ length: 1005 }, (_, index) => `Project ${index}`),
     );
 
     expect(keyterms).toHaveLength(1000);
     expect(keyterms[0]).toBe("IOSG");
     expect(keyterms).not.toContain(oversizedTerm);
+    expect(keyterms).not.toContain(tooManyWords);
     expect(keyterms.filter((term) => term.toLowerCase() === "iosg")).toHaveLength(
       1,
     );
@@ -305,6 +307,36 @@ describe("meeting intelligence helpers", () => {
           {
             id: "meeting_1",
             title: "David <> YP",
+            startedAt: "2026-06-20T10:00:00.000Z",
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("groups related meetings when title punctuation differs", () => {
+    expect(
+      groupRelatedMeetings([
+        {
+          id: "meeting_1",
+          title: "Internal Meeting - Investment Strategy",
+          startedAt: "2026-06-20T10:00:00.000Z",
+          primaryEntity: null,
+        },
+        {
+          id: "meeting_2",
+          title: "Internal Meeting Investment Strategy",
+          startedAt: "2026-06-27T10:00:00.000Z",
+          primaryEntity: null,
+        },
+      ]),
+    ).toEqual([
+      {
+        id: "meeting_2",
+        relatedMeetings: [
+          {
+            id: "meeting_1",
+            title: "Internal Meeting - Investment Strategy",
             startedAt: "2026-06-20T10:00:00.000Z",
           },
         ],

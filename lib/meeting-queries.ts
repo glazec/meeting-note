@@ -454,13 +454,22 @@ function isMeetingInsideHistoryWindow(
 }
 
 function getSimilarMeetingTitleKey(title: string) {
-  const normalized = title.trim().toLowerCase().replace(/\s+/g, " ");
+  const normalized = normalizeMeetingTitleGroupingKey(title);
 
   if (!normalized || genericMeetingGroupTitles.has(normalized)) {
     return null;
   }
 
   return normalized;
+}
+
+function normalizeMeetingTitleGroupingKey(title: string) {
+  return title
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
 }
 
 function toRelatedMeeting(meeting: MeetingListItem): MeetingListRelatedItem {
@@ -825,16 +834,16 @@ function getMeetingParticipantCount(input: {
 }) {
   const attendeeCount = getAttendeeCount(input.attendeeEmails);
 
-  if (typeof attendeeCount === "number" && attendeeCount > 0) {
-    return attendeeCount;
-  }
-
   if (
     input.status === "ready" &&
     typeof input.recognizedSpeakerCount === "number" &&
     input.recognizedSpeakerCount > 0
   ) {
     return input.recognizedSpeakerCount;
+  }
+
+  if (typeof attendeeCount === "number" && attendeeCount > 0) {
+    return attendeeCount;
   }
 
   if (

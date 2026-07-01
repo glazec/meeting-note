@@ -592,6 +592,63 @@ describe("listMeetingsForWorkspace", () => {
     expectUsesCurrentTranscriptJob(projection.transcriptDurationMs);
   });
 
+  it("prefers current transcript speakers over calendar attendees for ready meetings", async () => {
+    select
+      .mockReturnValueOnce({
+        from: () => ({
+          leftJoin: () => ({
+            where: () => ({
+              orderBy: vi.fn().mockResolvedValue([
+                {
+                  id: "2702fadb-cdf7-4d99-89ca-416eaa5bf640",
+                  teamId: "team_123",
+                  title: "Internal Meeting - Investment Strategy",
+                  platform: "zoom",
+                  status: "ready",
+                  transcriptJobStatus: null,
+                  recallBotId: "bot_123",
+                  startedAt: new Date("2026-06-30T02:00:00.000Z"),
+                  endedAt: new Date("2026-06-30T02:31:00.000Z"),
+                  createdAt: new Date("2026-06-27T05:28:53.945Z"),
+                  calendarAttendeeEmails: [
+                    "jocy@iosg.vc",
+                    "jiawei@iosg.vc",
+                    "momir@iosg.vc",
+                    "yiping@iosg.vc",
+                    "frank@iosg.vc",
+                  ],
+                  recognizedSpeakerCount: 4,
+                  transcriptSegmentCount: 259,
+                },
+              ]),
+            }),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      });
+    const { listMeetingsForWorkspace } = await import("@/lib/meeting-queries");
+
+    await expect(
+      listMeetingsForWorkspace({
+        teamId: "team_123",
+        userId: "user_123",
+        domain: "iosg.vc",
+        canCreateMeetings: true,
+      }),
+    ).resolves.toMatchObject([
+      {
+        id: "2702fadb-cdf7-4d99-89ca-416eaa5bf640",
+        participantCount: 4,
+      },
+    ]);
+  });
+
   it("searches only the current transcript job text", async () => {
     const meetingWhere = vi.fn((condition: SQL) => {
       void condition;
