@@ -11,6 +11,9 @@ import {
   verifyRecallWebhook,
   webhookVerificationResponse,
 } from "@/lib/webhook-signatures";
+import { logWebhookProcessingError } from "@/lib/webhook-error-logging";
+
+const RECALL_REALTIME_PROCESSING_CLAIM_TIMEOUT_MS = 30 * 1000;
 
 export async function handleRecallRealtimeWebhook(request: Request) {
   const rawBody = await request.text();
@@ -36,17 +39,29 @@ export async function handleRecallRealtimeWebhook(request: Request) {
     return Response.json({ error: "Invalid webhook payload" }, { status: 400 });
   }
 
+  const idempotencyKey =
+    request.headers.get("webhook-id") ?? request.headers.get("svix-id") ?? "";
+
   try {
-    const idempotencyKey =
-      request.headers.get("webhook-id") ?? request.headers.get("svix-id") ?? "";
     const recorded = await recordVendorWebhookEvent({
       provider: "recall",
       eventType,
       idempotencyKey,
       payload: body,
+      processingClaimTimeoutMs: RECALL_REALTIME_PROCESSING_CLAIM_TIMEOUT_MS,
     });
 
     if (!recorded.shouldProcess) {
+      if (recorded.processed === false) {
+        return Response.json(
+          {
+            received: false,
+            result: { action: "retry", reason: "processing" },
+          },
+          { status: 503 },
+        );
+      }
+
       return Response.json({
         received: true,
         result: { action: "skipped", reason: "duplicate" },
@@ -71,6 +86,12 @@ export async function handleRecallRealtimeWebhook(request: Request) {
         { status: 400 },
       );
     }
+
+    logWebhookProcessingError("Recall realtime webhook processing failed", {
+      eventType,
+      idempotencyKey,
+      error,
+    });
 
     return Response.json(
       { error: "Webhook processing failed" },

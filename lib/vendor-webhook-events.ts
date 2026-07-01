@@ -10,6 +10,7 @@ type RecordVendorWebhookEventInput = {
   eventType: string;
   idempotencyKey: string;
   payload: unknown;
+  processingClaimTimeoutMs?: number;
 };
 
 const PROCESSING_CLAIM_TIMEOUT_MS = 10 * 60 * 1000;
@@ -30,7 +31,8 @@ export async function recordVendorWebhookEvent(
 
   const now = new Date();
   const staleProcessingClaim = new Date(
-    now.getTime() - PROCESSING_CLAIM_TIMEOUT_MS,
+    now.getTime() -
+      (input.processingClaimTimeoutMs ?? PROCESSING_CLAIM_TIMEOUT_MS),
   );
   const rows = await db
     .insert(vendorWebhookEvents)

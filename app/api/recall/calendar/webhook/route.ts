@@ -11,6 +11,7 @@ import {
   verifyRecallWebhook,
   webhookVerificationResponse,
 } from "@/lib/webhook-signatures";
+import { logWebhookProcessingError } from "@/lib/webhook-error-logging";
 
 export const runtime = "nodejs";
 
@@ -54,6 +55,16 @@ export async function POST(request: Request) {
       action: "duplicate";
     };
 
+    if (!recorded.shouldProcess && recorded.processed === false) {
+      return Response.json(
+        {
+          received: false,
+          result: { action: "retry", reason: "processing" },
+        },
+        { status: 503 },
+      );
+    }
+
     if (recorded.shouldProcess) {
       result = await processRecallCalendarWebhook(event);
       await markVendorWebhookEventProcessed({
@@ -72,6 +83,12 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+
+    logWebhookProcessingError("Recall calendar webhook processing failed", {
+      eventType: event.eventType,
+      idempotencyKey: getRecallCalendarWebhookIdempotencyKey(request.headers),
+      error,
+    });
 
     return Response.json(
       { error: "Webhook processing failed" },
