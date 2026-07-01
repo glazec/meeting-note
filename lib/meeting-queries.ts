@@ -834,16 +834,16 @@ function getMeetingParticipantCount(input: {
 }) {
   const attendeeCount = getAttendeeCount(input.attendeeEmails);
 
-  if (typeof attendeeCount === "number" && attendeeCount > 0) {
-    return attendeeCount;
-  }
-
   if (
     input.status === "ready" &&
     typeof input.recognizedSpeakerCount === "number" &&
     input.recognizedSpeakerCount > 0
   ) {
     return input.recognizedSpeakerCount;
+  }
+
+  if (typeof attendeeCount === "number" && attendeeCount > 0) {
+    return attendeeCount;
   }
 
   if (

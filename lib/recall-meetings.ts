@@ -78,7 +78,11 @@ export async function applyRecallMeetingEvent(event: RecallWebhookEvent) {
     })
     .where(eq(meetings.id, update.meetingId));
 
-  if (status === "processing" && update.recallBotId) {
+  if (
+    status === "processing" &&
+    update.recallBotId &&
+    shouldQueueRecallRecordingTranscription(event)
+  ) {
     await queueRecallRecordingTranscription({
       ...update,
       recallBotId: update.recallBotId,
@@ -86,6 +90,13 @@ export async function applyRecallMeetingEvent(event: RecallWebhookEvent) {
   }
 
   return update;
+}
+
+function shouldQueueRecallRecordingTranscription(event: RecallWebhookEvent) {
+  const eventType = event.eventType.toLowerCase();
+  const subCode = event.subCode?.toLowerCase() ?? "";
+
+  return eventType === "recording.done" || subCode === "recording_done";
 }
 
 async function queueRecallRecordingTranscription(

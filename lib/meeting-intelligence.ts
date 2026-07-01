@@ -7,6 +7,7 @@ type VocabularyTerm = {
 
 const ELEVENLABS_BATCH_KEYTERM_LIMIT = 1000;
 const ELEVENLABS_BATCH_KEYTERM_MAX_LENGTH = 50;
+const ELEVENLABS_BATCH_KEYTERM_MAX_SPACES = 4;
 
 type EntitySegment = {
   id: string;
@@ -114,6 +115,7 @@ export function buildTranscriptionKeyterms(...termGroups: string[][]) {
     if (
       !term ||
       term.length > ELEVENLABS_BATCH_KEYTERM_MAX_LENGTH ||
+      countSpaces(term) > ELEVENLABS_BATCH_KEYTERM_MAX_SPACES ||
       seen.has(key)
     ) {
       continue;
@@ -128,6 +130,10 @@ export function buildTranscriptionKeyterms(...termGroups: string[][]) {
   }
 
   return keyterms;
+}
+
+function countSpaces(value: string) {
+  return (value.match(/ /g) ?? []).length;
 }
 
 export function buildSmartMeetingTitle(input: {

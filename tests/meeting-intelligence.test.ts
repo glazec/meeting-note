@@ -23,14 +23,16 @@ describe("meeting intelligence helpers", () => {
 
   it("keeps transcription keyterms inside provider limits", () => {
     const oversizedTerm = "a".repeat(51);
+    const tooManyWords = "one two three four five six";
     const keyterms = buildTranscriptionKeyterms(
-      [" IOSG ", oversizedTerm, "iosg"],
+      [" IOSG ", oversizedTerm, tooManyWords, "iosg"],
       Array.from({ length: 1005 }, (_, index) => `Project ${index}`),
     );
 
     expect(keyterms).toHaveLength(1000);
     expect(keyterms[0]).toBe("IOSG");
     expect(keyterms).not.toContain(oversizedTerm);
+    expect(keyterms).not.toContain(tooManyWords);
     expect(keyterms.filter((term) => term.toLowerCase() === "iosg")).toHaveLength(
       1,
     );
