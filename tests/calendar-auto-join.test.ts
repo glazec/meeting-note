@@ -86,6 +86,7 @@ describe("calendar auto join", () => {
     update.mockReset();
     updateScheduledRecallBot.mockReset();
     vi.unstubAllEnvs();
+    vi.useRealTimers();
     vi.resetModules();
   });
 
@@ -1367,6 +1368,350 @@ describe("calendar auto join", () => {
           "team:22222222-2222-4222-8222-222222222222:start:2099-07-02T01:15:00.000Z:url:https://meet.google.com/abc-defg-hij",
       }),
     );
+  });
+
+  it("retries a failed future Recall Calendar V2 meeting on repair sync", async () => {
+    const calendarEventReturning = vi.fn().mockResolvedValue([
+      {
+        id: "33333333-3333-4333-8333-333333333333",
+        teamMeetingKey:
+          "team:22222222-2222-4222-8222-222222222222:start:2099-07-02T01:15:00.000Z:url:https://meet.google.com/abc-defg-hij",
+      },
+    ]);
+    const calendarEventOnConflictDoUpdate = vi
+      .fn()
+      .mockReturnValue({ returning: calendarEventReturning });
+    const calendarEventValues = vi
+      .fn()
+      .mockReturnValue({ onConflictDoUpdate: calendarEventOnConflictDoUpdate });
+
+    const existingLimit = vi.fn().mockResolvedValue([
+      {
+        id: "44444444-4444-4444-8444-444444444444",
+        calendarEventId: "33333333-3333-4333-8333-333333333333",
+        teamMeetingKey:
+          "team:22222222-2222-4222-8222-222222222222:start:2099-07-02T01:15:00.000Z:url:https://meet.google.com/abc-defg-hij",
+        recallBotId: "old_deleted_bot",
+        meetingUrl: "https://meet.google.com/abc-defg-hij",
+        startedAt: new Date("2099-07-02T01:15:00.000Z"),
+        status: "failed",
+      },
+    ]);
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
+    const updateSet = vi.fn().mockReturnValue({ where: updateWhere });
+
+    insert.mockReturnValueOnce({ values: calendarEventValues });
+    select.mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: existingLimit,
+        }),
+      }),
+    });
+    update.mockReturnValue({ set: updateSet });
+    deleteScheduledRecallBot.mockResolvedValue({});
+    deleteRecallCalendarEventBot.mockResolvedValue({});
+    scheduleRecallCalendarEventBot.mockResolvedValue({
+      bots: [
+        {
+          bot_id: "new_bot",
+          deduplication_key:
+            "team:22222222-2222-4222-8222-222222222222:start:2099-07-02T01:15:00.000Z:url:https://meet.google.com/abc-defg-hij",
+        },
+      ],
+    });
+
+    const { autoJoinCalendarEvent } = await import("@/lib/calendar-auto-join");
+
+    await expect(
+      autoJoinCalendarEvent({
+        connection: {
+          id: "11111111-1111-4111-8111-111111111111",
+          teamId: "22222222-2222-4222-8222-222222222222",
+          userId: "55555555-5555-4555-8555-555555555555",
+          autoJoinEnabled: true,
+        },
+        event: {
+          externalEventId: "google_event_123",
+          recallCalendarEventId: "55555555-5555-4555-8555-555555555555",
+          recallCalendarEventBots: [
+            {
+              botId: "other_workspace_bot",
+              deduplicationKey: "other-workspace-key",
+            },
+          ],
+          title: "IOSG <> Eggs",
+          startsAt: "2099-07-02T01:15:00.000Z",
+          endsAt: "2099-07-02T02:00:00.000Z",
+          meetingUrl: "https://meet.google.com/abc-defg-hij",
+        },
+      }),
+    ).resolves.toEqual({
+      action: "scheduled",
+      calendarEventId: "33333333-3333-4333-8333-333333333333",
+      meetingId: "44444444-4444-4444-8444-444444444444",
+      meetingUrl: "https://meet.google.com/abc-defg-hij",
+      platform: "google_meet",
+      recallBotId: "new_bot",
+    });
+
+    expect(deleteScheduledRecallBot).toHaveBeenCalledWith({
+      botId: "old_deleted_bot",
+    });
+    expect(deleteRecallCalendarEventBot).toHaveBeenCalledWith({
+      calendarEventId: "55555555-5555-4555-8555-555555555555",
+    });
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recallBotId: "new_bot",
+        status: "scheduled",
+      }),
+    );
+  });
+
+  it("marks an external-declined calendar meeting as cancelled", async () => {
+    const calendarEventReturning = vi.fn().mockResolvedValue([
+      {
+        id: "33333333-3333-4333-8333-333333333333",
+        teamMeetingKey: null,
+      },
+    ]);
+    const calendarEventOnConflictDoUpdate = vi
+      .fn()
+      .mockReturnValue({ returning: calendarEventReturning });
+    const calendarEventValues = vi
+      .fn()
+      .mockReturnValue({ onConflictDoUpdate: calendarEventOnConflictDoUpdate });
+
+    const existingLimit = vi.fn().mockResolvedValue([
+      {
+        id: "44444444-4444-4444-8444-444444444444",
+        calendarEventId: "33333333-3333-4333-8333-333333333333",
+        teamMeetingKey: null,
+        recallBotId: "stale_bot",
+        meetingUrl: "https://zoom.us/j/8166024230",
+        startedAt: new Date("2026-07-01T20:00:00.000Z"),
+        status: "failed",
+      },
+    ]);
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
+    const updateSet = vi.fn().mockReturnValue({ where: updateWhere });
+
+    insert.mockReturnValueOnce({ values: calendarEventValues });
+    select.mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: existingLimit,
+        }),
+      }),
+    });
+    update.mockReturnValue({ set: updateSet });
+    deleteRecallCalendarEventBot.mockResolvedValue({});
+
+    const { autoJoinCalendarEvent } = await import("@/lib/calendar-auto-join");
+
+    await expect(
+      autoJoinCalendarEvent({
+        connection: {
+          id: "11111111-1111-4111-8111-111111111111",
+          teamId: "22222222-2222-4222-8222-222222222222",
+          userId: "55555555-5555-4555-8555-555555555555",
+          autoJoinEnabled: true,
+          workspaceDomain: "iosg.vc",
+        },
+        event: {
+          externalEventId: "google_event_123",
+          recallCalendarEventId: "55555555-5555-4555-8555-555555555555",
+          title: "Salt <> IOSG",
+          startsAt: "2026-07-01T20:00:00.000Z",
+          endsAt: "2026-07-01T20:30:00.000Z",
+          meetingUrl: "https://zoom.us/j/8166024230",
+          attendees: [
+            {
+              email: "owais@thesaltfund.com",
+              responseStatus: "declined",
+            },
+            {
+              email: "yiping@iosg.vc",
+              responseStatus: "accepted",
+            },
+          ],
+        },
+      }),
+    ).resolves.toEqual({
+      action: "skipped",
+      calendarEventId: "33333333-3333-4333-8333-333333333333",
+      meetingId: "44444444-4444-4444-8444-444444444444",
+      reason: "missing_meeting_link",
+    });
+
+    expect(deleteRecallCalendarEventBot).toHaveBeenCalledWith({
+      calendarEventId: "55555555-5555-4555-8555-555555555555",
+    });
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        meetingUrl: null,
+        recallBotId: null,
+        status: "cancelled",
+        teamMeetingKey: null,
+        title: "Salt <> IOSG",
+      }),
+    );
+    expect(scheduleRecallCalendarEventBot).not.toHaveBeenCalled();
+    expect(scheduleRecallBot).not.toHaveBeenCalled();
+  });
+
+  it("marks a past failed calendar meeting as missed during repair", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-02T01:00:00.000Z"));
+
+    const calendarEventReturning = vi.fn().mockResolvedValue([
+      {
+        id: "33333333-3333-4333-8333-333333333333",
+        teamMeetingKey:
+          "team:22222222-2222-4222-8222-222222222222:start:2026-07-01T20:30:00.000Z:url:https://meet.google.com/abc-defg-hij",
+      },
+    ]);
+    const calendarEventOnConflictDoUpdate = vi
+      .fn()
+      .mockReturnValue({ returning: calendarEventReturning });
+    const calendarEventValues = vi
+      .fn()
+      .mockReturnValue({ onConflictDoUpdate: calendarEventOnConflictDoUpdate });
+
+    const existingLimit = vi.fn().mockResolvedValue([
+      {
+        id: "44444444-4444-4444-8444-444444444444",
+        calendarEventId: "33333333-3333-4333-8333-333333333333",
+        teamMeetingKey:
+          "team:22222222-2222-4222-8222-222222222222:start:2026-07-01T20:30:00.000Z:url:https://meet.google.com/abc-defg-hij",
+        recallBotId: "stale_bot",
+        meetingUrl: "https://meet.google.com/abc-defg-hij",
+        startedAt: new Date("2026-07-01T20:30:00.000Z"),
+        status: "failed",
+      },
+    ]);
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
+    const updateSet = vi.fn().mockReturnValue({ where: updateWhere });
+
+    insert.mockReturnValueOnce({ values: calendarEventValues });
+    select.mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: existingLimit,
+        }),
+      }),
+    });
+    update.mockReturnValue({ set: updateSet });
+
+    const { autoJoinCalendarEvent } = await import("@/lib/calendar-auto-join");
+
+    await expect(
+      autoJoinCalendarEvent({
+        repairMode: true,
+        connection: {
+          id: "11111111-1111-4111-8111-111111111111",
+          teamId: "22222222-2222-4222-8222-222222222222",
+          userId: "55555555-5555-4555-8555-555555555555",
+          autoJoinEnabled: true,
+          workspaceDomain: "iosg.vc",
+        },
+        event: {
+          externalEventId: "google_event_123",
+          recallCalendarEventId: "55555555-5555-4555-8555-555555555555",
+          title: "Yiping lu and BinBin He",
+          startsAt: "2026-07-01T20:30:00.000Z",
+          endsAt: "2026-07-01T21:00:00.000Z",
+          meetingUrl: "https://meet.google.com/abc-defg-hij",
+          attendees: [
+            {
+              email: "hebinsquared@gmail.com",
+              responseStatus: "accepted",
+            },
+            {
+              email: "yiping@iosg.vc",
+              responseStatus: "accepted",
+            },
+          ],
+        },
+      }),
+    ).resolves.toEqual({
+      action: "skipped",
+      calendarEventId: "33333333-3333-4333-8333-333333333333",
+      meetingId: "44444444-4444-4444-8444-444444444444",
+      meetingUrl: "https://meet.google.com/abc-defg-hij",
+      reason: "already_scheduled",
+    });
+
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recallBotId: "stale_bot",
+        status: "missed",
+        title: "Yiping lu and BinBin He",
+      }),
+    );
+    expect(scheduleRecallCalendarEventBot).not.toHaveBeenCalled();
+    expect(scheduleRecallBot).not.toHaveBeenCalled();
+  });
+
+  it("does not create a new meeting for a past repair event", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-02T01:00:00.000Z"));
+
+    const calendarEventReturning = vi.fn().mockResolvedValue([
+      {
+        id: "33333333-3333-4333-8333-333333333333",
+        teamMeetingKey:
+          "team:22222222-2222-4222-8222-222222222222:start:2026-07-01T20:30:00.000Z:url:https://meet.google.com/abc-defg-hij",
+      },
+    ]);
+    const calendarEventOnConflictDoUpdate = vi
+      .fn()
+      .mockReturnValue({ returning: calendarEventReturning });
+    const calendarEventValues = vi
+      .fn()
+      .mockReturnValue({ onConflictDoUpdate: calendarEventOnConflictDoUpdate });
+    const existingLimit = vi.fn().mockResolvedValue([]);
+
+    insert.mockReturnValueOnce({ values: calendarEventValues });
+    select.mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: existingLimit,
+        }),
+      }),
+    });
+
+    const { autoJoinCalendarEvent } = await import("@/lib/calendar-auto-join");
+
+    await expect(
+      autoJoinCalendarEvent({
+        repairMode: true,
+        connection: {
+          id: "11111111-1111-4111-8111-111111111111",
+          teamId: "22222222-2222-4222-8222-222222222222",
+          userId: "55555555-5555-4555-8555-555555555555",
+          autoJoinEnabled: true,
+          workspaceDomain: "iosg.vc",
+        },
+        event: {
+          externalEventId: "google_event_123",
+          recallCalendarEventId: "55555555-5555-4555-8555-555555555555",
+          title: "Past partner call",
+          startsAt: "2026-07-01T20:30:00.000Z",
+          endsAt: "2026-07-01T21:00:00.000Z",
+          meetingUrl: "https://meet.google.com/abc-defg-hij",
+        },
+      }),
+    ).resolves.toEqual({
+      action: "skipped",
+      calendarEventId: "33333333-3333-4333-8333-333333333333",
+      meetingUrl: "https://meet.google.com/abc-defg-hij",
+      reason: "already_scheduled",
+    });
+
+    expect(scheduleRecallCalendarEventBot).not.toHaveBeenCalled();
+    expect(scheduleRecallBot).not.toHaveBeenCalled();
   });
 
   it("rejects a Recall Calendar V2 replacement response without the new bot id", async () => {

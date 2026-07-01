@@ -277,6 +277,7 @@ export async function syncRecallCalendarEventsForWorkspace(input: {
     await autoJoinCalendarEvent({
       connection: activeConnection,
       event: syncedEvent,
+      repairMode: true,
     });
     count += 1;
   }
@@ -306,17 +307,7 @@ function shouldSyncRepairCalendarEvent(event: SyncedCalendarEvent, now: Date) {
     return false;
   }
 
-  if (startTime >= now.getTime()) {
-    return true;
-  }
-
-  if (!event.endsAt) {
-    return false;
-  }
-
-  const endTime = new Date(event.endsAt).getTime();
-
-  return Number.isFinite(endTime) && endTime >= now.getTime();
+  return startTime >= getRecallCalendarRepairStart(now).getTime();
 }
 
 async function findRecallManagedCalendarForWorkspace(
@@ -472,6 +463,7 @@ function normalizeRecallCalendarEvent(event: unknown): SyncedCalendarEvent | nul
     title: getString(raw?.summary) ?? "Untitled calendar event",
     startsAt,
     endsAt: getString(candidate.end_time),
+    attendees: getAttendees(raw?.attendees),
     attendeeEmails: getAttendeeEmails(raw?.attendees),
     meetingUrl: isDeleted ? null : getString(candidate.meeting_url),
     location: getString(raw?.location),
@@ -583,6 +575,35 @@ function getAttendeeEmails(value: unknown) {
   return value
     .map((attendee) => getString(getRecord(attendee)?.email))
     .filter((email): email is string => Boolean(email));
+}
+
+function getAttendees(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((attendee) => {
+      const record = getRecord(attendee);
+      const email = getString(record?.email);
+
+      if (!email) {
+        return null;
+      }
+
+      return {
+        email,
+        responseStatus: getString(record?.responseStatus),
+      };
+    })
+    .filter(
+      (
+        attendee,
+      ): attendee is {
+        email: string;
+        responseStatus: string | null;
+      } => Boolean(attendee),
+    );
 }
 
 function getRecord(value: unknown) {

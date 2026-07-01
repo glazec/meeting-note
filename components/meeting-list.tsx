@@ -38,6 +38,7 @@ type MeetingListBaseItem = {
   endedAt?: string | null;
   durationMs?: number | null;
   participantCount?: number;
+  participantNames?: string[];
   status: MeetingRecordStatus;
   transcriptJobStatus?: TranscriptJobStatus | null;
   hasRecallBot?: boolean;
@@ -273,7 +274,10 @@ function MeetingTableRow({
         {platformLabels[meeting.platform]}
       </TableCell>
       <TableCell className="hidden text-muted-foreground md:table-cell">
-        {formatParticipantCount(meeting.participantCount)}
+        <ParticipantCount
+          count={meeting.participantCount}
+          names={meeting.participantNames}
+        />
       </TableCell>
       <TableCell className="hidden text-muted-foreground md:table-cell">
         {formatMeetingDuration({
@@ -544,6 +548,51 @@ function formatParticipantCount(count: number | undefined) {
   }
 
   return count === 1 ? "1 person" : `${count} people`;
+}
+
+function ParticipantCount({
+  count,
+  names,
+}: {
+  count: number | undefined;
+  names?: string[];
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const label = formatParticipantCount(count);
+  const participantNames =
+    names?.map((name) => name.trim()).filter(Boolean).slice(0, 50) ?? [];
+
+  if (participantNames.length === 0) {
+    return <span>{label}</span>;
+  }
+
+  const namesText = participantNames.join(", ");
+
+  return (
+    <span
+      aria-label={`Participants: ${namesText}`}
+      className="relative inline-flex cursor-default"
+      onBlur={() => setIsOpen(false)}
+      onFocus={() => setIsOpen(true)}
+      onMouseEnter={() => setIsOpen(true)}
+      onMouseLeave={() => setIsOpen(false)}
+      tabIndex={0}
+    >
+      <span>{label}</span>
+      <span
+        className={cn(
+          "pointer-events-none absolute left-0 top-full z-50 mt-2 min-w-48 max-w-72 rounded-lg border bg-popover px-3 py-2 text-left text-xs leading-5 whitespace-normal text-popover-foreground shadow-lg",
+          isOpen ? "block" : "hidden",
+        )}
+      >
+        {participantNames.map((name) => (
+          <span className="block" key={name}>
+            {name}
+          </span>
+        ))}
+      </span>
+    </span>
+  );
 }
 
 function formatMeetingDuration(input: {

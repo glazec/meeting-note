@@ -90,7 +90,12 @@ describe("processRecallCalendarWebhook", () => {
           originalStartTime: {
             dateTime: "2026-06-30T12:00:00.000Z",
           },
-          attendees: [{ email: "alice@example.com" }],
+          attendees: [
+            {
+              email: "alice@example.com",
+              responseStatus: "declined",
+            },
+          ],
         },
       },
     ]);
@@ -129,6 +134,12 @@ describe("processRecallCalendarWebhook", () => {
         title: "Partner sync",
         meetingUrl: "https://meet.google.com/abc-defg-hij",
         attendeeEmails: ["alice@example.com"],
+        attendees: [
+          {
+            email: "alice@example.com",
+            responseStatus: "declined",
+          },
+        ],
       }),
     });
   });
@@ -212,6 +223,7 @@ describe("processRecallCalendarWebhook", () => {
         recallCalendarEventId: "55555555-5555-4555-8555-555555555555",
         meetingUrl: "https://meet.google.com/abc-defg-hij",
       }),
+      repairMode: true,
     });
   });
 
@@ -284,6 +296,7 @@ describe("processRecallCalendarWebhook", () => {
           startsAt: "2026-06-27T03:30:00.000Z",
           endsAt: "2026-06-27T04:15:00.000Z",
         }),
+        repairMode: true,
       }),
     );
   });
@@ -357,6 +370,7 @@ describe("processRecallCalendarWebhook", () => {
           isDeleted: true,
           meetingUrl: null,
         }),
+        repairMode: true,
       }),
     );
   });

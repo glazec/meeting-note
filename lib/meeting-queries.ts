@@ -255,29 +255,37 @@ export async function listMeetingLibraryPageForWorkspace(
     rows.map((meeting) => meeting.id),
   );
   const items: Array<MeetingListItem & { primaryEntity: string | null }> =
-    rows.map((meeting) => ({
-      id: meeting.id,
-      title: meeting.title,
-      platform: meeting.platform,
-      status: meeting.status,
-      transcriptJobStatus: meeting.transcriptJobStatus,
-      hasRecallBot: Boolean(meeting.recallBotId),
-      startedAt: (meeting.startedAt ?? meeting.createdAt).toISOString(),
-      endedAt: meeting.endedAt?.toISOString() ?? null,
-      durationMs: getTranscriptDurationMs(meeting.transcriptDurationMs),
-      participantCount: getMeetingParticipantCount({
-        attendeeEmails: meeting.calendarAttendeeEmails,
-        recognizedSpeakerCount: meeting.recognizedSpeakerCount,
-        transcriptSegmentCount: meeting.transcriptSegmentCount,
-        status: meeting.status,
-      }),
-      accessScope: meeting.teamId === workspace.teamId ? "workspace" : "shared",
-      externalParticipantKeys: getExternalParticipantKeys(
+    rows.map((meeting) => {
+      const participantNames = getMeetingParticipantNames(
         meeting.calendarAttendeeEmails,
-        workspace.domain,
-      ),
-      primaryEntity: primaryEntityByMeetingId.get(meeting.id) ?? null,
-    }));
+      );
+
+      return {
+        id: meeting.id,
+        title: meeting.title,
+        platform: meeting.platform,
+        status: meeting.status,
+        transcriptJobStatus: meeting.transcriptJobStatus,
+        hasRecallBot: Boolean(meeting.recallBotId),
+        startedAt: (meeting.startedAt ?? meeting.createdAt).toISOString(),
+        endedAt: meeting.endedAt?.toISOString() ?? null,
+        durationMs: getTranscriptDurationMs(meeting.transcriptDurationMs),
+        participantCount: getMeetingParticipantCount({
+          attendeeEmails: meeting.calendarAttendeeEmails,
+          recognizedSpeakerCount: meeting.recognizedSpeakerCount,
+          transcriptSegmentCount: meeting.transcriptSegmentCount,
+          status: meeting.status,
+        }),
+        ...(participantNames.length > 0 ? { participantNames } : {}),
+        accessScope:
+          meeting.teamId === workspace.teamId ? "workspace" : "shared",
+        externalParticipantKeys: getExternalParticipantKeys(
+          meeting.calendarAttendeeEmails,
+          workspace.domain,
+        ),
+        primaryEntity: primaryEntityByMeetingId.get(meeting.id) ?? null,
+      };
+    });
   return buildMeetingLibraryPage(items, options);
 }
 
@@ -489,6 +497,9 @@ function toRelatedMeeting(meeting: MeetingListItem): MeetingListRelatedItem {
     endedAt: meeting.endedAt,
     durationMs: meeting.durationMs,
     participantCount: meeting.participantCount,
+    ...(meeting.participantNames?.length
+      ? { participantNames: meeting.participantNames }
+      : {}),
     status: meeting.status,
     transcriptJobStatus: meeting.transcriptJobStatus,
     hasRecallBot: meeting.hasRecallBot,
@@ -515,6 +526,9 @@ function toLibraryRootMeeting(input: {
       ? { durationMs: input.meeting.durationMs }
       : {}),
     participantCount: input.meeting.participantCount,
+    ...(input.meeting.participantNames?.length
+      ? { participantNames: input.meeting.participantNames }
+      : {}),
     accessScope: input.meeting.accessScope,
     ...(input.meeting.primaryEntity
       ? { primaryEntity: input.meeting.primaryEntity }
@@ -863,6 +877,39 @@ function getMeetingParticipantCount(input: {
   }
 
   return attendeeCount;
+}
+
+function getMeetingParticipantNames(attendeeEmails: unknown) {
+  if (!Array.isArray(attendeeEmails)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const names: string[] = [];
+
+  for (const rawEmail of attendeeEmails) {
+    if (typeof rawEmail !== "string") {
+      continue;
+    }
+
+    const email = normalizeEmailAddress(rawEmail);
+
+    if (!email) {
+      continue;
+    }
+
+    const name = formatNameFromEmail(email);
+    const key = name.trim().toLowerCase();
+
+    if (!key || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    names.push(name);
+  }
+
+  return names;
 }
 
 function getTranscriptDurationMs(durationMs?: number | null) {

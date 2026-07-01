@@ -49,6 +49,29 @@ describe("MeetingList", () => {
     expect(html).not.toContain("Unknown");
   });
 
+  it("shows participant names from the people value", () => {
+    const html = renderToStaticMarkup(
+      <MeetingList
+        meetings={[
+          {
+            id: "11111111-1111-4111-8111-111111111111",
+            title: "Customer sync",
+            platform: "google_meet",
+            startedAt: "2026-01-01T12:00:00.000Z",
+            participantCount: 2,
+            participantNames: ["Alice Chen", "Bob Li"],
+            status: "scheduled",
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain("2 people");
+    expect(html).toContain("Alice Chen");
+    expect(html).toContain("Bob Li");
+    expect(html).toContain("Participants: Alice Chen, Bob Li");
+  });
+
   it("renders a custom empty message for shared transcript readers", () => {
     const html = renderToStaticMarkup(
       <MeetingList

@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 const {
   getWorkspace,
   getWorkspaceAccessSummary,
+  getDefaultMeetingBotAvatarJpegBase64,
   getMeetingBotProfile,
   listTeamVocabularyTerms,
   listWorkspaceMembers,
@@ -13,6 +14,7 @@ const {
 } = vi.hoisted(() => ({
   getWorkspace: vi.fn(),
   getWorkspaceAccessSummary: vi.fn(),
+  getDefaultMeetingBotAvatarJpegBase64: vi.fn(),
   getMeetingBotProfile: vi.fn(),
   listTeamVocabularyTerms: vi.fn(),
   listWorkspaceMembers: vi.fn(),
@@ -45,6 +47,7 @@ vi.mock("@/lib/team-vocabulary", () => ({
 }));
 
 vi.mock("@/lib/meeting-bot-profile", () => ({
+  getDefaultMeetingBotAvatarJpegBase64,
   getMeetingBotProfile,
 }));
 
@@ -52,6 +55,7 @@ describe("TeamSettingsPage", () => {
   afterEach(() => {
     getWorkspace.mockReset();
     getWorkspaceAccessSummary.mockReset();
+    getDefaultMeetingBotAvatarJpegBase64.mockReset();
     getMeetingBotProfile.mockReset();
     listTeamVocabularyTerms.mockReset();
     listWorkspaceMembers.mockReset();
@@ -160,5 +164,40 @@ describe("TeamSettingsPage", () => {
       teamId: "team_123",
       userId: "user_123",
     });
+  });
+
+  it("previews the default bot avatar when no custom avatar is saved", async () => {
+    requireCurrentUser.mockResolvedValue({
+      id: "auth_user_123",
+      email: "member@iosg.vc",
+      name: "Member",
+    });
+    getWorkspace.mockResolvedValue({
+      userId: "user_123",
+      teamId: "team_123",
+      domain: "iosg.vc",
+      canCreateMeetings: true,
+    });
+    getWorkspaceAccessSummary.mockResolvedValue({
+      canCreateMeetings: true,
+      hasExternalShares: false,
+      hasWorkspaceMeetings: true,
+      isSharedOnly: false,
+    });
+    listTeamVocabularyTerms.mockResolvedValue([]);
+    listWorkspaceMembers.mockResolvedValue([]);
+    getMeetingBotProfile.mockResolvedValue({
+      botName: "IOSG Old Friends",
+      avatarJpegBase64: null,
+    });
+    getDefaultMeetingBotAvatarJpegBase64.mockReturnValue("default-avatar");
+
+    const { default: TeamSettingsPage } = await import(
+      "@/app/settings/team/page"
+    );
+    const html = renderToStaticMarkup(await TeamSettingsPage());
+
+    expect(html).toContain("Default avatar");
+    expect(html).toContain("data:image/jpeg;base64,default-avatar");
   });
 });

@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID
@@ -24,9 +25,16 @@ import psycopg
 import jwt
 import sqlglot
 from fastmcp import FastMCP
-from fastmcp.server.auth import AccessToken, AuthProvider
+from fastmcp.server.auth import AccessToken, AuthProvider, MultiAuth, TokenVerifier
+from fastmcp.server.auth.providers.google import GoogleProvider
 from fastmcp.server.dependencies import get_access_token
 from jwt import PyJWKClient, PyJWTError
+from key_value.aio.stores.filetree import (
+    FileTreeStore,
+    FileTreeV1CollectionSanitizationStrategy,
+    FileTreeV1KeySanitizationStrategy,
+)
+from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
 from psycopg.rows import dict_row
 from sqlglot import exp
 from sqlglot.errors import ParseError
@@ -44,13 +52,18 @@ MCP_ALLOW_DEV_AUTH = os.environ.get("MCP_ALLOW_DEV_AUTH", "false").strip().lower
 }
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "").strip().rstrip("/")
-MCP_HOST = os.environ.get("MCP_HOST", "127.0.0.1").strip() or "127.0.0.1"
-MCP_PORT = int(os.environ.get("MCP_PORT", "8000"))
+DEFAULT_MCP_HOST = "0.0.0.0" if os.environ.get("PORT") else "127.0.0.1"
+MCP_HOST = os.environ.get("MCP_HOST", DEFAULT_MCP_HOST).strip() or DEFAULT_MCP_HOST
+MCP_PORT = int(os.environ.get("PORT") or os.environ.get("MCP_PORT", "8000"))
 SQL_TOOL_STATEMENT_TIMEOUT_MS = int(
     os.environ.get("SQL_TOOL_STATEMENT_TIMEOUT_MS", "10000"),
 )
 NEON_AUTH_ISSUER = os.environ.get("NEON_AUTH_ISSUER", "").strip()
 NEON_AUTH_AUDIENCE = os.environ.get("NEON_AUTH_AUDIENCE", "").strip() or None
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
+FASTMCP_JWT_SIGNING_KEY = os.environ.get("FASTMCP_JWT_SIGNING_KEY", "").strip()
+OAUTH_STORAGE_PATH = os.environ.get("OAUTH_STORAGE_PATH", "./oauth_data").strip()
 NEON_AUTH_ALLOWED_ALGORITHMS = {
     "RS256",
     "RS384",
@@ -473,6 +486,12 @@ def _claim_value(claims: dict[str, Any], key: str) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
 
+    upstream_claims = claims.get("upstream_claims")
+    if isinstance(upstream_claims, dict):
+        upstream_value = upstream_claims.get(key)
+        if isinstance(upstream_value, str) and upstream_value.strip():
+            return upstream_value.strip()
+
     nested_user = claims.get("user")
     if isinstance(nested_user, dict):
         nested_value = nested_user.get(key)
@@ -482,7 +501,7 @@ def _claim_value(claims: dict[str, Any], key: str) -> str | None:
     return None
 
 
-class NeonAuthJWTVerifier(AuthProvider):
+class NeonAuthJWTVerifier(TokenVerifier):
     """Verify Neon Auth bearer JWTs with the configured JWKS and issuer."""
 
     def __init__(
@@ -538,7 +557,39 @@ class NeonAuthJWTVerifier(AuthProvider):
         )
 
 
-def _build_auth_provider() -> NeonAuthJWTVerifier | None:
+def _mcp_base_url() -> str:
+    base_url = (
+        _optional_env("MCP_BASE_URL")
+        or _optional_env("BASE_URL")
+        or _optional_env("APP_BASE_URL")
+    )
+    if not base_url:
+        raise RuntimeError("MCP_BASE_URL or BASE_URL is required when DISABLE_AUTH=false")
+    return _require_https_url(base_url, "MCP_BASE_URL").rstrip("/")
+
+
+def _oauth_client_storage() -> FernetEncryptionWrapper:
+    if not FASTMCP_JWT_SIGNING_KEY:
+        raise RuntimeError("FASTMCP_JWT_SIGNING_KEY is required when DISABLE_AUTH=false")
+
+    storage_dir = Path(OAUTH_STORAGE_PATH or "./oauth_data")
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    file_store = FileTreeStore(
+        data_directory=storage_dir,
+        key_sanitization_strategy=FileTreeV1KeySanitizationStrategy(storage_dir),
+        collection_sanitization_strategy=FileTreeV1CollectionSanitizationStrategy(
+            storage_dir,
+        ),
+    )
+    return FernetEncryptionWrapper(
+        key_value=file_store,
+        source_material=FASTMCP_JWT_SIGNING_KEY,
+        salt="meeting-note-mcp-oauth-storage",
+        raise_on_decryption_error=False,
+    )
+
+
+def _build_auth_provider() -> AuthProvider | None:
     if DISABLE_AUTH:
         if not MCP_ALLOW_DEV_AUTH:
             raise RuntimeError(
@@ -549,10 +600,34 @@ def _build_auth_provider() -> NeonAuthJWTVerifier | None:
 
     if not NEON_AUTH_ISSUER:
         raise RuntimeError("NEON_AUTH_ISSUER is required when DISABLE_AUTH=false")
-    if not NEON_AUTH_AUDIENCE:
-        raise RuntimeError("NEON_AUTH_AUDIENCE is required when DISABLE_AUTH=false")
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise RuntimeError(
+            "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are required when DISABLE_AUTH=false",
+        )
 
-    return NeonAuthJWTVerifier(
+    base_url = _mcp_base_url()
+    google_provider = GoogleProvider(
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+        base_url=base_url,
+        required_scopes=[
+            "openid",
+            "https://www.googleapis.com/auth/userinfo.email",
+            "https://www.googleapis.com/auth/userinfo.profile",
+        ],
+        allowed_client_redirect_uris=[
+            "https://claude.ai/api/mcp/auth_callback",
+            "https://chatgpt.com/connector/oauth/*",
+            "https://chatgpt.com/connector_platform_oauth_redirect",
+            "http://localhost:*",
+            "http://127.0.0.1:*",
+        ],
+        redirect_path="/auth/callback",
+        client_storage=_oauth_client_storage(),
+        jwt_signing_key=FASTMCP_JWT_SIGNING_KEY,
+        require_authorization_consent="external",
+    )
+    neon_verifier = NeonAuthJWTVerifier(
         jwks_url=_neon_auth_jwks_url(),
         issuer=_require_https_url(NEON_AUTH_ISSUER, "NEON_AUTH_ISSUER"),
         audience=NEON_AUTH_AUDIENCE,
@@ -562,6 +637,7 @@ def _build_auth_provider() -> NeonAuthJWTVerifier | None:
             or _optional_env("APP_BASE_URL")
         ),
     )
+    return MultiAuth(server=google_provider, verifiers=[neon_verifier])
 
 
 mcp = FastMCP(name=SERVICE_NAME, auth=_build_auth_provider())
@@ -709,6 +785,16 @@ async def _workspace_for_auth_user(auth_user_id: str, token_email: str) -> Works
         """,
         {"auth_user_id": auth_user_id},
     )
+    if not user:
+        user = await _fetch_one(
+            """
+            select id, email, name, auth_user_id
+            from users
+            where lower(email) = %(email)s
+            limit 1
+            """,
+            {"email": normalized_token_email},
+        )
     if not user:
         raise MeetingAccessError("Authenticated user is not registered in Meeting Note")
 
@@ -1225,7 +1311,7 @@ async def get_user_info() -> dict[str, Any]:
     """Return the authenticated MCP user."""
     claims = _current_user_claims()
     return {
-        "auth_provider": "disabled" if DISABLE_AUTH else "neon_auth",
+        "auth_provider": "disabled" if DISABLE_AUTH else "oauth_or_neon_auth",
         "auth_id": _claim_value(claims, "sub"),
         "email": _claim_value(claims, "email"),
         "name": _claim_value(claims, "name"),

@@ -36,6 +36,11 @@ type CalendarConnection = {
   workspaceDomain?: string | null;
 };
 
+type SyncedCalendarAttendee = {
+  email: string;
+  responseStatus?: string | null;
+};
+
 type CalendarEventEntryPoint = {
   entryPointType?: string | null;
   uri?: string | null;
@@ -47,6 +52,7 @@ export type SyncedCalendarEvent = {
   startsAt: string | Date;
   endsAt?: string | Date | null;
   attendeeEmails?: string[];
+  attendees?: SyncedCalendarAttendee[];
   meetingUrl?: string | null;
   location?: string | null;
   description?: string | null;
@@ -66,6 +72,7 @@ export type SyncedCalendarEvent = {
 type AutoJoinInput = {
   connection: CalendarConnection;
   event: SyncedCalendarEvent;
+  repairMode?: boolean;
 };
 
 type RecallBotResponse = {
@@ -110,12 +117,17 @@ export function findCalendarMeetingUrl(event: SyncedCalendarEvent) {
 }
 
 export async function autoJoinCalendarEvent(input: AutoJoinInput) {
+  const attendeeEmails = getCalendarAttendeeEmails(input.event);
+  const declinedByExternalAttendees =
+    isDeclinedByAllExternalAttendees(input);
   const meetingUrl = input.event.isDeleted
     ? null
+    : declinedByExternalAttendees
+      ? null
     : findCalendarMeetingUrl(input.event);
   const platform = meetingUrl ? detectMeetingPlatform(meetingUrl) : null;
   const title = normalizeEventTitle(
-    input.event,
+    { ...input.event, attendeeEmails },
     platform,
     input.connection.workspaceDomain,
   );
@@ -130,7 +142,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
           startsAt,
           meetingUrl,
         })
-      : location && !input.event.isDeleted
+      : location && !input.event.isDeleted && !declinedByExternalAttendees
         ? buildLocationMeetingKey({
             teamId: input.connection.teamId,
             startsAt,
@@ -150,7 +162,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
       description,
       startsAt,
       endsAt,
-      attendeeEmails: normalizeAttendeeEmails(input.event.attendeeEmails ?? []),
+      attendeeEmails: normalizeAttendeeEmails(attendeeEmails),
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
@@ -165,7 +177,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
         description,
         startsAt,
         endsAt,
-        attendeeEmails: normalizeAttendeeEmails(input.event.attendeeEmails ?? []),
+        attendeeEmails: normalizeAttendeeEmails(attendeeEmails),
         updatedAt: new Date(),
       },
     })
@@ -189,9 +201,19 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
     calendarEventId: calendarEvent.id,
     teamMeetingKey: activeTeamMeetingKey,
   });
+  const isPastRepairEvent =
+    input.repairMode && isPastCalendarEvent({ startsAt, endsAt });
 
   if (!meetingUrl) {
-    if (location && !input.event.isDeleted) {
+    if (isPastRepairEvent && !existingMeeting) {
+      return {
+        action: "skipped" as const,
+        calendarEventId: calendarEvent.id,
+        reason: "missing_meeting_link" as const,
+      };
+    }
+
+    if (location && !input.event.isDeleted && !declinedByExternalAttendees) {
       return syncLocationCalendarMeeting({
         connection: input.connection,
         calendarEvent,
@@ -202,6 +224,34 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
         location,
         teamMeetingKey: activeTeamMeetingKey,
       });
+    }
+
+    if (declinedByExternalAttendees) {
+      if (existingMeeting) {
+        await cancelScheduledMeetingBotFromCalendar({
+          botId: existingMeeting.recallBotId,
+          endsAt,
+          meetingId: existingMeeting.id,
+          meetingUrl: null,
+          nextStatus: "cancelled",
+          recallCalendarEventId: input.event.recallCalendarEventId,
+          startsAt,
+          title,
+        });
+
+        return {
+          action: "skipped" as const,
+          calendarEventId: calendarEvent.id,
+          meetingId: existingMeeting.id,
+          reason: "missing_meeting_link" as const,
+        };
+      }
+
+      return {
+        action: "skipped" as const,
+        calendarEventId: calendarEvent.id,
+        reason: "missing_meeting_link" as const,
+      };
     }
 
     if (existingMeeting?.recallBotId && existingMeeting.status === "scheduled") {
@@ -291,6 +341,36 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
     };
   }
 
+  if (isPastRepairEvent && !existingMeeting) {
+    return {
+      action: "skipped" as const,
+      calendarEventId: calendarEvent.id,
+      meetingUrl,
+      reason: "already_scheduled" as const,
+    };
+  }
+
+  if (existingMeeting?.status === "failed" && isPastCalendarEvent({ startsAt, endsAt })) {
+    await markMeetingMissedFromCalendar({
+      meetingId: existingMeeting.id,
+      title,
+      platform,
+      meetingUrl,
+      startsAt,
+      endsAt,
+      teamMeetingKey: activeTeamMeetingKey,
+      recallBotId: existingMeeting.recallBotId,
+    });
+
+    return {
+      action: "skipped" as const,
+      calendarEventId: calendarEvent.id,
+      meetingId: existingMeeting.id,
+      meetingUrl,
+      reason: "already_scheduled" as const,
+    };
+  }
+
   if (existingMeeting?.recallBotId) {
     return syncExistingCalendarMeeting({
       meeting: existingMeeting,
@@ -367,8 +447,6 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
   if (!meeting) {
     throw new Error("Meeting creation failed");
   }
-
-  const attendeeEmails = normalizeAttendeeEmails(input.event.attendeeEmails ?? []);
 
   if (createdMeeting && attendeeEmails.length > 0) {
     await db
@@ -534,9 +612,9 @@ async function syncExistingCalendarMeeting(input: {
   teamMeetingKey?: string | null;
   forceScheduleBot?: boolean;
 }) {
-  const canRecoverMissedMeeting = shouldRecoverMissedMeeting(input);
+  const canRecoverCalendarMeeting = shouldRecoverCalendarMeeting(input);
 
-  if (input.meeting.status !== "scheduled" && !canRecoverMissedMeeting) {
+  if (input.meeting.status !== "scheduled" && !canRecoverCalendarMeeting) {
     return {
       action: "skipped" as const,
       calendarEventId: input.calendarEvent.id,
@@ -575,7 +653,7 @@ async function syncExistingCalendarMeeting(input: {
     shouldUpdateBot ||
     shouldLinkRecallCalendarEvent ||
     shouldReplaceRecallCalendarEventBot ||
-    canRecoverMissedMeeting;
+    canRecoverCalendarMeeting;
   let recallBotId = input.meeting.recallBotId;
 
   try {
@@ -611,7 +689,7 @@ async function syncExistingCalendarMeeting(input: {
       endsAt: input.endsAt,
       teamMeetingKey: input.teamMeetingKey,
       recallBotId,
-      status: canRecoverMissedMeeting ? "scheduled" : undefined,
+      status: canRecoverCalendarMeeting ? "scheduled" : undefined,
     });
   } catch (error) {
     await markMeetingFailed(input.meeting.id);
@@ -629,7 +707,11 @@ async function syncExistingCalendarMeeting(input: {
     };
   }
 
-  if (shouldLinkRecallCalendarEvent || input.forceScheduleBot) {
+  if (
+    shouldLinkRecallCalendarEvent ||
+    input.forceScheduleBot ||
+    canRecoverCalendarMeeting
+  ) {
     return {
       action: "scheduled" as const,
       calendarEventId: input.calendarEvent.id,
@@ -764,11 +846,38 @@ async function markMeetingFailed(meetingId: string) {
     .where(eq(meetings.id, meetingId));
 }
 
+async function markMeetingMissedFromCalendar(input: {
+  meetingId: string;
+  title: string;
+  platform: SupportedMeetingPlatform;
+  meetingUrl: string;
+  startsAt: Date;
+  endsAt: Date | null;
+  teamMeetingKey?: string | null;
+  recallBotId?: string | null;
+}) {
+  await db
+    .update(meetings)
+    .set({
+      title: input.title,
+      platform: input.platform,
+      teamMeetingKey: input.teamMeetingKey,
+      meetingUrl: input.meetingUrl,
+      startedAt: input.startsAt,
+      endedAt: input.endsAt,
+      recallBotId: input.recallBotId,
+      status: "missed",
+      updatedAt: new Date(),
+    })
+    .where(eq(meetings.id, input.meetingId));
+}
+
 async function cancelScheduledMeetingBotFromCalendar(input: {
-  botId: string;
+  botId?: string | null;
   meetingId: string;
   title: string;
   meetingUrl: string | null;
+  nextStatus?: "cancelled" | "failed";
   recallCalendarEventId?: string | null;
   skipVendorDelete?: boolean;
   startsAt: Date;
@@ -776,11 +885,11 @@ async function cancelScheduledMeetingBotFromCalendar(input: {
 }) {
   if (input.skipVendorDelete) {
     // Recall Calendar V2 automatically removes scheduled bots for deleted events.
-  } else if (input.recallCalendarEventId) {
+  } else if (input.botId && input.recallCalendarEventId) {
     await deleteRecallCalendarEventBot({
       calendarEventId: input.recallCalendarEventId,
     });
-  } else {
+  } else if (input.botId) {
     await deleteScheduledRecallBot({ botId: input.botId });
   }
   await db
@@ -792,7 +901,8 @@ async function cancelScheduledMeetingBotFromCalendar(input: {
       startedAt: input.startsAt,
       endedAt: input.endsAt,
       recallBotId: null,
-      status: input.skipVendorDelete ? "cancelled" : "failed",
+      status:
+        input.nextStatus ?? (input.skipVendorDelete ? "cancelled" : "failed"),
       updatedAt: new Date(),
     })
     .where(eq(meetings.id, input.meetingId));
@@ -980,14 +1090,21 @@ function hasScheduledBotChange(
   );
 }
 
-function shouldRecoverMissedMeeting(input: {
+function shouldRecoverCalendarMeeting(input: {
   meeting: ExistingMeeting;
   meetingUrl: string;
   startsAt: Date;
 }) {
+  if (input.startsAt.getTime() <= Date.now()) {
+    return false;
+  }
+
+  if (input.meeting.status === "failed") {
+    return true;
+  }
+
   return (
     input.meeting.status === "missed" &&
-    input.startsAt.getTime() > Date.now() &&
     hasScheduledBotChange(input.meeting, {
       meetingUrl: input.meetingUrl,
       startsAt: input.startsAt,
@@ -1071,6 +1188,49 @@ function normalizeAttendeeEmails(attendeeEmails: string[]) {
         .filter((email) => email.includes("@")),
     ),
   );
+}
+
+function getCalendarAttendeeEmails(event: SyncedCalendarEvent) {
+  const attendeeEmails =
+    event.attendeeEmails ??
+    event.attendees?.map((attendee) => attendee.email) ??
+    [];
+
+  return normalizeAttendeeEmails(attendeeEmails);
+}
+
+function isDeclinedByAllExternalAttendees(input: AutoJoinInput) {
+  const workspaceDomain = normalizeWorkspaceDomain(
+    input.connection.workspaceDomain,
+  );
+
+  if (!workspaceDomain || !input.event.attendees?.length) {
+    return false;
+  }
+
+  const externalAttendees = input.event.attendees
+    .map((attendee) => ({
+      email: normalizeEmail(attendee.email),
+      responseStatus: attendee.responseStatus?.trim().toLowerCase() ?? null,
+    }))
+    .filter((attendee) => {
+      const domain = attendee.email.split("@")[1]?.trim().toLowerCase();
+
+      return Boolean(domain && domain !== workspaceDomain);
+    });
+
+  return (
+    externalAttendees.length > 0 &&
+    externalAttendees.every(
+      (attendee) => attendee.responseStatus === "declined",
+    )
+  );
+}
+
+function isPastCalendarEvent(input: { startsAt: Date; endsAt: Date | null }) {
+  const endTime = (input.endsAt ?? input.startsAt).getTime();
+
+  return Number.isFinite(endTime) && endTime <= Date.now();
 }
 
 function normalizeEventTitle(

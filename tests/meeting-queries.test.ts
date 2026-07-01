@@ -541,6 +541,7 @@ describe("listMeetingsForWorkspace", () => {
         startedAt: "2026-06-27T12:00:00.000Z",
         endedAt: "2026-06-27T12:45:00.000Z",
         participantCount: 2,
+        participantNames: ["Alice", "Founder"],
         accessScope: "workspace",
         relatedMeetings: [],
       },

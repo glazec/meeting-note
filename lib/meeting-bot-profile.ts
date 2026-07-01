@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
@@ -29,6 +31,7 @@ type ProfileUpdate = {
 };
 
 const MAX_AVATAR_BYTES = 1_000_000;
+let defaultMeetingBotAvatarJpegBase64: string | null = null;
 
 export class MeetingBotProfileInputError extends Error {
   constructor(message: string) {
@@ -53,6 +56,16 @@ export async function getMeetingBotProfile(
     botName: normalizeBotName(profile?.botName) ?? DEFAULT_RECALL_BOT_NAME,
     avatarJpegBase64: profile?.avatarJpegBase64 ?? null,
   };
+}
+
+export function getDefaultMeetingBotAvatarJpegBase64() {
+  if (!defaultMeetingBotAvatarJpegBase64) {
+    defaultMeetingBotAvatarJpegBase64 = readFileSync(
+      join(process.cwd(), "assets", "meeting-bot-logo.jpg"),
+    ).toString("base64");
+  }
+
+  return defaultMeetingBotAvatarJpegBase64;
 }
 
 export async function upsertMeetingBotProfile(

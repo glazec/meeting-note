@@ -20,7 +20,7 @@ Visible tools:
 
 ## Access Model
 
-The MCP caller authenticates with a Neon Auth JWT in the `Authorization: Bearer ...` header. The server verifies the JWT against `NEON_AUTH_JWKS_URL`, `NEON_AUTH_ISSUER`, and `NEON_AUTH_AUDIENCE`, then resolves the verified `sub` through `users.auth_user_id`.
+Interactive MCP callers authenticate with Google OAuth through FastMCP's OAuth proxy. Direct bearer clients can still send a Neon Auth JWT in the `Authorization: Bearer ...` header. The server verifies Neon JWTs against `NEON_AUTH_JWKS_URL`, `NEON_AUTH_ISSUER`, and `NEON_AUTH_AUDIENCE` when configured. It resolves Neon JWTs by `users.auth_user_id`; Google OAuth users are resolved by the verified email already registered in Meeting Note.
 
 MCP data access mirrors the app read policy:
 
@@ -253,17 +253,21 @@ order by shared_entity_count desc, e.meeting_title asc
 Required in production:
 
 1. `DISABLE_AUTH=false`
-2. `NEON_AUTH_JWKS_URL`
-3. `NEON_AUTH_ISSUER`
-4. `NEON_AUTH_AUDIENCE`
-5. `DATABASE_URL` for a least privilege read only database role
-6. `APP_BASE_URL`
+2. `MCP_BASE_URL`
+3. `GOOGLE_CLIENT_ID`
+4. `GOOGLE_CLIENT_SECRET`
+5. `FASTMCP_JWT_SIGNING_KEY`
+6. `OAUTH_STORAGE_PATH`
+7. `NEON_AUTH_JWKS_URL`
+8. `NEON_AUTH_ISSUER`
+9. `DATABASE_URL` for a least privilege read only database role
+10. `APP_BASE_URL`
 
 Recommended:
 
-1. `MCP_BASE_URL`
-2. `MCP_HOST`
-3. `MCP_PORT`
+1. `MCP_HOST`
+2. `MCP_PORT`
+3. `NEON_AUTH_AUDIENCE` when the Neon Auth JWTs include a known audience claim
 4. `POSTHOG_API_KEY`
 5. `POSTHOG_HOST`
 

@@ -11,7 +11,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { requireCurrentUser } from "@/lib/auth-guards";
-import { getMeetingBotProfile } from "@/lib/meeting-bot-profile";
+import {
+  getDefaultMeetingBotAvatarJpegBase64,
+  getMeetingBotProfile,
+} from "@/lib/meeting-bot-profile";
 import { listTeamVocabularyTerms } from "@/lib/team-vocabulary";
 import {
   getOrCreateWorkspaceForSessionUser,
@@ -30,6 +33,9 @@ export default async function TeamSettingsPage() {
     : [];
   const botProfile = accessSummary.canCreateMeetings
     ? await getMeetingBotProfile(workspace.teamId)
+    : null;
+  const botAvatarJpegBase64 = botProfile
+    ? (botProfile.avatarJpegBase64 ?? getDefaultMeetingBotAvatarJpegBase64())
     : null;
   const teamMembers = accessSummary.canCreateMeetings
     ? await listWorkspaceMembers(workspace)
@@ -163,9 +169,9 @@ export default async function TeamSettingsPage() {
                     className="size-16 rounded-lg border bg-muted bg-cover bg-center"
                     role="img"
                     style={
-                      botProfile.avatarJpegBase64
+                      botAvatarJpegBase64
                         ? {
-                            backgroundImage: `url(data:image/jpeg;base64,${botProfile.avatarJpegBase64})`,
+                            backgroundImage: `url(data:image/jpeg;base64,${botAvatarJpegBase64})`,
                           }
                         : undefined
                     }
