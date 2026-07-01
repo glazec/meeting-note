@@ -493,7 +493,7 @@ function normalizeRecallCalendarEvent(event: unknown): SyncedCalendarEvent | nul
 
 function normalizeRecallCalendarEventBots(value: unknown) {
   if (!Array.isArray(value)) {
-    return [];
+    return undefined;
   }
 
   return value

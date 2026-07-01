@@ -550,14 +550,31 @@ async function syncExistingCalendarMeeting(input: {
     meetingUrl: input.meetingUrl,
     startsAt: input.startsAt,
   });
+  const recallCalendarEventDeduplicationKey =
+    getRecallCalendarEventBotDeduplicationKey({
+      event: input.event,
+      teamMeetingKey: input.teamMeetingKey,
+    });
   const shouldLinkRecallCalendarEvent = Boolean(
     input.event.recallCalendarEventId &&
       input.meeting.calendarEventId !== input.calendarEvent.id,
+  );
+  const shouldReplaceRecallCalendarEventBot = Boolean(
+    input.event.recallCalendarEventId &&
+      (isExistingBotOutsideRecallCalendarEvent(
+        input.event,
+        input.meeting.recallBotId,
+      ) ||
+        hasConflictingRecallCalendarEventBot(
+          input.event,
+          recallCalendarEventDeduplicationKey,
+        )),
   );
   const shouldScheduleBot =
     input.forceScheduleBot ||
     shouldUpdateBot ||
     shouldLinkRecallCalendarEvent ||
+    shouldReplaceRecallCalendarEventBot ||
     canRecoverMissedMeeting;
   let recallBotId = input.meeting.recallBotId;
 
@@ -575,10 +592,7 @@ async function syncExistingCalendarMeeting(input: {
       });
       recallBotId = getRecallBotResponseId(
         bot,
-        getRecallCalendarEventBotDeduplicationKey({
-          event: input.event,
-          teamMeetingKey: input.teamMeetingKey,
-        }),
+        recallCalendarEventDeduplicationKey,
       );
 
       if (!recallBotId && input.event.recallCalendarEventId) {
@@ -806,10 +820,25 @@ async function scheduleBotForCalendarEvent(input: {
       event: input.event,
       teamMeetingKey: input.teamMeetingKey,
     });
+    const hasEventBotSnapshot = Array.isArray(input.event.recallCalendarEventBots);
+    const existingBotIsCalendarEventBot =
+      input.existingBotId && hasEventBotSnapshot
+        ? input.event.recallCalendarEventBots?.some(
+            (bot) => bot.botId === input.existingBotId,
+          )
+        : null;
+    const hasConflictingEventBot = hasConflictingRecallCalendarEventBot(
+      input.event,
+      deduplicationKey,
+    );
+
+    if (input.existingBotId && existingBotIsCalendarEventBot === false) {
+      await deleteScheduledRecallBot({ botId: input.existingBotId });
+    }
 
     if (
-      input.existingBotId ||
-      hasConflictingRecallCalendarEventBot(input.event, deduplicationKey)
+      (input.existingBotId && existingBotIsCalendarEventBot !== false) ||
+      hasConflictingEventBot
     ) {
       await deleteRecallCalendarEventBot({
         calendarEventId: input.event.recallCalendarEventId,
@@ -927,6 +956,17 @@ function hasConflictingRecallCalendarEventBot(
 ) {
   return event.recallCalendarEventBots?.some(
     (bot) => bot.deduplicationKey !== deduplicationKey,
+  );
+}
+
+function isExistingBotOutsideRecallCalendarEvent(
+  event: SyncedCalendarEvent,
+  existingBotId: string | null,
+) {
+  return Boolean(
+    existingBotId &&
+      Array.isArray(event.recallCalendarEventBots) &&
+      !event.recallCalendarEventBots.some((bot) => bot.botId === existingBotId),
   );
 }
 

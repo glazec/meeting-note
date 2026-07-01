@@ -137,17 +137,59 @@ async function findUpcomingCalendarEventByMeetingUrl(input: {
       and(
         eq(calendarEvents.teamId, input.teamId),
         gte(calendarEvents.startsAt, new Date()),
-        or(
-          eq(calendarEvents.meetingUrl, input.meetingUrl),
-          eq(calendarEvents.location, input.meetingUrl),
-          ilike(calendarEvents.description, `%${input.meetingUrl}%`),
-        ),
+        or(...buildMeetingUrlMatchConditions(input.meetingUrl)),
       ),
     )
     .orderBy(asc(calendarEvents.startsAt))
     .limit(1);
 
   return calendarEvent ?? null;
+}
+
+function buildMeetingUrlMatchConditions(meetingUrl: string) {
+  const conditions = [
+    eq(calendarEvents.meetingUrl, meetingUrl),
+    eq(calendarEvents.location, meetingUrl),
+    ilike(calendarEvents.description, `%${meetingUrl}%`),
+  ];
+  const pathToken = getMeetingUrlPathToken(meetingUrl);
+
+  if (pathToken) {
+    conditions.push(
+      ilike(calendarEvents.meetingUrl, `%${pathToken}%`),
+      ilike(calendarEvents.location, `%${pathToken}%`),
+      ilike(calendarEvents.description, `%${pathToken}%`),
+    );
+  }
+
+  return conditions;
+}
+
+function getMeetingUrlPathToken(meetingUrl: string) {
+  let url: URL;
+
+  try {
+    url = new URL(meetingUrl);
+  } catch {
+    return null;
+  }
+
+  const hostname = url.hostname.toLowerCase();
+
+  if (
+    (hostname === "zoom.us" || hostname.endsWith(".zoom.us")) &&
+    url.pathname.startsWith("/j/")
+  ) {
+    const meetingId = url.pathname.split("/").filter(Boolean)[1];
+
+    return meetingId ? `/j/${meetingId}` : null;
+  }
+
+  if (hostname === "meet.google.com") {
+    return url.pathname.replace(/\/$/, "") || null;
+  }
+
+  return null;
 }
 
 async function findMeetingForCalendarEvent(input: {
