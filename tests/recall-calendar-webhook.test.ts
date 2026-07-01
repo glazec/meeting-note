@@ -135,6 +135,7 @@ describe("POST /api/recall/calendar/webhook", () => {
   it("does not process duplicate Recall calendar webhooks", async () => {
     recordVendorWebhookEvent.mockResolvedValue({
       inserted: false,
+      processed: true,
       shouldProcess: false,
     });
 
@@ -149,6 +150,65 @@ describe("POST /api/recall/calendar/webhook", () => {
     expect(response.status).toBe(200);
     expect(processRecallCalendarWebhook).not.toHaveBeenCalled();
     expect(markVendorWebhookEventProcessed).not.toHaveBeenCalled();
+  });
+
+  it("asks Recall to retry unfinished duplicate calendar webhooks", async () => {
+    recordVendorWebhookEvent.mockResolvedValue({
+      inserted: false,
+      processed: false,
+      shouldProcess: false,
+    });
+
+    const response = await postRecallCalendarWebhook({
+      event: "calendar.sync_events",
+      data: {
+        calendar_id: "44444444-4444-4444-8444-444444444444",
+        last_updated_ts: "2026-06-30T11:00:00.000Z",
+      },
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      received: false,
+      result: {
+        action: "retry",
+        reason: "processing",
+      },
+    });
+    expect(processRecallCalendarWebhook).not.toHaveBeenCalled();
+    expect(markVendorWebhookEventProcessed).not.toHaveBeenCalled();
+  });
+
+  it("logs processing failures without marking the calendar delivery processed", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    processRecallCalendarWebhook.mockRejectedValue(new Error("sync failed"));
+
+    try {
+      const response = await postRecallCalendarWebhook({
+        event: "calendar.sync_events",
+        data: {
+          calendar_id: "44444444-4444-4444-8444-444444444444",
+          last_updated_ts: "2026-06-30T11:00:00.000Z",
+        },
+      });
+
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({
+        error: "Webhook processing failed",
+      });
+      expect(markVendorWebhookEventProcessed).not.toHaveBeenCalled();
+      expect(consoleError).toHaveBeenCalledWith(
+        "Recall calendar webhook processing failed",
+        expect.objectContaining({
+          eventType: "calendar.sync_events",
+          idempotencyKey: "msg_calendar_sync",
+        }),
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("retries duplicate Recall calendar webhooks when the previous attempt did not finish processing", async () => {

@@ -116,18 +116,29 @@ For production, run the migration command with the production `DATABASE_URL`, th
 
 ## Local Tunnel
 
-The Cloudflare test tunnel is `meeting-note-dev.inevitable.tech`. It points to `http://localhost:3000` and is suitable for Google OAuth redirects plus Recall and ElevenLabs webhooks during local testing.
+Production uses `https://meeting-note-swart.vercel.app` as `NEXT_PUBLIC_APP_URL`. Do not use a local tunnel URL for production callbacks.
+
+The Cloudflare test tunnel is `meeting-note-dev.inevitable.tech`. It points to `http://localhost:3000` and is suitable for Google OAuth redirects plus Recall and ElevenLabs webhooks only while the local tunnel is healthy.
 
 1. Set `NEXT_PUBLIC_APP_URL=https://meeting-note-dev.inevitable.tech` in `.env.local`.
 2. Run `npm run dev`.
 3. In another terminal, run `CLOUDFLARED_TOKEN=... ./scripts/dev-tunnel.sh`.
-4. Run `npm run inngest:sync` after the tunnel is reachable so Inngest can register `/api/inngest`.
+4. Verify the tunnel before using it for callbacks:
+
+```bash
+curl -I https://meeting-note-dev.inevitable.tech/api/recall/realtime/webhook
+```
+
+The expected response is `405 Method Not Allowed` for `GET`, or `401 Invalid webhook signature` for an unsigned `POST`. Cloudflare `530` means the tunnel is not usable.
+
+5. Run `npm run inngest:sync` after the tunnel is reachable so Inngest can register `/api/inngest`.
 
 Local test webhook URLs:
 
 1. `https://meeting-note-dev.inevitable.tech/api/recall/webhook`
 2. `https://meeting-note-dev.inevitable.tech/api/recall/calendar/webhook`
-3. `https://meeting-note-dev.inevitable.tech/api/elevenlabs/webhook`
+3. `https://meeting-note-dev.inevitable.tech/api/recall/realtime/webhook`
+4. `https://meeting-note-dev.inevitable.tech/api/elevenlabs/webhook`
 
 ## Auth
 
@@ -157,7 +168,7 @@ The Meeting library remains the searchable recent meeting table. It is filtered 
 
 ## Meeting Links
 
-The new meeting page posts Google Meet and Zoom links to `/api/meetings/link`. The route requires an authenticated Neon Auth session, rejects unsupported meeting hosts, creates a local meeting row, and schedules a Recall bot with `/api/recall/webhook` as the callback URL. The Recall bot receives the local `meetingId` in metadata so later webhooks can update the same meeting.
+The new meeting page posts Google Meet and Zoom links to `/api/meetings/link`. The route requires an authenticated Neon Auth session, rejects unsupported meeting hosts, creates a local meeting row, and schedules a Recall bot with `/api/recall/webhook` in metadata for status correlation plus `/api/recall/realtime/webhook` in the bot recording config for live chat and participant events. The Recall bot receives the local `meetingId` in metadata so later webhooks can update the same meeting.
 
 Google sign in identifies the user through Neon Auth, so keep the Neon Auth Google redirect URI configured for sign in. Calendar permission is owned by Recall Calendar V2, not by this app. Connect the Google Calendar account in Recall, then store `https://meeting-note-swart.vercel.app/api/recall/calendar/webhook` in the Recall dashboard as the Calendar V2 webhook endpoint for production. Use the local tunnel URL above for local testing.
 
@@ -220,6 +231,10 @@ Meeting transcript pages can export transcript text, export MP3 audio through th
 Recall bot status and Calendar V2 webhooks are delivered to endpoints configured in the Recall dashboard. ElevenLabs speech to text webhooks are delivered to workspace configured webhooks when transcript jobs set `webhook=true`. All vendor webhook routes verify vendor signatures from the raw request body before parsing the event, store an idempotency record, and only apply side effects for newly inserted webhook events.
 
 Recall bot status webhooks update the local meeting status when metadata contains a `meetingId`. Recall Calendar V2 webhooks keep scheduled meeting rows in sync without requiring the user to click Sync calendar. Completed Recall recordings store Recall speaker timeline data when available, then queue ElevenLabs transcription when Recall exposes a recording media URL. ElevenLabs webhooks update the local transcript job, store transcript text as transcript segments, map speaker ids to Recall participant names by timestamp, and mark the meeting ready when metadata contains `meetingId` and `transcriptJobId`.
+
+Recall realtime webhook URLs are embedded into each scheduled bot. After changing `NEXT_PUBLIC_APP_URL`, audit future scheduled bots in Recall and patch any `recording_config.realtime_endpoints` entries that still point at the old origin. Updating the environment and redeploying only affects newly created or later updated bots.
+
+Enable retries on the ElevenLabs workspace webhook. The app returns `503` for an unfinished duplicate delivery so the provider can retry after the original processing claim becomes stale, but ElevenLabs retry delivery is controlled by the workspace webhook setting.
 
 Inngest events do not register functions by themselves. After deploying the app or changing `NEXT_PUBLIC_APP_URL`, run `npm run inngest:sync` to sync the public `/api/inngest` endpoint. If this sync is missing, upload rows can be created while transcript jobs stay queued with no ElevenLabs provider job id, and the location reminder plus hourly Recall Calendar repair crons will not be registered. Normal calendar scheduling is still driven by Recall Calendar V2 reconciliation and webhooks.
 

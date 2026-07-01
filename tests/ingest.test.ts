@@ -549,6 +549,7 @@ describe("vendor webhook normalization", () => {
   it("skips ElevenLabs transcript persistence for duplicate webhooks", async () => {
     recordVendorWebhookEvent.mockResolvedValueOnce({
       inserted: false,
+      processed: true,
       shouldProcess: false,
     });
 
@@ -570,6 +571,39 @@ describe("vendor webhook normalization", () => {
     expect(applyElevenLabsTranscriptEvent).not.toHaveBeenCalled();
   });
 
+  it("asks ElevenLabs to retry unfinished duplicate webhooks", async () => {
+    recordVendorWebhookEvent.mockResolvedValueOnce({
+      inserted: false,
+      processed: false,
+      shouldProcess: false,
+    });
+
+    const response = await postElevenLabsWebhook({
+      type: "speech_to_text_transcription",
+      data: {
+        request_id: "req_123",
+        webhook_metadata: {
+          meetingId: "11111111-1111-4111-8111-111111111111",
+          transcriptJobId: "22222222-2222-4222-8222-222222222222",
+        },
+        transcription: {
+          text: "Transcript text",
+        },
+      },
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      received: false,
+      result: {
+        action: "retry",
+        reason: "processing",
+      },
+    });
+    expect(applyElevenLabsTranscriptEvent).not.toHaveBeenCalled();
+    expect(markVendorWebhookEventProcessed).not.toHaveBeenCalled();
+  });
+
   it("returns 400 for invalid ElevenLabs webhook payloads", async () => {
     const response = await postElevenLabsWebhook({
       type: "speech_to_text_transcription",
@@ -585,24 +619,38 @@ describe("vendor webhook normalization", () => {
   });
 
   it("returns 500 when ElevenLabs webhook persistence fails", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
     recordVendorWebhookEvent.mockRejectedValueOnce(new Error("db down"));
 
-    const response = await postElevenLabsWebhook({
-      type: "speech_to_text_transcription",
-      data: {
-        request_id: "req_123",
-        webhook_metadata: {},
-        transcription: {
-          text: "Transcript text",
+    try {
+      const response = await postElevenLabsWebhook({
+        type: "speech_to_text_transcription",
+        data: {
+          request_id: "req_123",
+          webhook_metadata: {},
+          transcription: {
+            text: "Transcript text",
+          },
         },
-      },
-    });
+      });
 
-    expect(response.status).toBe(500);
-    await expect(response.json()).resolves.toEqual({
-      error: "Webhook processing failed",
-    });
-    expect(applyElevenLabsTranscriptEvent).not.toHaveBeenCalled();
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({
+        error: "Webhook processing failed",
+      });
+      expect(applyElevenLabsTranscriptEvent).not.toHaveBeenCalled();
+      expect(consoleError).toHaveBeenCalledWith(
+        "ElevenLabs webhook processing failed",
+        expect.objectContaining({
+          eventType: "speech_to_text_transcription",
+          idempotencyKey: "req_123",
+        }),
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("rejects unsigned ElevenLabs webhook requests", async () => {
@@ -714,6 +762,7 @@ describe("vendor webhook normalization", () => {
   it("skips Recall meeting updates for duplicate webhooks", async () => {
     recordVendorWebhookEvent.mockResolvedValueOnce({
       inserted: false,
+      processed: true,
       shouldProcess: false,
     });
 
@@ -738,6 +787,42 @@ describe("vendor webhook normalization", () => {
     expect(applyRecallMeetingEvent).not.toHaveBeenCalled();
   });
 
+  it("asks Recall to retry unfinished duplicate bot status webhooks", async () => {
+    recordVendorWebhookEvent.mockResolvedValueOnce({
+      inserted: false,
+      processed: false,
+      shouldProcess: false,
+    });
+
+    const response = await postRecallWebhook({
+      event: "bot.status_change",
+      data: {
+        data: {
+          code: "done",
+          sub_code: "recording_done",
+          updated_at: "2026-06-23T12:00:00Z",
+        },
+        bot: {
+          id: "bot_123",
+          metadata: {
+            meetingId: "11111111-1111-4111-8111-111111111111",
+          },
+        },
+      },
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      received: false,
+      result: {
+        action: "retry",
+        reason: "processing",
+      },
+    });
+    expect(applyRecallMeetingEvent).not.toHaveBeenCalled();
+    expect(markVendorWebhookEventProcessed).not.toHaveBeenCalled();
+  });
+
   it("returns 400 for invalid Recall webhook payloads", async () => {
     const response = await postRecallWebhook({
       event: "bot.status_change",
@@ -753,28 +838,42 @@ describe("vendor webhook normalization", () => {
   });
 
   it("returns 500 when Recall webhook persistence fails", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
     recordVendorWebhookEvent.mockRejectedValueOnce(new Error("db down"));
 
-    const response = await postRecallWebhook({
-      event: "bot.status_change",
-      data: {
+    try {
+      const response = await postRecallWebhook({
+        event: "bot.status_change",
         data: {
-          code: "done",
-          sub_code: "recording_done",
-          updated_at: "2026-06-23T12:00:00Z",
+          data: {
+            code: "done",
+            sub_code: "recording_done",
+            updated_at: "2026-06-23T12:00:00Z",
+          },
+          bot: {
+            id: "bot_123",
+            metadata: {},
+          },
         },
-        bot: {
-          id: "bot_123",
-          metadata: {},
-        },
-      },
-    });
+      });
 
-    expect(response.status).toBe(500);
-    await expect(response.json()).resolves.toEqual({
-      error: "Webhook processing failed",
-    });
-    expect(applyRecallMeetingEvent).not.toHaveBeenCalled();
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({
+        error: "Webhook processing failed",
+      });
+      expect(applyRecallMeetingEvent).not.toHaveBeenCalled();
+      expect(consoleError).toHaveBeenCalledWith(
+        "Recall webhook processing failed",
+        expect.objectContaining({
+          eventType: "bot.status_change",
+          idempotencyKey: "msg_test",
+        }),
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("rejects unsigned Recall webhook requests", async () => {

@@ -19,6 +19,7 @@ import {
   verifyElevenLabsWebhook,
   webhookVerificationResponse,
 } from "@/lib/webhook-signatures";
+import { logWebhookProcessingError } from "@/lib/webhook-error-logging";
 
 export const runtime = "nodejs";
 
@@ -48,6 +49,16 @@ export async function POST(request: Request) {
       idempotencyKey,
       payload: body,
     });
+
+    if (!recorded.shouldProcess && recorded.processed === false) {
+      return Response.json(
+        {
+          received: false,
+          result: { action: "retry", reason: "processing" },
+        },
+        { status: 503 },
+      );
+    }
 
     if (recorded.shouldProcess) {
       const persistence = await applyElevenLabsTranscriptEvent(event);
@@ -92,6 +103,12 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+
+    logWebhookProcessingError("ElevenLabs webhook processing failed", {
+      eventType: event.eventType,
+      idempotencyKey: getElevenLabsWebhookIdempotencyKey(event) ?? "",
+      error,
+    });
 
     return Response.json(
       { error: "Webhook processing failed" },
