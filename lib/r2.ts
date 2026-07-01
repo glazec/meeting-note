@@ -53,7 +53,10 @@ export class ObjectNotFoundError extends Error {
   }
 }
 
-const requiredTrimmedString = z.string().trim().min(1);
+const requiredTrimmedString = z
+  .string()
+  .transform((value) => value.replace(/\\r|\\n/g, "").trim())
+  .pipe(z.string().min(1));
 
 const r2EnvSchema = z.object({
   R2_ACCOUNT_ID: requiredTrimmedString,

@@ -351,6 +351,34 @@ describe("local recorder API routes", () => {
     );
   });
 
+  it("returns a browser sign in bridge for unsigned in device login requests", async () => {
+    createLocalRecorderDeviceSession.mockResolvedValue({
+      error: "Unauthorized",
+    });
+
+    const { GET } = await import(
+      "@/app/api/local-recorder/device-login/route"
+    );
+    const response = await GET(
+      new Request(
+        "https://app.example.com/api/local-recorder/device-login?deviceId=mac_123&callbackUrl=meetingnote-local-recorder%3A%2F%2Flogin",
+        {
+          headers: { accept: "text/html,application/xhtml+xml" },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/html");
+
+    const body = await response.text();
+    expect(body).toContain("Opening sign in");
+    expect(body).toContain("Continue to sign in");
+    expect(body).toContain(
+      "https://app.example.com/auth/sign-in?callbackUrl=%2Fapi%2Flocal-recorder%2Fdevice-login%3FdeviceId%3Dmac_123%26callbackUrl%3Dmeetingnote-local-recorder%253A%252F%252Flogin",
+    );
+  });
+
   it("preserves controlled device login error statuses", async () => {
     createLocalRecorderDeviceSession.mockResolvedValue({
       error: "Shared users cannot add meetings",

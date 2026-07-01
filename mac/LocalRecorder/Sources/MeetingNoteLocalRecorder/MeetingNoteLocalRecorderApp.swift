@@ -6,16 +6,25 @@ import ServiceManagement
 import SwiftUI
 import UserNotifications
 
+@MainActor
+private let externalURLDispatcher = LocalRecorderExternalURLDispatcher()
+
+private final class LocalRecorderAppDelegate: NSObject, NSApplicationDelegate {
+    func application(_ application: NSApplication, open urls: [URL]) {
+        Task { @MainActor in
+            externalURLDispatcher.openURLs(urls)
+        }
+    }
+}
+
 @main
 struct MeetingNoteLocalRecorderApp: App {
+    @NSApplicationDelegateAdaptor(LocalRecorderAppDelegate.self) private var appDelegate
     @StateObject private var model = RecorderAppModel()
 
     var body: some Scene {
         MenuBarExtra("Meeting Note Recorder", systemImage: model.menuBarImage) {
             RecorderMenuView(model: model)
-                .onOpenURL { url in
-                    model.handleLoginCallback(url)
-                }
         }
         .menuBarExtraStyle(.window)
     }
@@ -57,6 +66,9 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
         self.serverURLText = credentials?.serverURLText ?? Self.defaultServerURLText
         self.bearerToken = credentials?.bearerToken ?? ""
         super.init()
+        externalURLDispatcher.setHandler { [weak self] url in
+            self?.handleLoginCallback(url)
+        }
         notificationCenter.delegate = self
         if !bearerToken.isEmpty {
             statusText = "Grant permissions to start monitoring"
@@ -81,19 +93,18 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
             return
         }
 
-        var components = URLComponents(
-            url: serverURL.appending(path: "/api/local-recorder/device-login"),
-            resolvingAgainstBaseURL: false
-        )
-        components?.queryItems = [
-            URLQueryItem(name: "deviceId", value: deviceIdStore.deviceId),
-            URLQueryItem(name: "callbackUrl", value: "meetingnote-local-recorder://login"),
-        ]
-
-        if let url = components?.url {
-            NSWorkspace.shared.open(url)
-            statusText = "Complete login in your browser"
+        guard
+            let url = makeLocalRecorderBrowserLoginURL(
+                serverURL: serverURL,
+                deviceId: deviceIdStore.deviceId
+            )
+        else {
+            statusText = "Enter a valid server URL"
+            return
         }
+
+        NSWorkspace.shared.open(url)
+        statusText = "Complete login in your browser"
     }
 
     func handleLoginCallback(_ url: URL) {

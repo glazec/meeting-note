@@ -252,6 +252,60 @@ public enum LocalRecorderLoginCallbackError: Error, Equatable {
     case invalidCallback
 }
 
+@MainActor
+public final class LocalRecorderExternalURLDispatcher {
+    private var handler: ((URL) -> Void)?
+    private var queuedURLs: [URL] = []
+
+    public init() {}
+
+    public func setHandler(_ handler: @escaping (URL) -> Void) {
+        self.handler = handler
+        let urls = queuedURLs
+        queuedURLs.removeAll()
+        urls.forEach(handler)
+    }
+
+    public func openURLs(_ urls: [URL]) {
+        guard let handler else {
+            queuedURLs.append(contentsOf: urls)
+            return
+        }
+
+        urls.forEach(handler)
+    }
+}
+
+public func makeLocalRecorderBrowserLoginURL(serverURL: URL, deviceId: String) -> URL? {
+    var deviceLoginComponents = URLComponents()
+    deviceLoginComponents.path = "/api/local-recorder/device-login"
+    deviceLoginComponents.percentEncodedQuery = [
+        "deviceId=\(percentEncodeQueryValue(deviceId))",
+        "callbackUrl=meetingnote-local-recorder%3A%2F%2Flogin",
+    ].joined(separator: "&")
+
+    guard let deviceLoginCallback = deviceLoginComponents.string else {
+        return nil
+    }
+
+    var signInComponents = URLComponents(
+        url: serverURL.appending(path: "/auth/sign-in"),
+        resolvingAgainstBaseURL: false
+    )
+    signInComponents?.percentEncodedQuery =
+        "callbackUrl=\(percentEncodeQueryValue(deviceLoginCallback))"
+
+    return signInComponents?.url
+}
+
+private let queryValueAllowedCharacters = CharacterSet(
+    charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+)
+
+private func percentEncodeQueryValue(_ value: String) -> String {
+    value.addingPercentEncoding(withAllowedCharacters: queryValueAllowedCharacters) ?? ""
+}
+
 public struct LocalRecorderLoginCallback: Equatable, Sendable {
     public var serverURL: URL
     public var token: String

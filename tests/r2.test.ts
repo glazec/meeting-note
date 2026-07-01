@@ -89,4 +89,20 @@ describe("parseR2Env", () => {
       R2_BUCKET: "recordings",
     });
   });
+
+  it("removes copied escaped newline markers from R2 values", () => {
+    expect(
+      parseR2Env({
+        R2_ACCOUNT_ID: "account-id\\n",
+        R2_ACCESS_KEY_ID: "access-key-id\\n",
+        R2_SECRET_ACCESS_KEY: "secret-access-key\\n",
+        R2_BUCKET: "recordings\\n",
+      }),
+    ).toEqual({
+      R2_ACCOUNT_ID: "account-id",
+      R2_ACCESS_KEY_ID: "access-key-id",
+      R2_SECRET_ACCESS_KEY: "secret-access-key",
+      R2_BUCKET: "recordings",
+    });
+  });
 });

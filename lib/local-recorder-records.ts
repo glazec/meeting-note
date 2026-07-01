@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
@@ -65,6 +65,13 @@ export function buildLocalRecorderTranscriptionEvent(
   };
 }
 
+export function isLocalRecorderCandidateVisibleInLookup(input: {
+  now: Date;
+  startedAt: Date | null;
+}) {
+  return Boolean(input.startedAt && input.startedAt <= input.now);
+}
+
 export async function listMissedLocalRecorderMeetings(input: {
   deviceId: string;
   now: Date;
@@ -121,6 +128,8 @@ export async function listMissedLocalRecorderMeetings(input: {
       and(
         eq(meetings.teamId, input.workspace.teamId),
         isNotNull(meetings.meetingUrl),
+        isNotNull(meetings.startedAt),
+        lte(meetings.startedAt, input.now),
       ),
     )
     .orderBy(desc(meetings.startedAt))
@@ -128,6 +137,15 @@ export async function listMissedLocalRecorderMeetings(input: {
   const items: LocalRecorderMeetingItem[] = [];
 
   for (const row of rows) {
+    if (
+      !isLocalRecorderCandidateVisibleInLookup({
+        now: input.now,
+        startedAt: row.startedAt,
+      })
+    ) {
+      continue;
+    }
+
     const candidate: LocalRecorderCandidate = {
       activeTranscriptJob: row.activeTranscriptJob,
       endedAt: row.endedAt,
@@ -463,8 +481,9 @@ export async function completeLocalRecorderRecordingUpload(input: {
   });
   const env = parseR2Env(process.env);
 
-  const recording = await db.transaction(async (tx) => {
-    await tx.insert(mediaAssets).values([
+  await db
+    .insert(mediaAssets)
+    .values([
       {
         bucket: env.R2_BUCKET,
         fileSizeBytes: normalizeLocalRecorderFileSizeBytes(
@@ -504,42 +523,37 @@ export async function completeLocalRecorderRecordingUpload(input: {
         source: "local_recorder",
         type: "synthesized_audio",
       },
-    ]);
+    ])
+    .onConflictDoNothing();
 
-    const [recording] = await tx
-      .insert(localRecordings)
-      .values({
-        clientRecordingId: input.clientRecordingId,
-        computerAudioAssetId: input.assets.computerAudioAssetId,
-        isPrimary: true,
-        localRecordingAttemptId: attempt.id,
-        manifest: input.manifest,
-        meetingId: attempt.meetingId,
-        microphoneAudioAssetId: input.assets.microphoneAudioAssetId,
-        ownerUserId: input.workspace.userId,
-        recordingStartedAt: input.recordingStartedAt,
-        recordingStoppedAt: input.recordingStoppedAt,
-        synthesizedAudioAssetId: input.assets.synthesizedAudioAssetId,
-        synthesisStatus: "completed",
-      })
-      .onConflictDoUpdate({
-        target: [
-          localRecordings.ownerUserId,
-          localRecordings.clientRecordingId,
-        ],
-        set: {
-          updatedAt: now,
-        },
-      })
-      .returning({ id: localRecordings.id });
+  const [recording] = await db
+    .insert(localRecordings)
+    .values({
+      clientRecordingId: input.clientRecordingId,
+      computerAudioAssetId: input.assets.computerAudioAssetId,
+      isPrimary: true,
+      localRecordingAttemptId: attempt.id,
+      manifest: input.manifest,
+      meetingId: attempt.meetingId,
+      microphoneAudioAssetId: input.assets.microphoneAudioAssetId,
+      ownerUserId: input.workspace.userId,
+      recordingStartedAt: input.recordingStartedAt,
+      recordingStoppedAt: input.recordingStoppedAt,
+      synthesizedAudioAssetId: input.assets.synthesizedAudioAssetId,
+      synthesisStatus: "completed",
+    })
+    .onConflictDoUpdate({
+      target: [localRecordings.ownerUserId, localRecordings.clientRecordingId],
+      set: {
+        updatedAt: now,
+      },
+    })
+    .returning({ id: localRecordings.id });
 
-    await tx
-      .update(localRecordingAttempts)
-      .set({ attemptState: "uploaded", updatedAt: now })
-      .where(eq(localRecordingAttempts.id, attempt.id));
-
-    return recording;
-  });
+  await db
+    .update(localRecordingAttempts)
+    .set({ attemptState: "uploaded", updatedAt: now })
+    .where(eq(localRecordingAttempts.id, attempt.id));
   const transcriptionEventInput =
     await getOrCreateLocalRecorderTranscriptionEventInput({
       localRecordingId: recording.id,

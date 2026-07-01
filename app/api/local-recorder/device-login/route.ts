@@ -20,7 +20,13 @@ export async function GET(request: Request) {
 
   if ("error" in result) {
     if (result.error === "Unauthorized") {
-      return Response.redirect(buildSignInRedirectUrl(request.url));
+      const signInUrl = buildSignInRedirectUrl(request.url);
+
+      if (acceptsHtml(request)) {
+        return buildSignInBridgeResponse(signInUrl);
+      }
+
+      return Response.redirect(signInUrl);
     }
 
     return Response.json(
@@ -38,4 +44,50 @@ function buildSignInRedirectUrl(requestUrl: string) {
 
   signInUrl.searchParams.set("callbackUrl", `${url.pathname}${url.search}`);
   return signInUrl;
+}
+
+function acceptsHtml(request: Request) {
+  return request.headers.get("accept")?.toLowerCase().includes("text/html");
+}
+
+function buildSignInBridgeResponse(signInUrl: URL) {
+  const href = escapeHtml(signInUrl.toString());
+  const scriptUrl = JSON.stringify(signInUrl.toString()).replaceAll(
+    "<",
+    "\\u003c",
+  );
+
+  return new Response(
+    `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="0;url=${href}">
+  <title>Opening sign in</title>
+  <script>window.location.replace(${scriptUrl});</script>
+</head>
+<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#ffffff;color:#111827;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+  <main style="max-width:32rem;padding:2rem;text-align:center;">
+    <h1 style="font-size:1.5rem;line-height:2rem;margin:0 0 0.75rem;">Opening sign in</h1>
+    <p style="margin:0 0 1.25rem;color:#4b5563;">Continue in your browser to finish connecting the recorder.</p>
+    <a href="${href}" style="display:inline-block;border-radius:0.5rem;background:#2563eb;color:#ffffff;padding:0.625rem 1rem;text-decoration:none;font-weight:600;">Continue to sign in</a>
+  </main>
+</body>
+</html>`,
+    {
+      headers: {
+        "cache-control": "no-store",
+        "content-type": "text/html; charset=utf-8",
+      },
+    },
+  );
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }

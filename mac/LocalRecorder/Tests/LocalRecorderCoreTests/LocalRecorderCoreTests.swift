@@ -195,12 +195,46 @@ import Testing
     #expect(callback.serverURL.absoluteString == "https://app.example.com")
 }
 
+@MainActor
+@Test func externalURLDispatcherQueuesCallbacksUntilHandlerIsRegistered() {
+    let dispatcher = LocalRecorderExternalURLDispatcher()
+    let queuedURL = URL(
+        string: "meetingnote-local-recorder://login?token=token_123&server=https%3A%2F%2Fapp.example.com"
+    )!
+    let laterURL = URL(
+        string: "meetingnote-local-recorder://login?token=token_456&server=https%3A%2F%2Fapp.example.com"
+    )!
+    var receivedURLs: [URL] = []
+
+    dispatcher.openURLs([queuedURL])
+    dispatcher.setHandler { url in
+        receivedURLs.append(url)
+    }
+    dispatcher.openURLs([laterURL])
+
+    #expect(receivedURLs == [queuedURL, laterURL])
+}
+
 @Test func loginCallbackRejectsUnexpectedScheme() {
     #expect(throws: LocalRecorderLoginCallbackError.self) {
         _ = try LocalRecorderLoginCallback(
             url: URL(string: "https://app.example.com/login?token=token_123")!
         )
     }
+}
+
+@Test func browserLoginURLStartsAtSignInWithEncodedDeviceCallback() throws {
+    let url = try #require(
+        makeLocalRecorderBrowserLoginURL(
+            serverURL: URL(string: "https://app.example.com")!,
+            deviceId: "device_123"
+        )
+    )
+
+    #expect(
+        url.absoluteString ==
+            "https://app.example.com/auth/sign-in?callbackUrl=%2Fapi%2Flocal-recorder%2Fdevice-login%3FdeviceId%3Ddevice_123%26callbackUrl%3Dmeetingnote-local-recorder%253A%252F%252Flogin"
+    )
 }
 
 @Test func failIntentRequestIncludesRecorderHeadersAndReason() throws {

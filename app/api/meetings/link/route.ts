@@ -6,7 +6,11 @@ import {
   markMeetingBotFailed,
   markMeetingBotScheduled,
 } from "@/lib/meeting-bot-records";
-import { buildAppUrl, detectMeetingPlatform } from "@/lib/meeting-links";
+import {
+  buildAppUrl,
+  detectMeetingPlatform,
+  resolveMeetingJoinUrl,
+} from "@/lib/meeting-links";
 import {
   getMeetingBotMetadata,
   getMeetingBotProfile,
@@ -48,12 +52,18 @@ export async function POST(request: Request) {
     );
   }
 
-  let scheduledMeeting: { meetingId: string; teamId: string };
+  const meetingUrl = await resolveMeetingJoinUrl(result.data.meetingUrl);
+  let scheduledMeeting: {
+    meetingId: string;
+    teamId: string;
+    startAt?: string;
+    recallBotId?: string;
+  };
 
   try {
     scheduledMeeting = await createScheduledMeetingBot({
       sessionUser: user,
-      meetingUrl: result.data.meetingUrl,
+      meetingUrl,
       platform,
     });
   } catch (error) {
@@ -66,11 +76,22 @@ export async function POST(request: Request) {
     return Response.json({ error: "Meeting unavailable" }, { status: 500 });
   }
 
+  if (scheduledMeeting.recallBotId) {
+    return Response.json({
+      botId: scheduledMeeting.recallBotId,
+      meetingId: scheduledMeeting.meetingId,
+      meetingUrl,
+      platform,
+      status: "scheduled",
+    });
+  }
+
   try {
     const botProfile = await getMeetingBotProfile(scheduledMeeting.teamId);
     const bot = (await scheduleRecallBot({
-      meetingUrl: result.data.meetingUrl,
+      meetingUrl,
       ...getMeetingBotRecallCreateInput(botProfile),
+      ...(scheduledMeeting.startAt ? { startAt: scheduledMeeting.startAt } : {}),
       webhookUrl: buildAppUrl("/api/recall/webhook"),
       metadata: {
         ...getMeetingBotMetadata(botProfile),
@@ -90,7 +111,7 @@ export async function POST(request: Request) {
     return Response.json({
       botId: bot.id,
       meetingId: scheduledMeeting.meetingId,
-      meetingUrl: result.data.meetingUrl,
+      meetingUrl,
       platform,
       status: "scheduled",
     });

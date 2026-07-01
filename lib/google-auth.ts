@@ -27,7 +27,10 @@ export function normalizeGoogleSignInCallbackURL(
       return defaultCallbackURL;
     }
 
-    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    const query = parsed.searchParams.toString();
+    const search = query ? `?${query}` : "";
+
+    return `${parsed.pathname}${search}${parsed.hash}`;
   } catch {
     return defaultCallbackURL;
   }

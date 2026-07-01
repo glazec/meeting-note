@@ -68,6 +68,7 @@ describe("POST /api/meetings/link", () => {
     createScheduledMeetingBot.mockReset();
     markMeetingBotFailed.mockReset();
     markMeetingBotScheduled.mockReset();
+    vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     vi.resetModules();
   });
@@ -164,6 +165,112 @@ describe("POST /api/meetings/link", () => {
       platform: "zoom",
       status: "scheduled",
     });
+  });
+
+  it("schedules a Recall bot for Zoom personal room links", async () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com/");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(null, {
+          status: 302,
+          headers: {
+            location:
+              "https://iosg-vc.zoom.us/j/8436420171?pwd=RU5mZ2VSMUpqbGRPclNFajBTV0RBdz09&_x_zm_rtaid=tracking",
+          },
+        }),
+      ),
+    );
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    createScheduledMeetingBot.mockResolvedValue({
+      meetingId: "22222222-2222-4222-8222-222222222222",
+      teamId: "22222222-2222-4222-8222-222222222222",
+    });
+    scheduleRecallBot.mockResolvedValue({ id: "bot_456" });
+    markMeetingBotScheduled.mockResolvedValue(undefined);
+
+    const meetingUrl =
+      "https://iosg-vc.zoom.us/my/yiping?pwd=RU5mZ2VSMUpqbGRPclNFajBTV0RBdz09";
+    const canonicalMeetingUrl =
+      "https://zoom.us/j/8436420171?pwd=RU5mZ2VSMUpqbGRPclNFajBTV0RBdz09";
+    const response = await postMeetingLink({ meetingUrl });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      botId: "bot_456",
+      meetingId: "22222222-2222-4222-8222-222222222222",
+      meetingUrl: canonicalMeetingUrl,
+      platform: "zoom",
+      status: "scheduled",
+    });
+    expect(createScheduledMeetingBot).toHaveBeenCalledWith({
+      sessionUser: {
+        id: "user_123",
+        email: "user@example.com",
+        name: null,
+      },
+      meetingUrl: canonicalMeetingUrl,
+      platform: "zoom",
+    });
+  });
+
+  it("passes a matched calendar start time to Recall scheduling", async () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com/");
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    createScheduledMeetingBot.mockResolvedValue({
+      meetingId: "22222222-2222-4222-8222-222222222222",
+      teamId: "22222222-2222-4222-8222-222222222222",
+      startAt: "2026-07-02T02:00:00.000Z",
+    });
+    scheduleRecallBot.mockResolvedValue({ id: "bot_456" });
+    markMeetingBotScheduled.mockResolvedValue(undefined);
+
+    const meetingUrl = "https://zoom.us/j/8851797582";
+    const response = await postMeetingLink({ meetingUrl });
+
+    expect(response.status).toBe(200);
+    expect(scheduleRecallBot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        meetingUrl,
+        startAt: "2026-07-02T02:00:00.000Z",
+      }),
+    );
+  });
+
+  it("returns an existing scheduled calendar bot without creating another bot", async () => {
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    createScheduledMeetingBot.mockResolvedValue({
+      meetingId: "22222222-2222-4222-8222-222222222222",
+      teamId: "22222222-2222-4222-8222-222222222222",
+      startAt: "2026-07-02T02:00:00.000Z",
+      recallBotId: "existing_bot",
+    });
+
+    const meetingUrl = "https://zoom.us/j/8851797582";
+    const response = await postMeetingLink({ meetingUrl });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      botId: "existing_bot",
+      meetingId: "22222222-2222-4222-8222-222222222222",
+      meetingUrl,
+      platform: "zoom",
+      status: "scheduled",
+    });
+    expect(scheduleRecallBot).not.toHaveBeenCalled();
+    expect(markMeetingBotScheduled).not.toHaveBeenCalled();
   });
 
   it("rejects unsupported meeting links", async () => {

@@ -486,8 +486,38 @@ function normalizeRecallCalendarEvent(event: unknown): SyncedCalendarEvent | nul
     description: getString(raw?.description),
     hangoutLink: getString(raw?.hangoutLink),
     isDeleted,
+    recallCalendarEventBots: normalizeRecallCalendarEventBots(candidate.bots),
     conferenceData: normalizeConferenceData(raw?.conferenceData),
   };
+}
+
+function normalizeRecallCalendarEventBots(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((bot) => {
+      const candidate = getRecord(bot);
+      const botId = getString(candidate?.bot_id);
+
+      if (!botId) {
+        return null;
+      }
+
+      return {
+        botId,
+        deduplicationKey: getString(candidate?.deduplication_key),
+      };
+    })
+    .filter(
+      (
+        bot,
+      ): bot is {
+        botId: string;
+        deduplicationKey: string | null;
+      } => Boolean(bot),
+    );
 }
 
 function normalizeRecallCalendar(calendar: unknown): RecallCalendarSummary | null {

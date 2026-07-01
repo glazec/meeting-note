@@ -442,6 +442,95 @@ describe("calendar auto join", () => {
     );
   });
 
+  it("replaces a stale Recall Calendar V2 bot from another team before scheduling", async () => {
+    const calendarEventReturning = vi
+      .fn()
+      .mockResolvedValue([{ id: "33333333-3333-4333-8333-333333333333" }]);
+    const calendarEventOnConflictDoUpdate = vi
+      .fn()
+      .mockReturnValue({ returning: calendarEventReturning });
+    const calendarEventValues = vi
+      .fn()
+      .mockReturnValue({ onConflictDoUpdate: calendarEventOnConflictDoUpdate });
+
+    const meetingReturning = vi
+      .fn()
+      .mockResolvedValue([{ id: "44444444-4444-4444-8444-444444444444" }]);
+    const meetingValues = vi.fn().mockReturnValue({ returning: meetingReturning });
+
+    const existingLimit = vi.fn().mockResolvedValue([]);
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
+    const updateSet = vi.fn().mockReturnValue({ where: updateWhere });
+
+    insert
+      .mockReturnValueOnce({ values: calendarEventValues })
+      .mockReturnValueOnce({ values: meetingValues });
+    select.mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: existingLimit,
+        }),
+      }),
+    });
+    update.mockReturnValue({ set: updateSet });
+    deleteRecallCalendarEventBot.mockResolvedValue({});
+    scheduleRecallCalendarEventBot.mockResolvedValue({
+      bots: [
+        {
+          bot_id: "iosg_bot",
+          deduplication_key:
+            "team:22222222-2222-4222-8222-222222222222:start:2026-07-06T01:30:00.000Z:url:https://zoom.us/j/6898482622",
+        },
+      ],
+    });
+
+    const { autoJoinCalendarEvent } = await import("@/lib/calendar-auto-join");
+
+    await expect(
+      autoJoinCalendarEvent({
+        connection: {
+          id: "11111111-1111-4111-8111-111111111111",
+          teamId: "22222222-2222-4222-8222-222222222222",
+          userId: "55555555-5555-4555-8555-555555555555",
+          autoJoinEnabled: true,
+        },
+        event: {
+          externalEventId: "google_event_123",
+          recallCalendarEventId: "66666666-6666-4666-8666-666666666666",
+          recallCalendarEventBots: [
+            {
+              botId: "surf_bot",
+              deduplicationKey:
+                "team:99999999-9999-4999-8999-999999999999:start:2026-07-06T01:30:00.000Z:url:https://zoom.us/j/6898482622",
+            },
+          ],
+          title: "IOSG Weekly Team Meeting",
+          startsAt: "2026-07-06T01:30:00.000Z",
+          meetingUrl: "https://zoom.us/j/6898482622",
+        },
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        action: "scheduled",
+        recallBotId: "iosg_bot",
+      }),
+    );
+
+    expect(deleteRecallCalendarEventBot).toHaveBeenCalledWith({
+      calendarEventId: "66666666-6666-4666-8666-666666666666",
+    });
+    expect(scheduleRecallCalendarEventBot).toHaveBeenCalledWith({
+      calendarEventId: "66666666-6666-4666-8666-666666666666",
+      deduplicationKey:
+        "team:22222222-2222-4222-8222-222222222222:start:2026-07-06T01:30:00.000Z:url:https://zoom.us/j/6898482622",
+      botName: "IOSG Old Friend",
+      metadata: {
+        calendarEventId: "33333333-3333-4333-8333-333333333333",
+        meetingId: "44444444-4444-4444-8444-444444444444",
+      },
+    });
+  });
+
   it("matches Recall Calendar V2 bot responses by the team dedupe key", async () => {
     const calendarEventReturning = vi
       .fn()

@@ -54,6 +54,10 @@ export type SyncedCalendarEvent = {
   isDeleted?: boolean;
   recallCalendarEventId?: string | null;
   recallCalendarEventDeduplicationKey?: string | null;
+  recallCalendarEventBots?: Array<{
+    botId: string;
+    deduplicationKey: string | null;
+  }>;
   conferenceData?: {
     entryPoints?: CalendarEventEntryPoint[] | null;
   } | null;
@@ -798,7 +802,15 @@ async function scheduleBotForCalendarEvent(input: {
   };
 
   if (input.event.recallCalendarEventId) {
-    if (input.existingBotId) {
+    const deduplicationKey = getRecallCalendarEventBotDeduplicationKey({
+      event: input.event,
+      teamMeetingKey: input.teamMeetingKey,
+    });
+
+    if (
+      input.existingBotId ||
+      hasConflictingRecallCalendarEventBot(input.event, deduplicationKey)
+    ) {
       await deleteRecallCalendarEventBot({
         calendarEventId: input.event.recallCalendarEventId,
       });
@@ -806,10 +818,7 @@ async function scheduleBotForCalendarEvent(input: {
 
     return (await scheduleRecallCalendarEventBot({
       calendarEventId: input.event.recallCalendarEventId,
-      deduplicationKey:
-        input.teamMeetingKey ??
-        input.event.recallCalendarEventDeduplicationKey ??
-        input.event.recallCalendarEventId,
+      deduplicationKey: deduplicationKey ?? input.event.recallCalendarEventId,
       ...getMeetingBotRecallCreateInput(botProfile),
       metadata,
     })) as RecallBotResponse;
@@ -910,6 +919,15 @@ function getRecallBotResponseId(
   }
 
   return typeof bot.id === "string" ? bot.id : null;
+}
+
+function hasConflictingRecallCalendarEventBot(
+  event: SyncedCalendarEvent,
+  deduplicationKey: string | null,
+) {
+  return event.recallCalendarEventBots?.some(
+    (bot) => bot.deduplicationKey !== deduplicationKey,
+  );
 }
 
 function hasScheduledBotChange(

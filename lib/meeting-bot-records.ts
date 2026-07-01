@@ -1,7 +1,7 @@
-import { eq } from "drizzle-orm";
+import { and, asc, eq, gte, ilike, or } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { meetings } from "@/db/schema";
+import { calendarEvents, meetings } from "@/db/schema";
 import type { SessionUser } from "@/lib/auth";
 import type { SupportedMeetingPlatform } from "@/lib/meeting-links";
 import {
@@ -20,6 +20,62 @@ export async function createScheduledMeetingBot(
 ) {
   const workspace = await getOrCreateWorkspaceForSessionUser(input.sessionUser);
   await assertCanCreateMeetings(workspace);
+  const calendarEvent = await findUpcomingCalendarEventByMeetingUrl({
+    meetingUrl: input.meetingUrl,
+    teamId: workspace.teamId,
+  });
+
+  if (calendarEvent) {
+    const existingMeeting = await findMeetingForCalendarEvent({
+      calendarEventId: calendarEvent.id,
+      teamId: workspace.teamId,
+    });
+
+    if (existingMeeting) {
+      await db
+        .update(meetings)
+        .set({
+          meetingUrl: input.meetingUrl,
+          platform: input.platform,
+          status: "scheduled",
+          title: calendarEvent.title,
+          startedAt: calendarEvent.startsAt,
+          endedAt: calendarEvent.endsAt,
+          updatedAt: new Date(),
+        })
+        .where(eq(meetings.id, existingMeeting.id));
+
+      return {
+        meetingId: existingMeeting.id,
+        teamId: workspace.teamId,
+        startAt: calendarEvent.startsAt.toISOString(),
+        ...(existingMeeting.status === "scheduled" && existingMeeting.recallBotId
+          ? { recallBotId: existingMeeting.recallBotId }
+          : {}),
+      };
+    }
+
+    const [meeting] = await db
+      .insert(meetings)
+      .values({
+        teamId: workspace.teamId,
+        ownerUserId: workspace.userId,
+        calendarEventId: calendarEvent.id,
+        title: calendarEvent.title,
+        platform: input.platform,
+        status: "scheduled",
+        meetingUrl: input.meetingUrl,
+        startedAt: calendarEvent.startsAt,
+        endedAt: calendarEvent.endsAt,
+      })
+      .returning({ id: meetings.id });
+
+    return {
+      meetingId: meeting.id,
+      teamId: workspace.teamId,
+      startAt: calendarEvent.startsAt.toISOString(),
+    };
+  }
 
   const [meeting] = await db
     .insert(meetings)
@@ -44,6 +100,7 @@ export async function markMeetingBotScheduled(input: {
     .update(meetings)
     .set({
       recallBotId: input.recallBotId,
+      status: "scheduled",
       updatedAt: new Date(),
     })
     .where(eq(meetings.id, input.meetingId));
@@ -61,4 +118,56 @@ export async function markMeetingBotFailed(input: { meetingId: string }) {
 
 function defaultMeetingTitle(platform: SupportedMeetingPlatform) {
   return platform === "google_meet" ? "Google Meet recording" : "Zoom recording";
+}
+
+async function findUpcomingCalendarEventByMeetingUrl(input: {
+  teamId: string;
+  meetingUrl: string;
+}) {
+  const [calendarEvent] = await db
+    .select({
+      id: calendarEvents.id,
+      title: calendarEvents.title,
+      meetingUrl: calendarEvents.meetingUrl,
+      startsAt: calendarEvents.startsAt,
+      endsAt: calendarEvents.endsAt,
+    })
+    .from(calendarEvents)
+    .where(
+      and(
+        eq(calendarEvents.teamId, input.teamId),
+        gte(calendarEvents.startsAt, new Date()),
+        or(
+          eq(calendarEvents.meetingUrl, input.meetingUrl),
+          eq(calendarEvents.location, input.meetingUrl),
+          ilike(calendarEvents.description, `%${input.meetingUrl}%`),
+        ),
+      ),
+    )
+    .orderBy(asc(calendarEvents.startsAt))
+    .limit(1);
+
+  return calendarEvent ?? null;
+}
+
+async function findMeetingForCalendarEvent(input: {
+  teamId: string;
+  calendarEventId: string;
+}) {
+  const [meeting] = await db
+    .select({
+      id: meetings.id,
+      recallBotId: meetings.recallBotId,
+      status: meetings.status,
+    })
+    .from(meetings)
+    .where(
+      and(
+        eq(meetings.teamId, input.teamId),
+        eq(meetings.calendarEventId, input.calendarEventId),
+      ),
+    )
+    .limit(1);
+
+  return meeting ?? null;
 }
