@@ -464,6 +464,11 @@ export const localRecordingAttempts = pgTable(
       table.fallbackIntentIdHash,
     ),
     index("local_recording_attempts_meeting_index").on(table.meetingId),
+    uniqueIndex("local_recording_attempts_primary_active_unique")
+      .on(table.meetingId)
+      .where(
+        sql`${table.attemptState} in ('started', 'uploading', 'uploaded')`,
+      ),
   ],
 );
 
@@ -537,6 +542,9 @@ export const localRecordings = pgTable(
     uniqueIndex("local_recordings_attempt_unique").on(
       table.localRecordingAttemptId,
     ),
+    uniqueIndex("local_recordings_meeting_primary_unique")
+      .on(table.meetingId)
+      .where(sql`${table.isPrimary} = true`),
   ],
 );
 

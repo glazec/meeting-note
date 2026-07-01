@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const createLocalRecorderDeviceSession = vi.fn();
-const getLocalRecorderWorkspace = vi.fn();
+const getLocalRecorderDeviceRequestContext = vi.fn();
 const listMissedLocalRecorderMeetings = vi.fn();
 const claimLocalRecorderIntent = vi.fn();
 const failLocalRecorderIntent = vi.fn();
@@ -9,7 +9,7 @@ const createLocalRecorderRecording = vi.fn();
 
 vi.mock("@/lib/local-recorder-auth", () => ({
   createLocalRecorderDeviceSession,
-  getLocalRecorderWorkspace,
+  getLocalRecorderDeviceRequestContext,
 }));
 
 vi.mock("@/lib/local-recorder-records", () => ({
@@ -19,10 +19,21 @@ vi.mock("@/lib/local-recorder-records", () => ({
   listMissedLocalRecorderMeetings,
 }));
 
+function mockSignedInDevice() {
+  getLocalRecorderDeviceRequestContext.mockResolvedValue({
+    ok: true,
+    deviceId: "mac_123",
+    workspace: {
+      teamId: "team_123",
+      userId: "user_123",
+    },
+  });
+}
+
 describe("local recorder API routes", () => {
   afterEach(() => {
     createLocalRecorderDeviceSession.mockReset();
-    getLocalRecorderWorkspace.mockReset();
+    getLocalRecorderDeviceRequestContext.mockReset();
     listMissedLocalRecorderMeetings.mockReset();
     claimLocalRecorderIntent.mockReset();
     failLocalRecorderIntent.mockReset();
@@ -31,10 +42,7 @@ describe("local recorder API routes", () => {
   });
 
   it("returns eligible missed meetings for a signed in Mac device", async () => {
-    getLocalRecorderWorkspace.mockResolvedValue({
-      teamId: "team_123",
-      userId: "user_123",
-    });
+    mockSignedInDevice();
     listMissedLocalRecorderMeetings.mockResolvedValue([
       {
         displayTimeWindow: {
@@ -81,10 +89,7 @@ describe("local recorder API routes", () => {
   });
 
   it("claims a fallback intent before recording starts", async () => {
-    getLocalRecorderWorkspace.mockResolvedValue({
-      teamId: "team_123",
-      userId: "user_123",
-    });
+    mockSignedInDevice();
     claimLocalRecorderIntent.mockResolvedValue({
       claimed: true,
       meetingTitle: "Weekly sync",
@@ -112,10 +117,7 @@ describe("local recorder API routes", () => {
   });
 
   it("marks a claimed fallback intent failed when local capture cannot start", async () => {
-    getLocalRecorderWorkspace.mockResolvedValue({
-      teamId: "team_123",
-      userId: "user_123",
-    });
+    mockSignedInDevice();
     failLocalRecorderIntent.mockResolvedValue({
       failed: true,
     });
@@ -150,10 +152,7 @@ describe("local recorder API routes", () => {
   });
 
   it("uploads two tracks and queues local recording processing", async () => {
-    getLocalRecorderWorkspace.mockResolvedValue({
-      teamId: "team_123",
-      userId: "user_123",
-    });
+    mockSignedInDevice();
     createLocalRecorderRecording.mockResolvedValue({
       meetingId: "11111111-1111-4111-8111-111111111111",
       queued: true,
@@ -205,10 +204,7 @@ describe("local recorder API routes", () => {
   });
 
   it("returns 400 when the local recording manifest is invalid JSON", async () => {
-    getLocalRecorderWorkspace.mockResolvedValue({
-      teamId: "team_123",
-      userId: "user_123",
-    });
+    mockSignedInDevice();
 
     const formData = new FormData();
     formData.set("fallbackIntentId", "intent_123");

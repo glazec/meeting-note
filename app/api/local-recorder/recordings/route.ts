@@ -1,4 +1,4 @@
-import { getLocalRecorderWorkspace } from "@/lib/local-recorder-auth";
+import { getLocalRecorderDeviceRequestContext } from "@/lib/local-recorder-auth";
 import {
   createLocalRecorderRecording,
   LocalRecorderUploadError,
@@ -8,16 +8,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
-  const workspace = await getLocalRecorderWorkspace(request);
+  const deviceContext = await getLocalRecorderDeviceRequestContext(request);
 
-  if (!workspace) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const deviceId = request.headers.get("x-local-recorder-device-id")?.trim();
-
-  if (!deviceId) {
-    return Response.json({ error: "Missing recorder device" }, { status: 400 });
+  if (!deviceContext.ok) {
+    return Response.json(
+      { error: deviceContext.error },
+      { status: deviceContext.status },
+    );
   }
 
   const formData = await request.formData().catch(() => null);
@@ -49,13 +46,13 @@ export async function POST(request: Request) {
     const result = await createLocalRecorderRecording({
       clientRecordingId,
       computerAudio,
-      deviceId,
+      deviceId: deviceContext.deviceId,
       fallbackIntentId,
       manifest: manifest.value,
       microphoneAudio,
       recordingStartedAt,
       recordingStoppedAt,
-      workspace,
+      workspace: deviceContext.workspace,
     });
 
     return Response.json(result, { status: 202 });

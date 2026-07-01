@@ -16,36 +16,62 @@ export async function getLocalRecorderWorkspace(
 ): Promise<WorkspaceContext | null> {
   const bearerToken = getBearerToken(request);
 
-  if (bearerToken) {
-    const tokenHash = await hashLocalRecorderSecret(bearerToken);
-    const [session] = await db
-      .select({
-        teamId: localRecorderDeviceSessions.teamId,
-        userId: localRecorderDeviceSessions.userId,
-      })
-      .from(localRecorderDeviceSessions)
-      .where(
-        and(
-          eq(localRecorderDeviceSessions.tokenHash, tokenHash),
-          gt(localRecorderDeviceSessions.expiresAt, new Date()),
-          isNull(localRecorderDeviceSessions.revokedAt),
-        ),
-      )
-      .limit(1);
-
-    return session
-      ? {
-          canCreateMeetings: true,
-          domain: "",
-          teamId: session.teamId,
-          userId: session.userId,
-        }
-      : null;
+  if (!bearerToken) {
+    return null;
   }
 
-  const user = await getCurrentUser();
+  const tokenHash = await hashLocalRecorderSecret(bearerToken);
+  const [session] = await db
+    .select({
+      teamId: localRecorderDeviceSessions.teamId,
+      userId: localRecorderDeviceSessions.userId,
+    })
+    .from(localRecorderDeviceSessions)
+    .where(
+      and(
+        eq(localRecorderDeviceSessions.tokenHash, tokenHash),
+        gt(localRecorderDeviceSessions.expiresAt, new Date()),
+        isNull(localRecorderDeviceSessions.revokedAt),
+      ),
+    )
+    .limit(1);
 
-  return user ? getOrCreateWorkspaceForSessionUser(user) : null;
+  return session
+    ? {
+        canCreateMeetings: true,
+        domain: "",
+        teamId: session.teamId,
+        userId: session.userId,
+      }
+    : null;
+}
+
+export async function getLocalRecorderDeviceRequestContext(request: Request) {
+  const workspace = await getLocalRecorderWorkspace(request);
+
+  if (!workspace) {
+    return {
+      ok: false as const,
+      error: "Unauthorized",
+      status: 401,
+    };
+  }
+
+  const deviceId = request.headers.get("x-local-recorder-device-id")?.trim();
+
+  if (!deviceId) {
+    return {
+      ok: false as const,
+      error: "Missing recorder device",
+      status: 400,
+    };
+  }
+
+  return {
+    ok: true as const,
+    deviceId,
+    workspace,
+  };
 }
 
 export async function createLocalRecorderDeviceSession(input: {
@@ -59,9 +85,9 @@ export async function createLocalRecorderDeviceSession(input: {
     return { error: "Unauthorized" as const };
   }
 
-  const callbackUrl = new URL(input.callbackUrl);
+  const callbackUrl = parseLocalRecorderCallbackUrl(input.callbackUrl);
 
-  if (callbackUrl.protocol !== "meetingnote-local-recorder:") {
+  if (!callbackUrl) {
     return { error: "Invalid callback" as const };
   }
 
@@ -110,4 +136,23 @@ function createDeviceToken() {
   const bytes = crypto.getRandomValues(new Uint8Array(deviceTokenBytes));
 
   return Buffer.from(bytes).toString("base64url");
+}
+
+function parseLocalRecorderCallbackUrl(value: string) {
+  try {
+    const callbackUrl = new URL(value);
+
+    if (
+      callbackUrl.protocol !== "meetingnote-local-recorder:" ||
+      callbackUrl.hostname !== "login"
+    ) {
+      return null;
+    }
+
+    callbackUrl.search = "";
+    callbackUrl.hash = "";
+    return callbackUrl;
+  } catch {
+    return null;
+  }
 }

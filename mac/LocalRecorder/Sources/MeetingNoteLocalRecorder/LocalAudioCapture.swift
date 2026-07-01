@@ -146,7 +146,17 @@ final class LocalRecordingCaptureSession {
 }
 
 enum LocalRecorderFileLocations {
+    static func uploadQueueDirectoryURL() -> URL {
+        applicationSupportDirectoryURL()
+            .appending(path: "PendingUploads", directoryHint: .isDirectory)
+    }
+
     static func recordingsDirectoryURL() -> URL {
+        applicationSupportDirectoryURL()
+            .appending(path: "Recordings", directoryHint: .isDirectory)
+    }
+
+    private static func applicationSupportDirectoryURL() -> URL {
         let baseURL = FileManager.default.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
@@ -154,7 +164,6 @@ enum LocalRecorderFileLocations {
 
         return baseURL
             .appending(path: "MeetingNoteLocalRecorder", directoryHint: .isDirectory)
-            .appending(path: "Recordings", directoryHint: .isDirectory)
     }
 }
 

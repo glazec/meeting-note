@@ -45,13 +45,14 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
     private let uploadQueue: LocalRecordingUploadQueue
     private var activeClient: LocalRecorderAPIClient?
     private var isUploadingQueuedRecordings = false
+    private var monitoringTimer: Timer?
 
     override init() {
         let credentialStore = LocalRecorderKeychainCredentialStore()
         let credentials = try? credentialStore.load()
         self.credentialStore = credentialStore
         self.uploadQueue = LocalRecordingUploadQueue(
-            directoryURL: Self.uploadQueueDirectoryURL()
+            directoryURL: LocalRecorderFileLocations.uploadQueueDirectoryURL()
         )
         self.serverURLText = credentials?.serverURLText ?? Self.defaultServerURLText
         self.bearerToken = credentials?.bearerToken ?? ""
@@ -107,23 +108,10 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
                 )
             )
             statusText = "Grant permissions to start monitoring"
-            Task {
-                await retryQueuedUploadsIfPossible()
-            }
+            requestPermissions()
         } catch {
             statusText = "Could not finish login"
         }
-    }
-
-    private static func uploadQueueDirectoryURL() -> URL {
-        let baseURL = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first ?? FileManager.default.temporaryDirectory
-
-        return baseURL
-            .appending(path: "MeetingNoteLocalRecorder", directoryHint: .isDirectory)
-            .appending(path: "PendingUploads", directoryHint: .isDirectory)
     }
 
     private func makeClient() -> LocalRecorderAPIClient? {
@@ -193,7 +181,7 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
         Task {
             let microphone = await requestMicrophonePermission()
             let notifications = await requestNotificationPermission()
-            let screenCapture = CGPreflightScreenCaptureAccess() ? PermissionGrant.granted : .denied
+            let screenCapture = requestScreenCapturePermission()
 
             permissionChecklist = PermissionChecklist(
                 microphone: microphone,
@@ -201,9 +189,11 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
                 notifications: notifications,
                 startAtLogin: configureStartAtLogin()
             )
-            statusText = permissionChecklist.canMonitor
-                ? "Monitoring missed bot joins"
-                : "Permissions needed before monitoring"
+            if permissionChecklist.canMonitor {
+                startMonitoring()
+            } else {
+                statusText = "Permissions needed before monitoring"
+            }
         }
     }
 
@@ -255,6 +245,17 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
                 }
             } catch {
                 statusText = "Could not check missed meetings"
+            }
+        }
+    }
+
+    private func startMonitoring() {
+        monitoringTimer?.invalidate()
+        statusText = "Monitoring missed bot joins"
+        checkNow()
+        monitoringTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.checkNow()
             }
         }
     }
@@ -397,6 +398,14 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
         } catch {
             return .denied
         }
+    }
+
+    private func requestScreenCapturePermission() -> PermissionGrant {
+        if CGPreflightScreenCaptureAccess() {
+            return .granted
+        }
+
+        return CGRequestScreenCaptureAccess() ? .granted : .denied
     }
 
     private func configureStartAtLogin() -> PermissionGrant {
