@@ -1,12 +1,27 @@
 import { redirect } from "next/navigation";
 
-import { getCurrentUser } from "@/lib/auth";
+import { isAdminSessionUser } from "@/lib/admin-access";
+import { getAuthenticatedUser, getCurrentUser } from "@/lib/auth";
 
 export async function requireCurrentUser() {
   const user = await getCurrentUser();
 
   if (!user) {
     redirect("/auth/sign-in");
+  }
+
+  return user;
+}
+
+export async function requireAdminUser() {
+  const user = await getAuthenticatedUser();
+
+  if (!user) {
+    redirect("/auth/sign-in");
+  }
+
+  if (!isAdminSessionUser(user)) {
+    redirect("/dashboard");
   }
 
   return user;

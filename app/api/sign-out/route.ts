@@ -1,4 +1,7 @@
 import {
+  buildExpiredAdminImpersonationCookie,
+} from "@/lib/admin-access";
+import {
   buildExpiredNeonAuthCookie,
   getNeonAuthCookieNames,
 } from "@/lib/neon-auth-cookies";
@@ -13,6 +16,7 @@ export async function POST(request: Request) {
   )) {
     headers.append("set-cookie", buildExpiredNeonAuthCookie(cookieName));
   }
+  headers.append("set-cookie", buildExpiredAdminImpersonationCookie());
 
   return new Response(null, { status: 204, headers });
 }

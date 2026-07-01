@@ -19,6 +19,7 @@ describe("POST /api/sign-out", () => {
 
     expect(setCookie).toContain("__Secure-neon-auth.session_token=");
     expect(setCookie).toContain("__Secure-neon-auth.local.session_data=");
+    expect(setCookie).toContain("meeting_note_impersonated_user_id=");
     expect(setCookie).not.toContain("app_theme");
   });
 });

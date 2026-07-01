@@ -19,7 +19,7 @@ Team meeting transcript product.
 
 1. Copy `.env.example` to `.env.local`.
 2. If an agent is helping with setup, complete the Agent Setup Interview below before editing `.env.local` or changing providers.
-3. Fill in Neon, R2, Recall, ElevenLabs, OpenRouter, Inngest, OneSignal, and optional Twenty CRM credentials. Google sign in is configured in Neon Auth. Calendar permission is owned by Recall Calendar V2, not by Google credentials in this app. `NEON_AUTH_BASE_URL` is optional when `NEON_AUTH_JWKS_URL` ends with `/.well-known/jwks.json`; generate `NEON_AUTH_COOKIE_SECRET` with `openssl rand -base64 32`.
+3. Fill in Neon, R2, Recall, ElevenLabs, OpenRouter, Inngest, OneSignal, and optional Twenty CRM credentials. Google sign in is configured in Neon Auth. Calendar permission is owned by Recall Calendar V2, not by Google credentials in this app. `NEON_AUTH_BASE_URL` is optional when `NEON_AUTH_JWKS_URL` ends with `/.well-known/jwks.json`; generate `NEON_AUTH_COOKIE_SECRET` with `openssl rand -base64 32`. Set `APP_ADMIN_EMAILS` to the comma separated owner email list allowed to use `/admin`.
    Set `RECALL_API_BASE_URL` to the region for the Recall API key, for example `https://ap-northeast-1.recall.ai`.
 4. Run `npm install`.
 5. Run `npm run dev`.
