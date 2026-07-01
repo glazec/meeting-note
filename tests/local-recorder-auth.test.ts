@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { getCurrentUser, getWorkspace, limit, select, where } = vi.hoisted(() => ({
-  getCurrentUser: vi.fn(),
-  getWorkspace: vi.fn(),
-  limit: vi.fn(),
-  select: vi.fn(),
-  where: vi.fn(),
-}));
+const { assertCanCreateMeetings, getCurrentUser, getWorkspace, limit, select, where } =
+  vi.hoisted(() => ({
+    assertCanCreateMeetings: vi.fn(),
+    getCurrentUser: vi.fn(),
+    getWorkspace: vi.fn(),
+    limit: vi.fn(),
+    select: vi.fn(),
+    where: vi.fn(),
+  }));
 
 vi.mock("@/db/client", () => ({
   db: {
@@ -19,6 +21,7 @@ vi.mock("@/lib/auth", () => ({
 }));
 
 vi.mock("@/lib/workspace", () => ({
+  assertCanCreateMeetings,
   getOrCreateWorkspaceForSessionUser: getWorkspace,
 }));
 
@@ -26,6 +29,7 @@ describe("local recorder auth", () => {
   afterEach(() => {
     getCurrentUser.mockReset();
     getWorkspace.mockReset();
+    assertCanCreateMeetings.mockReset();
     limit.mockReset();
     select.mockReset();
     where.mockReset();
@@ -65,6 +69,7 @@ describe("local recorder auth", () => {
     where.mockReturnValue({ limit });
     limit.mockResolvedValue([
       {
+        canCreateMeetings: true,
         teamId: "team_123",
         userId: "user_123",
       },
@@ -87,6 +92,35 @@ describe("local recorder auth", () => {
       teamId: "team_123",
       userId: "user_123",
     });
+  });
+
+  it("rejects bearer device sessions after a user loses creator access", async () => {
+    select.mockReturnValue({
+      from: () => ({
+        where,
+      }),
+    });
+    where.mockReturnValue({ limit });
+    limit.mockResolvedValue([
+      {
+        canCreateMeetings: false,
+        teamId: "team_123",
+        userId: "user_123",
+      },
+    ]);
+
+    const { getLocalRecorderWorkspace } = await import(
+      "@/lib/local-recorder-auth"
+    );
+    const workspace = await getLocalRecorderWorkspace(
+      new Request("https://app.example.com/api/local-recorder/missed-meetings", {
+        headers: {
+          authorization: "Bearer token_123",
+        },
+      }),
+    );
+
+    expect(workspace).toBeNull();
   });
 
   it("returns a controlled error for malformed device login callbacks", async () => {
@@ -127,5 +161,37 @@ describe("local recorder auth", () => {
         requestUrl: "https://app.example.com/api/local-recorder/device-login",
       }),
     ).resolves.toEqual({ error: "Invalid callback" });
+  });
+
+  it("rejects shared only users before creating a device session", async () => {
+    const { SharedOnlyAccessError } = await import("@/lib/access-errors");
+
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "reader@partner.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({
+      canCreateMeetings: false,
+      domain: "partner.com",
+      teamId: "team_123",
+      userId: "user_123",
+    });
+    assertCanCreateMeetings.mockRejectedValue(new SharedOnlyAccessError());
+
+    const { createLocalRecorderDeviceSession } = await import(
+      "@/lib/local-recorder-auth"
+    );
+
+    await expect(
+      createLocalRecorderDeviceSession({
+        callbackUrl: "meetingnote-local-recorder://login",
+        deviceId: "mac_123",
+        requestUrl: "https://app.example.com/api/local-recorder/device-login",
+      }),
+    ).resolves.toEqual({
+      error: "Shared users cannot add meetings",
+      status: 403,
+    });
   });
 });

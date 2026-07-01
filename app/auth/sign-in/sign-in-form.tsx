@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { authClient } from "@/lib/auth/client";
 import { buildGoogleSignInOptions } from "@/lib/google-auth";
 
-export function SignInForm() {
+export function SignInForm({ callbackUrl }: { callbackUrl?: string }) {
   const [error, setError] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
 
@@ -17,7 +17,9 @@ export function SignInForm() {
     setError(null);
 
     try {
-      const result = await authClient.signIn.social(buildGoogleSignInOptions());
+      const result = await authClient.signIn.social(
+        buildGoogleSignInOptions(callbackUrl),
+      );
 
       if (result.error) {
         setError(result.error.message || "Google sign in failed");

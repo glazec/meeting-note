@@ -10,7 +10,10 @@ vi.mock("@/inngest/client", () => ({
   },
 }));
 
-import { buildLocalRecorderTranscriptionEvent } from "@/lib/local-recorder-records";
+import {
+  buildLocalRecorderTranscriptionEvent,
+  isLocalRecorderPrimaryClaimConflict,
+} from "@/lib/local-recorder-records";
 
 describe("local recorder records", () => {
   it("builds a deterministic transcription event for completion retries", () => {
@@ -33,5 +36,20 @@ describe("local recorder records", () => {
         transcriptJobId: "33333333-3333-4333-8333-333333333333",
       },
     });
+  });
+
+  it("detects concurrent primary local recorder claim conflicts", () => {
+    expect(
+      isLocalRecorderPrimaryClaimConflict({
+        code: "23505",
+        constraint: "local_recording_attempts_primary_active_unique",
+      }),
+    ).toBe(true);
+    expect(
+      isLocalRecorderPrimaryClaimConflict({
+        code: "23505",
+        constraint: "other_unique_index",
+      }),
+    ).toBe(false);
   });
 });

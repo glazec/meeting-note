@@ -326,4 +326,49 @@ describe("local recorder API routes", () => {
       "meetingnote-local-recorder://login?token=token_123&server=https%3A%2F%2Fapp.example.com",
     );
   });
+
+  it("redirects unsigned in device login requests through web sign in", async () => {
+    createLocalRecorderDeviceSession.mockResolvedValue({
+      error: "Unauthorized",
+    });
+
+    const { GET } = await import(
+      "@/app/api/local-recorder/device-login/route"
+    );
+    const response = await GET(
+      new Request(
+        "https://app.example.com/api/local-recorder/device-login?deviceId=mac_123&callbackUrl=meetingnote-local-recorder%3A%2F%2Flogin",
+      ),
+    );
+
+    const location = new URL(response.headers.get("location") ?? "");
+
+    expect(response.status).toBe(302);
+    expect(location.origin).toBe("https://app.example.com");
+    expect(location.pathname).toBe("/auth/sign-in");
+    expect(location.searchParams.get("callbackUrl")).toBe(
+      "/api/local-recorder/device-login?deviceId=mac_123&callbackUrl=meetingnote-local-recorder%3A%2F%2Flogin",
+    );
+  });
+
+  it("preserves controlled device login error statuses", async () => {
+    createLocalRecorderDeviceSession.mockResolvedValue({
+      error: "Shared users cannot add meetings",
+      status: 403,
+    });
+
+    const { GET } = await import(
+      "@/app/api/local-recorder/device-login/route"
+    );
+    const response = await GET(
+      new Request(
+        "https://app.example.com/api/local-recorder/device-login?deviceId=mac_123&callbackUrl=meetingnote-local-recorder%3A%2F%2Flogin",
+      ),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "Shared users cannot add meetings",
+    });
+  });
 });

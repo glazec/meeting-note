@@ -1,9 +1,11 @@
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { localRecorderDeviceSessions } from "@/db/schema";
+import { localRecorderDeviceSessions, teamMemberships } from "@/db/schema";
+import { SharedOnlyAccessError } from "@/lib/access-errors";
 import { getCurrentUser } from "@/lib/auth";
 import {
+  assertCanCreateMeetings,
   getOrCreateWorkspaceForSessionUser,
   type WorkspaceContext,
 } from "@/lib/workspace";
@@ -23,6 +25,13 @@ export async function getLocalRecorderWorkspace(
   const tokenHash = await hashLocalRecorderSecret(bearerToken);
   const [session] = await db
     .select({
+      canCreateMeetings: sql<boolean>`coalesce((
+        select ${teamMemberships.role} <> 'external'
+        from ${teamMemberships}
+        where ${teamMemberships.teamId} = ${localRecorderDeviceSessions.teamId}
+          and ${teamMemberships.userId} = ${localRecorderDeviceSessions.userId}
+        limit 1
+      ), false)`,
       teamId: localRecorderDeviceSessions.teamId,
       userId: localRecorderDeviceSessions.userId,
     })
@@ -36,7 +45,7 @@ export async function getLocalRecorderWorkspace(
     )
     .limit(1);
 
-  return session
+  return session?.canCreateMeetings
     ? {
         canCreateMeetings: true,
         domain: "",
@@ -92,6 +101,19 @@ export async function createLocalRecorderDeviceSession(input: {
   }
 
   const workspace = await getOrCreateWorkspaceForSessionUser(user);
+  try {
+    await assertCanCreateMeetings(workspace);
+  } catch (error) {
+    if (error instanceof SharedOnlyAccessError) {
+      return {
+        error: "Shared users cannot add meetings" as const,
+        status: 403,
+      };
+    }
+
+    throw error;
+  }
+
   const token = createDeviceToken();
   const tokenHash = await hashLocalRecorderSecret(token);
   const deviceIdHash = await hashLocalRecorderSecret(input.deviceId);

@@ -19,8 +19,23 @@ export async function GET(request: Request) {
   });
 
   if ("error" in result) {
-    return Response.json({ error: result.error }, { status: 401 });
+    if (result.error === "Unauthorized") {
+      return Response.redirect(buildSignInRedirectUrl(request.url));
+    }
+
+    return Response.json(
+      { error: result.error },
+      { status: "status" in result ? result.status : 401 },
+    );
   }
 
   return Response.redirect(result.redirectUrl);
+}
+
+function buildSignInRedirectUrl(requestUrl: string) {
+  const url = new URL(requestUrl);
+  const signInUrl = new URL("/auth/sign-in", url.origin);
+
+  signInUrl.searchParams.set("callbackUrl", `${url.pathname}${url.search}`);
+  return signInUrl;
 }
