@@ -81,6 +81,7 @@ export const allowedDomains = pgTable(
     ...timestamps,
   },
   (table) => [
+    uniqueIndex("allowed_domains_domain_unique").on(table.domain),
     uniqueIndex("allowed_domains_team_domain_unique").on(
       table.teamId,
       table.domain,
