@@ -5,9 +5,11 @@ import { db } from "@/db/client";
 import { transcriptJobs, transcriptSegments } from "@/db/schema";
 import { inngest } from "./client";
 import { currentTranscriptJobIdSubquery } from "@/lib/current-transcript-job";
+import { convertVideoObjectToAudio } from "@/lib/media-conversion";
 import { createReadUrl } from "@/lib/r2";
 import { sendDueLocationReminders } from "@/lib/location-reminders";
 import { getMeetingVocabularyKeyterms } from "@/lib/team-vocabulary";
+import { completeUploadedVideoConversion } from "@/lib/transcription-records";
 import { createElevenLabsTranscriptJob } from "@/lib/vendors/elevenlabs";
 import {
   markMeetingTranslationCompleted,
@@ -44,6 +46,16 @@ const transcribeAudioDataSchema = z.union([
   }),
 ]);
 const TRANSCRIBE_AUDIO_RETRIES = 4;
+
+const convertVideoToAudioDataSchema = z.object({
+  meetingId: z.uuid(),
+  sourceMediaAssetId: z.uuid(),
+  sourceObjectKey: z.string().min(1),
+  audioMediaAssetId: z.uuid(),
+  audioObjectKey: z.string().min(1),
+  transcriptJobId: z.uuid(),
+});
+const CONVERT_VIDEO_TO_AUDIO_RETRIES = 2;
 
 const enrichTranscriptDataSchema = z.object({
   meetingId: z.uuid(),
@@ -112,6 +124,45 @@ export const transcribeAudio = inngest.createFunction(
       await markTranscriptJobFailedAfterFinalAttempt({
         attempt,
         error,
+        maxAttempts: TRANSCRIBE_AUDIO_RETRIES,
+        transcriptJobId: data.transcriptJobId,
+      });
+      throw error;
+    }
+  },
+);
+
+export const convertVideoToAudio = inngest.createFunction(
+  {
+    id: "convert-video-to-audio",
+    retries: CONVERT_VIDEO_TO_AUDIO_RETRIES,
+    triggers: [{ event: "meeting/convert.video-to-audio" }],
+  },
+  async ({ event, step, attempt = 0 }) => {
+    const data = convertVideoToAudioDataSchema.parse(event.data);
+
+    try {
+      await convertVideoObjectToAudio({
+        sourceObjectKey: data.sourceObjectKey,
+        audioObjectKey: data.audioObjectKey,
+      });
+
+      const transcription = await completeUploadedVideoConversion({
+        meetingId: data.meetingId,
+        audioMediaAssetId: data.audioMediaAssetId,
+        audioObjectKey: data.audioObjectKey,
+        transcriptJobId: data.transcriptJobId,
+      });
+
+      return step.sendEvent("queue-audio-transcription", {
+        name: "meeting/transcribe.audio",
+        data: transcription,
+      });
+    } catch (error) {
+      await markTranscriptJobFailedAfterFinalAttempt({
+        attempt,
+        error,
+        maxAttempts: CONVERT_VIDEO_TO_AUDIO_RETRIES,
         transcriptJobId: data.transcriptJobId,
       });
       throw error;
@@ -279,6 +330,7 @@ export const syncRecallCalendarsHourly = inngest.createFunction(
 export const functions = [
   scheduleMeetingBot,
   transcribeAudio,
+  convertVideoToAudio,
   enrichTranscript,
   sendLocationReminders,
   syncRecallCalendarsHourly,
@@ -309,11 +361,12 @@ function buildTranscriptMetadata(data: z.infer<typeof transcribeAudioDataSchema>
 async function markTranscriptJobFailedAfterFinalAttempt(input: {
   attempt: number;
   error: unknown;
+  maxAttempts: number;
   transcriptJobId?: string;
 }) {
   if (
     !input.transcriptJobId ||
-    input.attempt < TRANSCRIBE_AUDIO_RETRIES
+    input.attempt < input.maxAttempts
   ) {
     return;
   }

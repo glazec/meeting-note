@@ -7,6 +7,67 @@ describe("Recall Calendar V2 adapter", () => {
     vi.resetModules();
   });
 
+  it("creates a Calendar V2 connection from Google OAuth credentials", async () => {
+    vi.stubEnv("RECALL_API_KEY", "recall-key\n");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "44444444-4444-4444-8444-444444444444",
+          platform: "google_calendar",
+          platform_email: "yiping@iosg.vc",
+          status: "connecting",
+        }),
+        {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { createRecallCalendar } = await import("@/lib/vendors/recall");
+
+    await expect(
+      createRecallCalendar({
+        oauthClientId: "google-client-id",
+        oauthClientSecret: "google-client-secret",
+        oauthRefreshToken: "google-refresh-token",
+        platform: "google_calendar",
+        metadata: {
+          teamId: "22222222-2222-4222-8222-222222222222",
+          userId: "11111111-1111-4111-8111-111111111111",
+        },
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        id: "44444444-4444-4444-8444-444444444444",
+        status: "connecting",
+      }),
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://us-east-1.recall.ai/api/v2/calendars/",
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Token recall-key",
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          oauth_client_id: "google-client-id",
+          oauth_client_secret: "google-client-secret",
+          oauth_refresh_token: "google-refresh-token",
+          platform: "google_calendar",
+          metadata: {
+            teamId: "22222222-2222-4222-8222-222222222222",
+            userId: "11111111-1111-4111-8111-111111111111",
+          },
+        }),
+      },
+    );
+  });
+
   it("lists Recall managed calendars", async () => {
     vi.stubEnv("RECALL_API_KEY", "recall-key\n");
     const fetchMock = vi.fn().mockResolvedValue(

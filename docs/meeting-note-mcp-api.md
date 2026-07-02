@@ -29,7 +29,7 @@ MCP data access mirrors the app read policy:
 3. Workspace members can also read explicit shares from other teams.
 4. Pending share invites, calendar attendees, transcript speakers, and meeting ownership are not separate MCP authorization paths.
 5. Cancelled meetings are hidden from the SQL tables.
-6. Shared scoped SQL rows keep transcript content available but hide join URLs, URL derived grouping keys, and participant email lists.
+6. Shared scoped SQL rows keep transcript content available but hide workspace team ids, join URLs, URL derived grouping keys, and participant email lists.
 7. Duplicate allowed domains fail closed unless the user already has explicit team membership.
 
 The MCP does not create users, memberships, shares, translations, or transcripts. It only returns data already stored by the app. Users must already exist in the app because the MCP resolves access through `users.auth_user_id`.
@@ -120,7 +120,7 @@ The tool returns a URL, not bytes. The URL is still protected by the app session
 `readable_meetings`:
 
 1. `id`
-2. `team_id`
+2. `team_id` (null for shared rows)
 3. `title`
 4. `platform`
 5. `status`

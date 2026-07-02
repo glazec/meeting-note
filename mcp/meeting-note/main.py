@@ -87,7 +87,7 @@ SQL_SCHEMA = {
         "description": "One row per readable, non cancelled meeting.",
         "columns": [
             {"name": "id", "type": "uuid", "description": "Meeting id."},
-            {"name": "team_id", "type": "uuid", "description": "Workspace team id."},
+            {"name": "team_id", "type": "uuid", "description": "Workspace team id. Null for shared rows."},
             {"name": "title", "type": "text", "description": "Meeting title."},
             {"name": "platform", "type": "text", "description": "google_meet, zoom, in_person, or upload."},
             {"name": "status", "type": "text", "description": "scheduled, recording, processing, ready, failed, missed, or cancelled. Cancelled rows are excluded."},
@@ -1120,7 +1120,10 @@ def _build_sql_tool_query(user_sql: str, access_sql: str, access_scope_sql: str)
     with readable_meetings as (
         select
             m.id,
-            m.team_id,
+            case
+                when {access_scope_sql} = 'workspace' then m.team_id
+                else null::uuid
+            end as team_id,
             m.title,
             m.platform::text as platform,
             m.status::text as status,

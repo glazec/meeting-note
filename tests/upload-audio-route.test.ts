@@ -5,6 +5,7 @@ const getWorkspace = vi.fn();
 const assertCanCreateMeetings = vi.fn();
 const putObject = vi.fn();
 const createUploadedAudioTranscription = vi.fn();
+const createUploadedVideoTranscription = vi.fn();
 const revalidatePath = vi.fn();
 const send = vi.fn();
 
@@ -38,6 +39,7 @@ vi.mock("next/cache", () => ({
 
 vi.mock("@/lib/transcription-records", () => ({
   createUploadedAudioTranscription,
+  createUploadedVideoTranscription,
 }));
 
 async function postAudioUpload(
@@ -67,6 +69,7 @@ describe("POST /api/uploads/audio", () => {
     getWorkspace.mockReset();
     putObject.mockReset();
     createUploadedAudioTranscription.mockReset();
+    createUploadedVideoTranscription.mockReset();
     revalidatePath.mockReset();
     send.mockReset();
     vi.resetModules();
@@ -212,6 +215,76 @@ describe("POST /api/uploads/audio", () => {
     expect(createUploadedAudioTranscription).not.toHaveBeenCalled();
   });
 
+  it("queues video conversion before transcription for fallback MP4 uploads", async () => {
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+      "11111111-1111-4111-8111-111111111111",
+    );
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({
+      userId: "user_123",
+      teamId: "team_123",
+      domain: "example.com",
+    });
+    assertCanCreateMeetings.mockResolvedValue(undefined);
+    putObject.mockResolvedValue(undefined);
+    createUploadedVideoTranscription.mockResolvedValue({
+      meetingId: "22222222-2222-4222-8222-222222222222",
+      sourceMediaAssetId: "33333333-3333-4333-8333-333333333333",
+      audioMediaAssetId: "44444444-4444-4444-8444-444444444444",
+      transcriptJobId: "55555555-5555-4555-8555-555555555555",
+      audioObjectKey:
+        "teams/team_123/meetings/22222222-2222-4222-8222-222222222222/assets/44444444-4444-4444-8444-444444444444.mp3",
+    });
+    send.mockResolvedValue({ ids: ["evt_456"] });
+
+    const response = await postAudioUpload(
+      new File(["fake mp4"], "sample.mp4", { type: "video/mp4" }),
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      queued: true,
+      key: "users/user_123/uploads/11111111-1111-4111-8111-111111111111.mp4",
+      meetingId: "22222222-2222-4222-8222-222222222222",
+      redirectTo: "/dashboard",
+    });
+    expect(putObject).toHaveBeenCalledWith({
+      key: "users/user_123/uploads/11111111-1111-4111-8111-111111111111.mp4",
+      body: expect.any(Uint8Array),
+      contentType: "video/mp4",
+    });
+    expect(createUploadedAudioTranscription).not.toHaveBeenCalled();
+    expect(createUploadedVideoTranscription).toHaveBeenCalledWith({
+      sessionUser: {
+        id: "user_123",
+        email: "user@example.com",
+        name: null,
+      },
+      objectKey:
+        "users/user_123/uploads/11111111-1111-4111-8111-111111111111.mp4",
+      title: "sample",
+      fileSizeBytes: 8,
+      mimeType: "video/mp4",
+    });
+    expect(send).toHaveBeenCalledWith({
+      name: "meeting/convert.video-to-audio",
+      data: {
+        meetingId: "22222222-2222-4222-8222-222222222222",
+        sourceMediaAssetId: "33333333-3333-4333-8333-333333333333",
+        sourceObjectKey:
+          "users/user_123/uploads/11111111-1111-4111-8111-111111111111.mp4",
+        audioMediaAssetId: "44444444-4444-4444-8444-444444444444",
+        audioObjectKey:
+          "teams/team_123/meetings/22222222-2222-4222-8222-222222222222/assets/44444444-4444-4444-8444-444444444444.mp3",
+        transcriptJobId: "55555555-5555-4555-8555-555555555555",
+      },
+    });
+  });
+
   it("rejects non-MP3 files", async () => {
     getCurrentUser.mockResolvedValue({
       id: "user_123",
@@ -229,6 +302,7 @@ describe("POST /api/uploads/audio", () => {
     });
     expect(putObject).not.toHaveBeenCalled();
     expect(createUploadedAudioTranscription).not.toHaveBeenCalled();
+    expect(createUploadedVideoTranscription).not.toHaveBeenCalled();
   });
 
   it("rejects shared only users before storing fallback MP3 uploads", async () => {
@@ -257,6 +331,7 @@ describe("POST /api/uploads/audio", () => {
     });
     expect(putObject).not.toHaveBeenCalled();
     expect(createUploadedAudioTranscription).not.toHaveBeenCalled();
+    expect(createUploadedVideoTranscription).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
   });
 });

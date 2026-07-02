@@ -5,6 +5,7 @@ import { db } from "@/db/client";
 import { meetings, transcriptSegments } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { currentTranscriptJobIdSubquery } from "@/lib/current-transcript-job";
+import { getManageableMeetingCondition } from "@/lib/meeting-write-policy";
 import { getOrCreateWorkspaceForSessionUser } from "@/lib/workspace";
 
 export const runtime = "nodejs";
@@ -46,8 +47,7 @@ export async function PATCH(
     .innerJoin(meetings, eq(transcriptSegments.meetingId, meetings.id))
     .where(
       and(
-        eq(meetings.id, parsedMeetingId.data),
-        eq(meetings.teamId, workspace.teamId),
+        getManageableMeetingCondition(workspace, parsedMeetingId.data),
         eq(transcriptSegments.id, parsedSegmentId.data),
         eq(
           transcriptSegments.jobId,

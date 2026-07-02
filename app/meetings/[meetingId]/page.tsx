@@ -6,6 +6,7 @@ import { MeetingAutoRefresh } from "@/components/meeting-auto-refresh";
 import { MeetingActions } from "@/components/meeting-actions";
 import { MeetingEntityLinks } from "@/components/meeting-entity-links";
 import { MeetingTitleEditor } from "@/components/meeting-title-editor";
+import { RelatedMeetingsCard } from "@/components/related-meetings-card";
 import { ShareDialog } from "@/components/share-dialog";
 import { TranscriptViewer } from "@/components/transcript-viewer";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +14,7 @@ import { requireCurrentUser } from "@/lib/auth-guards";
 import { getMeetingDisplayStatus } from "@/lib/meeting-display-status";
 import {
   getMeetingTranscriptForWorkspace,
+  listMeetingDetailRelatedMeetingsForWorkspace,
   listWorkspaceShareRecipients,
 } from "@/lib/meeting-queries";
 import { getOrCreateWorkspaceForSessionUser } from "@/lib/workspace";
@@ -29,15 +31,19 @@ export default async function MeetingPage({
     params,
   ]);
   const workspace = await getOrCreateWorkspaceForSessionUser(user);
-  const [meeting, shareRecipients] = await Promise.all([
+  const [meeting, relatedMeetings] = await Promise.all([
     getMeetingTranscriptForWorkspace(workspace, meetingId),
-    listWorkspaceShareRecipients(workspace),
+    listMeetingDetailRelatedMeetingsForWorkspace(workspace, meetingId),
   ]);
 
   if (!meeting) {
     notFound();
   }
 
+  const canManage = meeting.canManage;
+  const shareRecipients = canManage
+    ? await listWorkspaceShareRecipients(workspace)
+    : [];
   const displayStatus = getMeetingDisplayStatus({
     meetingStatus: meeting.status,
     transcriptJobStatus: meeting.transcriptJobStatus,
@@ -60,7 +66,7 @@ export default async function MeetingPage({
             Meeting
           </p>
           <div className="mt-3 flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            {meeting.accessScope === "workspace" ? (
+            {canManage ? (
               <MeetingTitleEditor
                 meetingId={meetingId}
                 meetingTitle={meeting.title}
@@ -70,7 +76,7 @@ export default async function MeetingPage({
                 {meeting.title}
               </h1>
             )}
-            {meeting.accessScope === "workspace" ? (
+            {canManage ? (
               <div className="lg:hidden">
                 <MeetingActions
                   instanceId="mobile"
@@ -124,9 +130,7 @@ export default async function MeetingPage({
                     meeting.translationSummary.translatedSegments,
                   translationStatus: meeting.translationSummary.status,
                 })}
-                meetingId={
-                  meeting.accessScope === "workspace" ? meetingId : null
-                }
+                meetingId={canManage ? meetingId : null}
                 segments={meeting.segments}
                 speakerAliases={meeting.speakerAliases}
                 speakerSuggestions={meeting.speakerSuggestions}
@@ -139,10 +143,10 @@ export default async function MeetingPage({
 
         <aside
           className={`min-w-0 ${
-            meeting.accessScope === "workspace" ? "lg:pt-8" : "lg:pt-24"
+            canManage ? "lg:pt-8" : "lg:pt-24"
           }`}
         >
-          {meeting.accessScope === "workspace" ? (
+          {canManage ? (
             <>
               <div className="hidden lg:flex">
                 <MeetingActions
@@ -157,15 +161,23 @@ export default async function MeetingPage({
                   teamMembers={shareRecipients}
                 />
               </div>
+              <div className="mt-6">
+                <RelatedMeetingsCard meetings={relatedMeetings} />
+              </div>
             </>
           ) : (
-            <div className="rounded-lg border bg-card p-5">
-              <p className="text-sm font-semibold">Shared transcript</p>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                You can read this transcript. Adding meetings and sharing stay
-                with the workspace owner.
-              </p>
-            </div>
+            <>
+              <div className="rounded-lg border bg-card p-5">
+                <p className="text-sm font-semibold">Shared transcript</p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  You can read this transcript. Editing and sharing stay with
+                  the meeting owner.
+                </p>
+              </div>
+              <div className="mt-6">
+                <RelatedMeetingsCard meetings={relatedMeetings} />
+              </div>
+            </>
           )}
         </aside>
       </div>

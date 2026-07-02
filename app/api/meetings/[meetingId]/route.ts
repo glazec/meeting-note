@@ -1,9 +1,9 @@
-import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
 import { meetings } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { getManageableMeetingCondition } from "@/lib/meeting-write-policy";
 import { getOrCreateWorkspaceForSessionUser } from "@/lib/workspace";
 
 export const runtime = "nodejs";
@@ -41,12 +41,7 @@ export async function PATCH(
   const meetingRows = await db
     .select({ id: meetings.id })
     .from(meetings)
-    .where(
-      and(
-        eq(meetings.id, parsedMeetingId.data),
-        eq(meetings.teamId, workspace.teamId),
-      ),
-    )
+    .where(getManageableMeetingCondition(workspace, parsedMeetingId.data))
     .limit(1);
 
   if (!meetingRows[0]) {
@@ -59,12 +54,7 @@ export async function PATCH(
       title: parsedBody.data.title,
       updatedAt: new Date(),
     })
-    .where(
-      and(
-        eq(meetings.id, parsedMeetingId.data),
-        eq(meetings.teamId, workspace.teamId),
-      ),
-    );
+    .where(getManageableMeetingCondition(workspace, parsedMeetingId.data));
 
   return Response.json({
     meetingId: parsedMeetingId.data,
@@ -93,12 +83,7 @@ export async function DELETE(
   const meetingRows = await db
     .select({ id: meetings.id })
     .from(meetings)
-    .where(
-      and(
-        eq(meetings.id, parsedMeetingId.data),
-        eq(meetings.teamId, workspace.teamId),
-      ),
-    )
+    .where(getManageableMeetingCondition(workspace, parsedMeetingId.data))
     .limit(1);
 
   if (!meetingRows[0]) {
@@ -107,12 +92,7 @@ export async function DELETE(
 
   await db
     .delete(meetings)
-    .where(
-      and(
-        eq(meetings.id, parsedMeetingId.data),
-        eq(meetings.teamId, workspace.teamId),
-      ),
-    );
+    .where(getManageableMeetingCondition(workspace, parsedMeetingId.data));
 
   return Response.json({ deleted: true });
 }

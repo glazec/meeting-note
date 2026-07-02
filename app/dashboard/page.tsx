@@ -33,6 +33,7 @@ import { getDefaultMeetingLibraryView } from "@/lib/meeting-library-views";
 import {
   getMeetingDashboardSummaryForWorkspace,
   DEFAULT_MEETING_LIBRARY_HISTORY_MONTHS,
+  DEFAULT_RELATED_MEETING_HISTORY_MONTHS,
   MAX_MEETING_LIBRARY_HISTORY_MONTHS,
   MEETING_LIBRARY_HISTORY_MONTH_STEP,
   listMeetingLibraryPageForWorkspace,
@@ -77,10 +78,7 @@ export default async function DashboardPage({
   } = resolvedSearchParams;
   const currentPage = parseMeetingLibraryPage(page);
   const historyMonths = parseMeetingLibraryHistoryMonths(historyMonthsParam);
-  const relatedHistoryMonths = Math.max(
-    historyMonths,
-    parseMeetingLibraryHistoryMonths(relatedMonths),
-  );
+  const relatedHistoryMonths = parseRelatedMeetingHistoryMonths(relatedMonths);
   const requestedViewConfig = normalizeMeetingLibraryViewConfig({
     q,
     scope,
@@ -587,6 +585,19 @@ function parseMeetingLibraryHistoryMonths(value: string | string[] | undefined) 
 
   return Math.max(
     DEFAULT_MEETING_LIBRARY_HISTORY_MONTHS,
+    Math.min(MAX_MEETING_LIBRARY_HISTORY_MONTHS, numberValue),
+  );
+}
+
+function parseRelatedMeetingHistoryMonths(value: string | string[] | undefined) {
+  const numberValue = Number(getSearchParamValue(value));
+
+  if (!Number.isInteger(numberValue)) {
+    return DEFAULT_RELATED_MEETING_HISTORY_MONTHS;
+  }
+
+  return Math.max(
+    DEFAULT_RELATED_MEETING_HISTORY_MONTHS,
     Math.min(MAX_MEETING_LIBRARY_HISTORY_MONTHS, numberValue),
   );
 }

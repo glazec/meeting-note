@@ -1084,6 +1084,7 @@ describe("calendar auto join", () => {
     expect(updateSet).toHaveBeenCalledWith(
       expect.objectContaining({
         meetingUrl: "https://meet.google.com/new-link",
+        recallRecordingId: null,
         startedAt: new Date("2026-06-30T13:00:00.000Z"),
         title: "Partner sync moved",
         updatedAt: expect.any(Date),
@@ -1464,6 +1465,7 @@ describe("calendar auto join", () => {
     expect(updateSet).toHaveBeenCalledWith(
       expect.objectContaining({
         recallBotId: "new_bot",
+        recallRecordingId: null,
         status: "scheduled",
       }),
     );

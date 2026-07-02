@@ -482,6 +482,117 @@ describe("getWorkspaceMeetingTranscript", () => {
   });
 });
 
+describe("listMeetingDetailRelatedMeetingsForWorkspace", () => {
+  afterEach(() => {
+    getWorkspace.mockReset();
+    select.mockReset();
+    vi.resetModules();
+  });
+
+  it("lists readable related meetings with transcript previews", async () => {
+    const meetingWhere = vi.fn((condition: SQL) => {
+      void condition;
+
+      return {
+        orderBy: vi.fn().mockResolvedValue([
+          {
+            id: "22222222-2222-4222-8222-222222222222",
+            title: "Nascent follow up",
+            startedAt: new Date("2026-06-27T12:00:00.000Z"),
+            createdAt: new Date("2026-06-27T11:59:00.000Z"),
+            calendarAttendeeEmails: [
+              "alice@iosg.vc",
+              "founder@nascent.xyz",
+            ],
+          },
+          {
+            id: "11111111-1111-4111-8111-111111111111",
+            title: "Nascent intro",
+            startedAt: new Date("2026-06-20T12:00:00.000Z"),
+            createdAt: new Date("2026-06-20T11:59:00.000Z"),
+            calendarAttendeeEmails: [
+              "bob@iosg.vc",
+              "founder@nascent.xyz",
+            ],
+          },
+          {
+            id: "33333333-3333-4333-8333-333333333333",
+            title: "Internal review",
+            startedAt: new Date("2026-06-19T12:00:00.000Z"),
+            createdAt: new Date("2026-06-19T11:59:00.000Z"),
+            calendarAttendeeEmails: ["bob@iosg.vc"],
+          },
+        ]),
+      };
+    });
+    const previewWhere = vi.fn((condition: SQL) => {
+      void condition;
+
+      return {
+        orderBy: () => ({
+          limit: vi.fn().mockResolvedValue([
+            {
+              id: "segment_1",
+              speaker: "Founder",
+              startMs: 42_000,
+              text: "We discussed the next product milestone.",
+            },
+          ]),
+        }),
+      };
+    });
+
+    select
+      .mockReturnValueOnce({
+        from: () => ({
+          leftJoin: () => ({
+            where: meetingWhere,
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: previewWhere,
+        }),
+      });
+    const { listMeetingDetailRelatedMeetingsForWorkspace } = await import(
+      "@/lib/meeting-queries"
+    );
+
+    await expect(
+      listMeetingDetailRelatedMeetingsForWorkspace(
+        {
+          teamId: "team_123",
+          userId: "user_123",
+          domain: "iosg.vc",
+          canCreateMeetings: false,
+        },
+        "22222222-2222-4222-8222-222222222222",
+      ),
+    ).resolves.toEqual([
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        title: "Nascent intro",
+        startedAt: "2026-06-20T12:00:00.000Z",
+        hasMoreTranscriptSegments: false,
+        transcriptPreview: [
+          {
+            id: "segment_1",
+            speaker: "Founder",
+            startMs: 42_000,
+            text: "We discussed the next product milestone.",
+          },
+        ],
+      },
+    ]);
+
+    const meetingQuery = toQuery(meetingWhere.mock.calls[0][0]);
+    expect(meetingQuery.sql).toContain('"meeting_access"');
+    expect(meetingQuery.params).toContain("cancelled");
+    expectUsesCurrentTranscriptJob(previewWhere.mock.calls[0][0]);
+  });
+});
+
 describe("listMeetingsForWorkspace", () => {
   afterEach(() => {
     getWorkspace.mockReset();
@@ -1219,6 +1330,61 @@ describe("buildMeetingLibraryPage", () => {
       "Recent founder call",
       "Older board prep",
     ]);
+  });
+
+  it("shows two months of related meetings by default without shrinking the library", async () => {
+    const { buildMeetingLibraryPage } = await import("@/lib/meeting-queries");
+
+    const page = buildMeetingLibraryPage(
+      [
+        libraryMeeting({
+          id: "11111111-1111-4111-8111-111111111111",
+          title: "Nascent follow up",
+          platform: "google_meet",
+          externalParticipantKeys: ["email:founder@nascent.xyz"],
+          startedAt: "2026-06-27T12:00:00.000Z",
+        }),
+        libraryMeeting({
+          id: "22222222-2222-4222-8222-222222222222",
+          title: "Nascent monthly check in",
+          platform: "google_meet",
+          externalParticipantKeys: ["email:founder@nascent.xyz"],
+          startedAt: "2026-05-27T12:00:00.000Z",
+        }),
+        libraryMeeting({
+          id: "33333333-3333-4333-8333-333333333333",
+          title: "Nascent old intro",
+          platform: "google_meet",
+          externalParticipantKeys: ["email:founder@nascent.xyz"],
+          startedAt: "2026-03-27T12:00:00.000Z",
+        }),
+        libraryMeeting({
+          id: "44444444-4444-4444-8444-444444444444",
+          title: "Standalone quarterly review",
+          platform: "zoom",
+          startedAt: "2026-03-27T12:00:00.000Z",
+        }),
+      ],
+      { now: new Date("2026-06-28T12:00:00.000Z") },
+    );
+
+    expect(page.historyMonths).toBe(6);
+    expect(page.relatedHistoryMonths).toBe(2);
+    expect(page.meetings.map((meeting) => meeting.title)).toEqual([
+      "Nascent follow up",
+      "Standalone quarterly review",
+    ]);
+    expect(page.meetings[0]).toMatchObject({
+      title: "Nascent follow up",
+      hasMoreRelatedMeetings: true,
+      relatedMeetings: [
+        expect.objectContaining({ title: "Nascent monthly check in" }),
+      ],
+    });
+    expect(
+      page.meetings[0]?.relatedMeetings?.map((meeting) => meeting.title),
+    ).toEqual(["Nascent monthly check in"]);
+    expect(page.meetings[1]?.relatedMeetings).toEqual([]);
   });
 
   it("keeps older related meetings hidden until the related window expands", async () => {

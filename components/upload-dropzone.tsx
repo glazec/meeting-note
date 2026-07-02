@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getUploadMediaFromFile, uploadMediaAccept } from "@/lib/upload-media";
 
 type UploadState = "idle" | "uploading" | "complete" | "error";
 
@@ -45,13 +46,15 @@ export function UploadDropzone() {
 
     if (!selectedFile || selectedFile.size === 0) {
       setState("error");
-      setMessage("Select an MP3 file first");
+      setMessage("Select a recording file first");
       return;
     }
 
-    if (!selectedFile.name.toLowerCase().endsWith(".mp3")) {
+    const uploadMedia = getUploadMediaFromFile(selectedFile);
+
+    if (!uploadMedia) {
       setState("error");
-      setMessage("Only MP3 files are supported");
+      setMessage("Only MP3, MP4, MOV, WEBM, and MKV files are supported");
       return;
     }
 
@@ -68,14 +71,14 @@ export function UploadDropzone() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          extension: "mp3",
-          contentType: "audio/mpeg",
+          extension: uploadMedia.extension,
+          contentType: uploadMedia.contentType,
         }),
       });
 
       if (signResponse.status === 401) {
         setState("error");
-        setMessage("Sign in to upload MP3 files");
+        setMessage("Sign in to upload recordings");
         setSignInRequired(true);
         return;
       }
@@ -93,7 +96,11 @@ export function UploadDropzone() {
         throw new Error("Upload URL missing");
       }
 
-      const uploadedDirectly = await uploadDirectly(uploadUrl, selectedFile);
+      const uploadedDirectly = await uploadDirectly(
+        uploadUrl,
+        selectedFile,
+        uploadMedia.contentType,
+      );
 
       let queuedResult: UploadQueuedResponse;
 
@@ -106,6 +113,8 @@ export function UploadDropzone() {
           body: JSON.stringify({
             uploadId,
             fileName: selectedFile.name,
+            extension: uploadMedia.extension,
+            contentType: uploadMedia.contentType,
             ...(startedAt ? { startedAt } : {}),
           }),
         });
@@ -135,7 +144,7 @@ export function UploadDropzone() {
       <CardHeader className="border-b bg-muted/35">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <CardTitle>Upload MP3</CardTitle>
+            <CardTitle>Upload recording</CardTitle>
             <CardDescription>
               Add an existing recording and queue transcription.
             </CardDescription>
@@ -151,12 +160,12 @@ export function UploadDropzone() {
       <CardContent>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-2">
-            <Label htmlFor="meeting-audio">Audio file</Label>
+            <Label htmlFor="meeting-audio">Recording file</Label>
             <Input
               id="meeting-audio"
               name="meeting-audio"
               type="file"
-              accept="audio/mpeg,.mp3"
+              accept={uploadMediaAccept}
               onChange={handleFileChange}
               className="bg-background"
               aria-invalid={state === "error" && !startTimeInvalid}
@@ -210,11 +219,15 @@ export function UploadDropzone() {
   );
 }
 
-async function uploadDirectly(uploadUrl: string, file: File) {
+async function uploadDirectly(
+  uploadUrl: string,
+  file: File,
+  contentType: string,
+) {
   try {
     const uploadResponse = await fetch(uploadUrl, {
       method: "PUT",
-      headers: { "content-type": "audio/mpeg" },
+      headers: { "content-type": contentType },
       body: file,
     });
 

@@ -115,8 +115,17 @@ const recallBotDeleteInputSchema = z.object({
   botId: z.string().trim().min(1),
 });
 
+const recallCalendarInputSchema = z.object({
+  oauthClientId: z.string().trim().min(1),
+  oauthClientSecret: z.string().trim().min(1),
+  oauthRefreshToken: z.string().trim().min(1),
+  platform: z.enum(["google_calendar", "microsoft_outlook"]),
+  metadata: z.record(z.string(), z.string()).optional(),
+});
+
 const recallCalendarUpdateInputSchema = z.object({
   calendarId: z.string().trim().min(1),
+  oauthRefreshToken: z.string().trim().min(1).optional(),
   metadata: z.record(z.string(), z.string()).optional(),
 });
 
@@ -282,8 +291,40 @@ function getRecallBotLogoJpegBase64() {
   return recallBotLogoJpegBase64;
 }
 
+export async function createRecallCalendar(input: {
+  oauthClientId: string;
+  oauthClientSecret: string;
+  oauthRefreshToken: string;
+  platform: "google_calendar" | "microsoft_outlook";
+  metadata?: Record<string, string>;
+}) {
+  const parsedInput = recallCalendarInputSchema.parse(input);
+  const env = recallApiEnvSchema.parse(process.env);
+
+  const response = await fetch(buildRecallApiUrl(env, "/api/v2/calendars/"), {
+    method: "POST",
+    headers: buildRecallJsonHeaders(env),
+    body: JSON.stringify({
+      oauth_client_id: parsedInput.oauthClientId,
+      oauth_client_secret: parsedInput.oauthClientSecret,
+      oauth_refresh_token: parsedInput.oauthRefreshToken,
+      platform: parsedInput.platform,
+      metadata: parsedInput.metadata,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Recall calendar creation failed with ${response.status} ${response.statusText}`,
+    );
+  }
+
+  return response.json();
+}
+
 export async function updateRecallCalendar(input: {
   calendarId: string;
+  oauthRefreshToken?: string;
   metadata?: Record<string, string>;
 }) {
   const parsedInput = recallCalendarUpdateInputSchema.parse(input);
@@ -298,6 +339,7 @@ export async function updateRecallCalendar(input: {
       method: "PATCH",
       headers: buildRecallJsonHeaders(env),
       body: JSON.stringify({
+        oauth_refresh_token: parsedInput.oauthRefreshToken,
         metadata: parsedInput.metadata,
       }),
     },

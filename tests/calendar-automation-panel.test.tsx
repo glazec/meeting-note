@@ -10,7 +10,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 describe("CalendarAutomationPanel", () => {
-  it("groups Recall calendar status and sync action when connected", () => {
+  it("groups calendar status and sync action when connected", () => {
     const html = renderToStaticMarkup(
       <CalendarAutomationPanel
         accountLabel="member@iosg.vc"
@@ -65,7 +65,7 @@ describe("CalendarAutomationPanel", () => {
     }
   });
 
-  it("shows a connect action when Recall Calendar is not connected", () => {
+  it("shows a connect action when the calendar is not connected", () => {
     const html = renderToStaticMarkup(
       <CalendarAutomationPanel
         autoSync={false}
@@ -79,8 +79,9 @@ describe("CalendarAutomationPanel", () => {
     );
 
     expect(html).toContain("Calendar not connected");
-    expect(html).toContain("Check Recall calendar");
+    expect(html).toContain("Connect calendar");
     expect(html).toContain("Future meetings are watched");
+    expect(html).not.toContain("Recall");
   });
 
   it("does not claim auto join is active without a Recall Calendar connection", () => {
@@ -97,7 +98,7 @@ describe("CalendarAutomationPanel", () => {
     );
 
     expect(html).toContain("Recording coverage off");
-    expect(html).toContain("Connect calendar in Recall first");
+    expect(html).toContain("Connect calendar to enable recording");
     expect(html).not.toContain("Eligible online meetings are recorded");
   });
 
@@ -116,6 +117,6 @@ describe("CalendarAutomationPanel", () => {
 
     expect(html).toContain("Recording coverage off");
     expect(html).toContain("Sync calendar to enable recording");
-    expect(html).not.toContain("Connect calendar in Recall first");
+    expect(html).not.toContain("Connect calendar to enable recording");
   });
 });

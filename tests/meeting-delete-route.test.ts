@@ -1,11 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 
-const { getCurrentUser, getWorkspace, limit, deleteMeeting, updateMeeting, where } =
+const {
+  getCurrentUser,
+  getWorkspace,
+  limit,
+  deleteMeeting,
+  selectWhere,
+  updateMeeting,
+  where,
+} =
   vi.hoisted(() => ({
     getCurrentUser: vi.fn(),
     getWorkspace: vi.fn(),
     limit: vi.fn(),
     deleteMeeting: vi.fn(),
+    selectWhere: vi.fn(),
     updateMeeting: vi.fn(),
     where: vi.fn(),
   }));
@@ -22,15 +33,21 @@ vi.mock("@/db/client", () => ({
   db: {
     select: () => ({
       from: () => ({
-        where: () => ({
+        where: selectWhere.mockImplementation(() => ({
           limit,
-        }),
+        })),
       }),
     }),
     delete: deleteMeeting,
     update: updateMeeting,
   },
 }));
+
+const dialect = new PgDialect();
+
+function toQuery(condition: SQL) {
+  return dialect.sqlToQuery(condition);
+}
 
 async function deleteMeetingRequest() {
   const { DELETE } = await import("@/app/api/meetings/[meetingId]/route");
@@ -83,6 +100,7 @@ describe("DELETE /api/meetings/[meetingId]", () => {
     getWorkspace.mockReset();
     limit.mockReset();
     deleteMeeting.mockReset();
+    selectWhere.mockReset();
     updateMeeting.mockReset();
     where.mockReset();
     vi.resetModules();
@@ -115,6 +133,9 @@ describe("DELETE /api/meetings/[meetingId]", () => {
     await expect(response.json()).resolves.toEqual({ deleted: true });
     expect(deleteMeeting).toHaveBeenCalled();
     expect(where).toHaveBeenCalled();
+    const query = toQuery(selectWhere.mock.calls[0][0]);
+    expect(query.sql).toContain('"meetings"."owner_user_id"');
+    expect(query.sql).toContain('"team_memberships"');
   });
 });
 
@@ -123,6 +144,7 @@ describe("PATCH /api/meetings/[meetingId]", () => {
     getCurrentUser.mockReset();
     getWorkspace.mockReset();
     limit.mockReset();
+    selectWhere.mockReset();
     updateMeeting.mockReset();
     where.mockReset();
     vi.resetModules();
@@ -150,5 +172,8 @@ describe("PATCH /api/meetings/[meetingId]", () => {
     });
     expect(updateMeeting).toHaveBeenCalled();
     expect(where).toHaveBeenCalled();
+    const query = toQuery(selectWhere.mock.calls[0][0]);
+    expect(query.sql).toContain('"meetings"."owner_user_id"');
+    expect(query.sql).toContain('"team_memberships"');
   });
 });

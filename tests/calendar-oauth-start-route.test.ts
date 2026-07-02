@@ -1,0 +1,93 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const {
+  assertCanCreateMeetings,
+  buildGoogleCalendarOAuthUrl,
+  getCurrentUser,
+  getWorkspace,
+} = vi.hoisted(() => ({
+  assertCanCreateMeetings: vi.fn(),
+  buildGoogleCalendarOAuthUrl: vi.fn(),
+  getCurrentUser: vi.fn(),
+  getWorkspace: vi.fn(),
+}));
+
+vi.mock("@/lib/auth", () => ({
+  getCurrentUser,
+}));
+
+vi.mock("@/lib/workspace", () => ({
+  assertCanCreateMeetings,
+  getOrCreateWorkspaceForSessionUser: getWorkspace,
+}));
+
+vi.mock("@/lib/google-calendar-oauth", () => ({
+  buildGoogleCalendarOAuthUrl,
+  GOOGLE_CALENDAR_OAUTH_STATE_COOKIE: "google-calendar-oauth-state",
+  shouldUseSecureCalendarOAuthCookie: () => false,
+}));
+
+describe("GET /api/calendar/oauth/start", () => {
+  afterEach(() => {
+    assertCanCreateMeetings.mockReset();
+    buildGoogleCalendarOAuthUrl.mockReset();
+    getCurrentUser.mockReset();
+    getWorkspace.mockReset();
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it("starts calendar OAuth for users who can create meetings", async () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com");
+    getCurrentUser.mockResolvedValue({
+      id: "auth_user_123",
+      email: "alice@example.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({
+      userId: "11111111-1111-4111-8111-111111111111",
+      teamId: "22222222-2222-4222-8222-222222222222",
+      domain: "example.com",
+    });
+    assertCanCreateMeetings.mockResolvedValue(undefined);
+    buildGoogleCalendarOAuthUrl.mockReturnValue(
+      "https://accounts.google.com/o/oauth2/v2/auth?state=state_123",
+    );
+
+    const { GET } = await import("@/app/api/calendar/oauth/start/route");
+    const response = await GET();
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "https://accounts.google.com/o/oauth2/v2/auth?state=state_123",
+    );
+    expect(buildGoogleCalendarOAuthUrl).toHaveBeenCalledWith(expect.any(String));
+  });
+
+  it("does not start calendar OAuth for shared only users", async () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com");
+    const { SharedOnlyAccessError } = await import("@/lib/access-errors");
+
+    getCurrentUser.mockResolvedValue({
+      id: "auth_user_123",
+      email: "reader@partner.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({
+      userId: "11111111-1111-4111-8111-111111111111",
+      teamId: "22222222-2222-4222-8222-222222222222",
+      domain: "partner.com",
+      canCreateMeetings: false,
+    });
+    assertCanCreateMeetings.mockRejectedValue(new SharedOnlyAccessError());
+
+    const { GET } = await import("@/app/api/calendar/oauth/start/route");
+    const response = await GET();
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "https://app.example.com/dashboard",
+    );
+    expect(buildGoogleCalendarOAuthUrl).not.toHaveBeenCalled();
+  });
+});

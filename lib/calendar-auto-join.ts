@@ -750,6 +750,7 @@ async function updateMeetingFromCalendar(input: {
     startedAt: input.startsAt,
     endedAt: input.endsAt,
     recallBotId: input.recallBotId,
+    recallRecordingId: null,
     ...(input.status ? { status: input.status } : {}),
     updatedAt: new Date(),
   };

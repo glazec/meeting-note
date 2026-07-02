@@ -505,6 +505,29 @@ describe("buildElevenLabsTranscriptPersistence", () => {
     });
   });
 
+  it("builds a failure update when ElevenLabs returns no transcript text", () => {
+    expect(
+      buildElevenLabsTranscriptPersistence({
+        eventType: "speech_to_text_transcription",
+        type: "speech_to_text_transcription",
+        requestId: "req_123",
+        transcriptId: null,
+        status: "completed",
+        transcriptionText: " ",
+        transcriptionWords: [],
+        metadata: {
+          meetingId: "11111111-1111-4111-8111-111111111111",
+          transcriptJobId: "22222222-2222-4222-8222-222222222222",
+        },
+      }),
+    ).toEqual({
+      action: "fail",
+      errorMessage: "No transcript text returned",
+      providerJobId: "req_123",
+      transcriptJobId: "22222222-2222-4222-8222-222222222222",
+    });
+  });
+
   it("skips payloads that cannot be mapped to a local transcript job", () => {
     expect(
       buildElevenLabsTranscriptPersistence({

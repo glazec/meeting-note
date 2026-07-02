@@ -55,7 +55,7 @@ export function CalendarAutomationPanel({
             value={
               connected
                 ? (accountLabel ?? "Connected account")
-                : "Connect calendar in Recall first"
+                : "Connect calendar"
             }
           />
           <StatusRow
@@ -72,7 +72,7 @@ export function CalendarAutomationPanel({
                   : "Supported online meetings will be recorded"
                 : connected
                   ? "Sync calendar to enable recording"
-                  : "Connect calendar in Recall first"
+                  : "Connect calendar to enable recording"
             }
           />
           <StatusRow

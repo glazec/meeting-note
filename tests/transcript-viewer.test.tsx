@@ -3,6 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   applySpeakerUpdateToSegments,
+  getSpeakerPreviewClips,
+  getSpeakerPreviewTransition,
+  getSpeakerRenameSuggestions,
   getWaveformHoverSnapshot,
   TranscriptViewer,
   type EditingSpeaker,
@@ -347,6 +350,60 @@ describe("TranscriptViewer", () => {
     );
 
     expect(html).toContain('aria-label="Preview Speaker 1"');
+  });
+
+  it("keeps every participant available in the speaker rename suggestions", () => {
+    const suggestions = Array.from({ length: 12 }, (_, index) => ({
+      email: `participant-${index + 1}@example.com`,
+      name: `Participant ${index + 1}`,
+    }));
+
+    expect(getSpeakerRenameSuggestions(suggestions).map((item) => item.name)).toEqual(
+      suggestions.map((item) => item.name),
+    );
+  });
+
+  it("builds speaker preview clips that skip over other speakers", () => {
+    const previewSegments: TranscriptSegment[] = [
+      {
+        id: "segment_alice_1",
+        speaker: "Alice",
+        startMs: 0,
+        endMs: null,
+        text: "Alice first",
+      },
+      {
+        id: "segment_bob",
+        speaker: "Bob",
+        startMs: 900,
+        endMs: 2000,
+        text: "Bob talks",
+      },
+      {
+        id: "segment_alice_2",
+        speaker: "Alice",
+        startMs: 2000,
+        endMs: 2600,
+        text: "Alice again",
+      },
+    ];
+    const clips = getSpeakerPreviewClips(previewSegments, "Alice", []);
+
+    expect(clips).toEqual([
+      { startMs: 0, endMs: 900 },
+      { startMs: 2000, endMs: 2600 },
+    ]);
+    expect(getSpeakerPreviewTransition(clips, 0, 899)).toEqual({
+      type: "continue",
+    });
+    expect(getSpeakerPreviewTransition(clips, 0, 900)).toEqual({
+      clip: { startMs: 2000, endMs: 2600 },
+      index: 1,
+      type: "jump",
+    });
+    expect(getSpeakerPreviewTransition(clips, 1, 2600)).toEqual({
+      type: "done",
+    });
   });
 
   it("merges speaker aliases when applying to the same speaker", () => {

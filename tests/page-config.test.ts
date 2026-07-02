@@ -27,6 +27,7 @@ vi.mock("@/lib/meeting-bot-profile", () => ({
 vi.mock("@/lib/meeting-queries", () => ({
   getMeetingTranscriptForWorkspace: vi.fn(),
   getWorkspaceMeetingTranscript: vi.fn(),
+  listMeetingDetailRelatedMeetingsForWorkspace: vi.fn(),
   listMeetingLibraryPageForWorkspace: vi.fn(),
   listMeetingsForWorkspace: vi.fn(),
   listWorkspaceShareRecipients: vi.fn(),

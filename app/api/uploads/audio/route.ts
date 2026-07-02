@@ -12,9 +12,13 @@ import {
   putObject,
   UnsafeObjectKeySegmentError,
 } from "@/lib/r2";
-import { createUploadedAudioTranscription } from "@/lib/transcription-records";
+import {
+  createUploadedAudioTranscription,
+  createUploadedVideoTranscription,
+} from "@/lib/transcription-records";
 import { SharedOnlyAccessError } from "@/lib/access-errors";
 import { titleFromUploadFileName } from "@/lib/upload-titles";
+import { getUploadMediaFromFile } from "@/lib/upload-media";
 
 export const runtime = "nodejs";
 
@@ -30,11 +34,12 @@ export async function POST(request: Request) {
   const formData = await request.formData().catch(() => null);
   const file = formData?.get("meeting-audio");
   const startedAt = parseUploadStartedAt(formData?.get("startedAt"));
+  const uploadMedia = file instanceof File ? getUploadMediaFromFile(file) : null;
 
   if (
     !(file instanceof File) ||
     file.size === 0 ||
-    !isMp3(file) ||
+    !uploadMedia ||
     startedAt === null
   ) {
     return Response.json(
@@ -51,28 +56,63 @@ export async function POST(request: Request) {
     const key = buildPendingUploadObjectKey({
       userId: user.id,
       uploadId,
-      extension: "mp3",
+      extension: uploadMedia.extension,
     });
     const body = new Uint8Array(await file.arrayBuffer());
 
     await putObject({
       key,
       body,
-      contentType: "audio/mpeg",
+      contentType: uploadMedia.contentType,
     });
 
-    const transcription = await createUploadedAudioTranscription({
+    if (uploadMedia.kind === "audio") {
+      const transcription = await createUploadedAudioTranscription({
+        sessionUser: user,
+        objectKey: key,
+        title: titleFromUploadFileName(file.name),
+        ...(startedAt ? { startedAt } : {}),
+        fileSizeBytes: file.size,
+        mimeType: uploadMedia.contentType,
+      });
+
+      await inngest.send({
+        name: "meeting/transcribe.audio",
+        data: { objectKey: key, ...transcription },
+      });
+
+      revalidatePath("/dashboard");
+
+      return Response.json(
+        {
+          queued: true,
+          key,
+          meetingId: transcription.meetingId,
+          redirectTo: "/dashboard",
+        },
+        { status: 202 },
+      );
+    }
+
+    const transcription = await createUploadedVideoTranscription({
       sessionUser: user,
       objectKey: key,
       title: titleFromUploadFileName(file.name),
       ...(startedAt ? { startedAt } : {}),
       fileSizeBytes: file.size,
-      mimeType: "audio/mpeg",
+      mimeType: uploadMedia.contentType,
     });
 
     await inngest.send({
-      name: "meeting/transcribe.audio",
-      data: { objectKey: key, ...transcription },
+      name: "meeting/convert.video-to-audio",
+      data: {
+        meetingId: transcription.meetingId,
+        sourceMediaAssetId: transcription.sourceMediaAssetId,
+        sourceObjectKey: key,
+        audioMediaAssetId: transcription.audioMediaAssetId,
+        audioObjectKey: transcription.audioObjectKey,
+        transcriptJobId: transcription.transcriptJobId,
+      },
     });
 
     revalidatePath("/dashboard");
@@ -106,10 +146,6 @@ export async function POST(request: Request) {
       { status: 500 },
     );
   }
-}
-
-function isMp3(file: File) {
-  return file.name.toLowerCase().endsWith(".mp3");
 }
 
 function parseUploadStartedAt(value: FormDataEntryValue | null | undefined) {

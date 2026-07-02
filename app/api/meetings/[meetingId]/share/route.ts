@@ -11,6 +11,7 @@ import {
 } from "@/db/schema";
 import { normalizeEmail } from "@/lib/access";
 import { getCurrentUser } from "@/lib/auth";
+import { getManageableMeetingCondition } from "@/lib/meeting-write-policy";
 import { getOrCreateWorkspaceForSessionUser } from "@/lib/workspace";
 
 export const runtime = "nodejs";
@@ -52,12 +53,7 @@ export async function POST(
   const meetingRows = await db
     .select({ id: meetings.id })
     .from(meetings)
-    .where(
-      and(
-        eq(meetings.id, parsedMeetingId.data),
-        eq(meetings.teamId, workspace.teamId),
-      ),
-    )
+    .where(getManageableMeetingCondition(workspace, parsedMeetingId.data))
     .limit(1);
 
   if (!meetingRows[0]) {

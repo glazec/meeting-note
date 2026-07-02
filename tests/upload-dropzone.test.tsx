@@ -11,6 +11,15 @@ vi.mock("next/navigation", () => ({
 }));
 
 describe("UploadDropzone", () => {
+  it("accepts audio and video uploads", () => {
+    const html = renderToStaticMarkup(<UploadDropzone />);
+
+    expect(html).toContain("Upload recording");
+    expect(html).toContain("audio/mpeg");
+    expect(html).toContain("video/mp4");
+    expect(html).toContain("video/quicktime");
+  });
+
   it("allows users to set the uploaded meeting start time", () => {
     const html = renderToStaticMarkup(<UploadDropzone />);
 

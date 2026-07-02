@@ -5,6 +5,7 @@ import { db } from "@/db/client";
 import { meetings, transcriptSegments } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { currentTranscriptJobIdSubquery } from "@/lib/current-transcript-job";
+import { getManageableMeetingCondition } from "@/lib/meeting-write-policy";
 import { upsertTeamSpeakerAliases } from "@/lib/speaker-aliases";
 import { getOrCreateWorkspaceForSessionUser } from "@/lib/workspace";
 
@@ -63,12 +64,7 @@ export async function PATCH(
   const meetingRows = await db
     .select({ id: meetings.id })
     .from(meetings)
-    .where(
-      and(
-        eq(meetings.id, parsedMeetingId.data),
-        eq(meetings.teamId, workspace.teamId),
-      ),
-    )
+    .where(getManageableMeetingCondition(workspace, parsedMeetingId.data))
     .limit(1);
 
   if (!meetingRows[0]) {

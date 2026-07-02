@@ -11,6 +11,9 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  outputFileTracingIncludes: {
+    "/api/inngest": ["./node_modules/ffmpeg-static/ffmpeg"],
+  },
 };
 
 export default nextConfig;

@@ -38,6 +38,7 @@ vi.mock("@/lib/calendar-connection-queries", () => ({
 
 vi.mock("@/lib/meeting-queries", () => ({
   DEFAULT_MEETING_LIBRARY_HISTORY_MONTHS: 6,
+  DEFAULT_RELATED_MEETING_HISTORY_MONTHS: 2,
   MAX_MEETING_LIBRARY_HISTORY_MONTHS: 60,
   MEETING_LIBRARY_HISTORY_MONTH_STEP: 6,
   getMeetingDashboardSummaryForWorkspace,
@@ -225,7 +226,7 @@ describe("DashboardPage", () => {
       hasNextPage: false,
       hasOlderMeetings: false,
       historyMonths: 6,
-      relatedHistoryMonths: 6,
+      relatedHistoryMonths: 2,
     });
 
     const { default: DashboardPage } = await import("@/app/dashboard/page");
@@ -239,7 +240,7 @@ describe("DashboardPage", () => {
       historyMonths: 6,
       page: 1,
       query: "alice",
-      relatedHistoryMonths: 6,
+      relatedHistoryMonths: 2,
       searchScope: "participants",
       sort: "participants_desc",
       status: "all",

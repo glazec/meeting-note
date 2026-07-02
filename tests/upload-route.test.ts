@@ -136,6 +136,40 @@ describe("POST /api/upload", () => {
     });
   });
 
+  it("signs supported video uploads in the authenticated user namespace", async () => {
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+      "33333333-3333-4333-8333-333333333333",
+    );
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({
+      userId: "user_123",
+      teamId: "team_123",
+      domain: "example.com",
+    });
+    assertCanCreateMeetings.mockResolvedValue(undefined);
+    createUploadUrl.mockResolvedValue("https://upload.example.com/signed-video");
+
+    const response = await postUpload({
+      extension: "mp4",
+      contentType: "video/mp4",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      key: "users/user_123/uploads/33333333-3333-4333-8333-333333333333.mp4",
+      uploadUrl: "https://upload.example.com/signed-video",
+      uploadId: "33333333-3333-4333-8333-333333333333",
+    });
+    expect(createUploadUrl).toHaveBeenCalledWith({
+      key: "users/user_123/uploads/33333333-3333-4333-8333-333333333333.mp4",
+      contentType: "video/mp4",
+    });
+  });
+
   it("does not include caller supplied team namespace in returned keys", async () => {
     vi.spyOn(crypto, "randomUUID").mockReturnValue(
       "22222222-2222-4222-8222-222222222222",

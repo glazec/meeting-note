@@ -47,7 +47,7 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof RecallCalendarConnectionError) {
       return Response.json(
-        { error: "Recall Calendar is not connected", reconnect: true },
+        { error: "Calendar is not connected", reconnect: true },
         { status: 409 },
       );
     }
@@ -60,7 +60,7 @@ export async function POST(request: Request) {
     }
 
     return Response.json(
-      { error: "Recall Calendar sync unavailable" },
+      { error: "Calendar sync unavailable" },
       { status: 502 },
     );
   }

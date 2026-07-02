@@ -142,6 +142,21 @@ type SpeakerStatDraft = {
   totalMs: number;
 };
 
+export type SpeakerPreviewClip = {
+  endMs: number;
+  startMs: number;
+};
+
+type SpeakerPreviewState = {
+  clips: SpeakerPreviewClip[];
+  index: number;
+};
+
+export type SpeakerPreviewTransition =
+  | { type: "continue" }
+  | { clip: SpeakerPreviewClip; index: number; type: "jump" }
+  | { type: "done" };
+
 type TranscriptTextToken = {
   isWordLike: boolean;
   text: string;
@@ -277,6 +292,7 @@ export function TranscriptViewer({
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
+  const speakerPreviewRef = useRef<SpeakerPreviewState | null>(null);
   const canEditSpeakers = Boolean(meetingId);
   const hasTranslations = useMemo(
     () => segments.some((segment) => Boolean(segment.translatedText?.trim())),
@@ -329,6 +345,7 @@ export function TranscriptViewer({
     () => groupSpeakerAliasesByCanonicalKey(speakerAliases),
     [speakerAliases],
   );
+  const speakerRenameSuggestions = getSpeakerRenameSuggestions(speakerSuggestions);
   const displaySegments = useMemo(
     () =>
       rawDisplaySegments.map((segment) => ({
@@ -352,6 +369,72 @@ export function TranscriptViewer({
       })?.id ?? null
     );
   }, [currentTime, displaySegments]);
+
+  function clearSpeakerPreview() {
+    speakerPreviewRef.current = null;
+  }
+
+  async function playSpeakerPreview(clips: SpeakerPreviewClip[]) {
+    const audio = audioRef.current;
+    const playableClips = normalizeSpeakerPreviewClips(clips);
+    const firstClip = playableClips[0];
+
+    if (!audio || !firstClip) {
+      return;
+    }
+
+    speakerPreviewRef.current = { clips: playableClips, index: 0 };
+    audio.currentTime = firstClip.startMs / 1000;
+    setCurrentTime(audio.currentTime);
+
+    try {
+      await audio.play();
+      setIsPlaying(true);
+    } catch {
+      clearSpeakerPreview();
+      setIsPlaying(false);
+    }
+  }
+
+  function handleAudioTimeUpdate(audio: HTMLAudioElement) {
+    const nextTime = audio.currentTime;
+
+    setCurrentTime(nextTime);
+
+    const preview = speakerPreviewRef.current;
+
+    if (!preview) {
+      return;
+    }
+
+    const transition = getSpeakerPreviewTransition(
+      preview.clips,
+      preview.index,
+      nextTime * 1000,
+    );
+
+    if (transition.type === "continue") {
+      return;
+    }
+
+    if (transition.type === "done") {
+      clearSpeakerPreview();
+      audio.pause();
+      setIsPlaying(false);
+      return;
+    }
+
+    speakerPreviewRef.current = {
+      clips: preview.clips,
+      index: transition.index,
+    };
+    audio.currentTime = transition.clip.startMs / 1000;
+    setCurrentTime(audio.currentTime);
+
+    if (!audio.paused) {
+      void audio.play().catch(() => setIsPlaying(false));
+    }
+  }
 
   function startEditing(speaker: string | null, segmentId?: string) {
     const speakerStat = speakerStatByRawKey.get(getSpeakerKey(speaker));
@@ -471,12 +554,12 @@ export function TranscriptViewer({
   function renderSpeakerEditor({
     hasError,
     isSaving,
-    previewStartMs,
+    previewClips,
     showScope,
   }: {
     hasError: boolean;
     isSaving: boolean;
-    previewStartMs?: number | null;
+    previewClips: SpeakerPreviewClip[];
     showScope: boolean;
   }) {
     return (
@@ -492,7 +575,7 @@ export function TranscriptViewer({
             value={draftSpeaker}
           />
           <datalist id="speaker-suggestions">
-            {speakerSuggestions.map((suggestion) => (
+            {speakerRenameSuggestions.map((suggestion) => (
               <option
                 key={suggestion.email}
                 label={suggestion.email}
@@ -500,11 +583,11 @@ export function TranscriptViewer({
               />
             ))}
           </datalist>
-          {typeof previewStartMs === "number" && canSeekTranscript ? (
+          {previewClips.length > 0 && canSeekTranscript ? (
             <Button
               aria-label="Preview speaker voice"
               disabled={isSaving}
-              onClick={() => seekTo(previewStartMs)}
+              onClick={() => playSpeakerPreview(previewClips)}
               size="sm"
               title="Preview speaker voice"
               type="button"
@@ -533,12 +616,12 @@ export function TranscriptViewer({
             <X />
           </Button>
         </div>
-        {speakerSuggestions.length > 0 ? (
+        {speakerRenameSuggestions.length > 0 ? (
           <div
             aria-label="Speaker suggestions"
-            className="flex flex-wrap gap-1.5"
+            className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto pr-1"
           >
-            {speakerSuggestions.slice(0, 8).map((suggestion) => (
+            {speakerRenameSuggestions.map((suggestion) => (
               <button
                 className="inline-flex h-7 max-w-full items-center rounded-md border px-2 text-xs font-medium text-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
                 key={suggestion.email}
@@ -596,6 +679,7 @@ export function TranscriptViewer({
       return;
     }
 
+    clearSpeakerPreview();
     audio.currentTime = startMs / 1000;
     setCurrentTime(audio.currentTime);
 
@@ -742,6 +826,11 @@ export function TranscriptViewer({
                 {speakerStats.map((speaker) => {
                   const speakerLabel = speaker.speaker ?? "Unknown speaker";
                   const speakerKey = speaker.speakerKey;
+                  const previewClips = getSpeakerPreviewClips(
+                    displaySegments,
+                    speaker.speaker,
+                    speaker.aliases,
+                  );
                   const isSummaryEditing =
                     editingSpeaker?.speakerKey === speakerKey &&
                     !editingSpeaker.allowSegmentScope;
@@ -754,7 +843,7 @@ export function TranscriptViewer({
                         {renderSpeakerEditor({
                           hasError,
                           isSaving,
-                          previewStartMs: speaker.previewStartMs,
+                          previewClips,
                           showScope: false,
                         })}
                       </div>
@@ -788,10 +877,10 @@ export function TranscriptViewer({
                         </div>
                       </div>
                       <div className="flex shrink-0 items-center gap-1">
-                        {canSeekTranscript ? (
+                        {canSeekTranscript && previewClips.length > 0 ? (
                           <Button
                             aria-label={`Preview ${speakerLabel}`}
-                            onClick={() => seekTo(speaker.previewStartMs)}
+                            onClick={() => playSpeakerPreview(previewClips)}
                             size="icon-sm"
                             title={`Preview ${speakerLabel}`}
                             type="button"
@@ -854,6 +943,9 @@ export function TranscriptViewer({
                   displaySegments,
                   index,
                 );
+                const previewClips = normalizeSpeakerPreviewClips([
+                  { endMs: segmentEndMs, startMs: segment.startMs },
+                ]);
                 const activeWordIndex = isActive
                   ? getActiveWordIndex(
                       segment.startMs,
@@ -896,7 +988,7 @@ export function TranscriptViewer({
                           renderSpeakerEditor({
                             hasError,
                             isSaving,
-                            previewStartMs: segment.startMs,
+                            previewClips,
                             showScope: true,
                           })
                         ) : canEditSpeakers ? (
@@ -1011,6 +1103,8 @@ export function TranscriptViewer({
           isPlaying={isPlaying}
           playbackRate={playbackRate}
           segments={displaySegments}
+          onAudioTimeUpdate={handleAudioTimeUpdate}
+          onPreviewCancel={clearSpeakerPreview}
           onTimelineSeek={scrollTranscriptToTime}
           setCurrentTime={setCurrentTime}
           setDuration={setDuration}
@@ -1135,6 +1229,12 @@ function getTranscriptDisplayKeys(segment: TranscriptSegment) {
   }
 
   return keys;
+}
+
+export function getSpeakerRenameSuggestions(
+  speakerSuggestions: SpeakerSuggestion[],
+) {
+  return [...speakerSuggestions];
 }
 
 function getDisplayedEmotionKey(label: TranscriptSegment["emotionLabel"]) {
@@ -1296,6 +1396,8 @@ function TranscriptAudioPlayer({
   isPlaying,
   playbackRate,
   segments,
+  onAudioTimeUpdate,
+  onPreviewCancel,
   onTimelineSeek,
   setCurrentTime,
   setDuration,
@@ -1310,6 +1412,8 @@ function TranscriptAudioPlayer({
   isPlaying: boolean;
   playbackRate: number;
   segments: TranscriptSegment[];
+  onAudioTimeUpdate: (audio: HTMLAudioElement) => void;
+  onPreviewCancel: () => void;
   onTimelineSeek: (timeSecond: number) => void;
   setCurrentTime: (value: number) => void;
   setDuration: (value: number) => void;
@@ -1476,6 +1580,8 @@ function TranscriptAudioPlayer({
       return;
     }
 
+    onPreviewCancel();
+
     if (audio.paused) {
       try {
         await audio.play();
@@ -1497,6 +1603,8 @@ function TranscriptAudioPlayer({
       return;
     }
 
+    onPreviewCancel();
+
     const upperBound = safeDuration || audio.duration || 0;
     const nextTime = Math.min(
       Math.max(audio.currentTime + seconds, 0),
@@ -1514,6 +1622,7 @@ function TranscriptAudioPlayer({
       return;
     }
 
+    onPreviewCancel();
     audio.currentTime = nextTime;
     setCurrentTime(nextTime);
     onTimelineSeek(nextTime);
@@ -1525,6 +1634,8 @@ function TranscriptAudioPlayer({
     if (!audio || !timelineDuration) {
       return;
     }
+
+    onPreviewCancel();
 
     const bounds = event.currentTarget.getBoundingClientRect();
     const position = clamp((event.clientX - bounds.left) / bounds.width, 0, 1);
@@ -1566,13 +1677,16 @@ function TranscriptAudioPlayer({
         onDurationChange={(event) =>
           setDuration(event.currentTarget.duration || 0)
         }
-        onEnded={() => setIsPlaying(false)}
+        onEnded={() => {
+          onPreviewCancel();
+          setIsPlaying(false);
+        }}
         onPause={() => setIsPlaying(false)}
         onPlay={(event) => {
           event.currentTarget.playbackRate = playbackRate;
           setIsPlaying(true);
         }}
-        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+        onTimeUpdate={(event) => onAudioTimeUpdate(event.currentTarget)}
         preload="metadata"
         ref={audioRef}
         src={audioUrl}
@@ -2281,6 +2395,64 @@ function getSegmentDisplayEndMs(
   const nextSegment = segments[index + 1];
 
   return segment.endMs ?? nextSegment?.startMs ?? segment.startMs;
+}
+
+export function getSpeakerPreviewClips(
+  segments: TranscriptSegment[],
+  speaker: string | null,
+  aliases: string[],
+) {
+  const speakerKeys = new Set([speaker, ...aliases].map(getSpeakerKey));
+  const clips = segments.flatMap((segment, index) => {
+    if (!speakerKeys.has(getSpeakerKey(segment.speaker))) {
+      return [];
+    }
+
+    return [
+      {
+        endMs: getSegmentDisplayEndMs(segment, segments, index),
+        startMs: segment.startMs,
+      },
+    ];
+  });
+
+  return normalizeSpeakerPreviewClips(clips);
+}
+
+function normalizeSpeakerPreviewClips(clips: SpeakerPreviewClip[]) {
+  return clips
+    .filter(
+      (clip) =>
+        Number.isFinite(clip.startMs) &&
+        Number.isFinite(clip.endMs) &&
+        clip.endMs > clip.startMs,
+    )
+    .toSorted((left, right) => left.startMs - right.startMs);
+}
+
+export function getSpeakerPreviewTransition(
+  clips: SpeakerPreviewClip[],
+  currentIndex: number,
+  currentMs: number,
+): SpeakerPreviewTransition {
+  const currentClip = clips[currentIndex];
+
+  if (!currentClip) {
+    return { type: "done" };
+  }
+
+  if (currentMs < currentClip.endMs) {
+    return { type: "continue" };
+  }
+
+  const nextIndex = currentIndex + 1;
+  const nextClip = clips[nextIndex];
+
+  if (!nextClip) {
+    return { type: "done" };
+  }
+
+  return { clip: nextClip, index: nextIndex, type: "jump" };
 }
 
 function getWaveformSpeakerColor(speaker: string | null) {

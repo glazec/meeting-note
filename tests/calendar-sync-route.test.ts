@@ -95,7 +95,7 @@ describe("POST /api/calendar/sync", () => {
     });
   });
 
-  it("returns a reconnect signal when Recall Calendar is missing", async () => {
+  it("returns a reconnect signal when calendar access is missing", async () => {
     const sessionUser = {
       id: "auth_user_123",
       email: "alice@example.com",
@@ -118,7 +118,7 @@ describe("POST /api/calendar/sync", () => {
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
-      error: "Recall Calendar is not connected",
+      error: "Calendar is not connected",
       reconnect: true,
     });
   });

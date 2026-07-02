@@ -13,14 +13,20 @@ import {
   ObjectNotFoundError,
   UnsafeObjectKeySegmentError,
 } from "@/lib/r2";
-import { createUploadedAudioTranscription } from "@/lib/transcription-records";
+import {
+  createUploadedAudioTranscription,
+  createUploadedVideoTranscription,
+} from "@/lib/transcription-records";
 import { SharedOnlyAccessError } from "@/lib/access-errors";
 import { titleFromUploadFileName } from "@/lib/upload-titles";
+import { getSupportedUploadMedia } from "@/lib/upload-media";
 
 export const runtime = "nodejs";
 
 const completeUploadSchema = z.strictObject({
   uploadId: z.string().min(1),
+  extension: z.string().trim().toLowerCase().min(1).default("mp3"),
+  contentType: z.string().trim().toLowerCase().min(1).default("audio/mpeg"),
   fileName: z.string().optional(),
   startedAt: z.iso.datetime().optional(),
 });
@@ -34,8 +40,14 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => null);
   const result = completeUploadSchema.safeParse(body);
+  const uploadMedia = result.success
+    ? getSupportedUploadMedia({
+        extension: result.data.extension,
+        contentType: result.data.contentType,
+      })
+    : null;
 
-  if (!result.success) {
+  if (!result.success || !uploadMedia) {
     return Response.json(
       { error: "Invalid upload completion request" },
       { status: 400 },
@@ -49,17 +61,55 @@ export async function POST(request: Request) {
     const key = buildPendingUploadObjectKey({
       userId: user.id,
       uploadId: result.data.uploadId,
-      extension: "mp3",
+      extension: uploadMedia.extension,
     });
 
     const objectMetadata = await getObjectMetadata({ key });
+    if (
+      objectMetadata.contentType &&
+      objectMetadata.contentType.toLowerCase() !== uploadMedia.contentType
+    ) {
+      return Response.json(
+        { error: "Invalid upload completion request" },
+        { status: 400 },
+      );
+    }
+
     const title = result.data.fileName
       ? titleFromUploadFileName(result.data.fileName)
       : undefined;
     const startedAt = result.data.startedAt
       ? new Date(result.data.startedAt)
       : undefined;
-    const transcription = await createUploadedAudioTranscription({
+    if (uploadMedia.kind === "audio") {
+      const transcription = await createUploadedAudioTranscription({
+        sessionUser: user,
+        objectKey: key,
+        ...(title ? { title } : {}),
+        ...(startedAt ? { startedAt } : {}),
+        fileSizeBytes: objectMetadata.contentLength,
+        mimeType: objectMetadata.contentType,
+      });
+
+      await inngest.send({
+        name: "meeting/transcribe.audio",
+        data: { objectKey: key, ...transcription },
+      });
+
+      revalidatePath("/dashboard");
+
+      return Response.json(
+        {
+          queued: true,
+          key,
+          meetingId: transcription.meetingId,
+          redirectTo: "/dashboard",
+        },
+        { status: 202 },
+      );
+    }
+
+    const transcription = await createUploadedVideoTranscription({
       sessionUser: user,
       objectKey: key,
       ...(title ? { title } : {}),
@@ -69,8 +119,15 @@ export async function POST(request: Request) {
     });
 
     await inngest.send({
-      name: "meeting/transcribe.audio",
-      data: { objectKey: key, ...transcription },
+      name: "meeting/convert.video-to-audio",
+      data: {
+        meetingId: transcription.meetingId,
+        sourceMediaAssetId: transcription.sourceMediaAssetId,
+        sourceObjectKey: key,
+        audioMediaAssetId: transcription.audioMediaAssetId,
+        audioObjectKey: transcription.audioObjectKey,
+        transcriptJobId: transcription.transcriptJobId,
+      },
     });
 
     revalidatePath("/dashboard");
@@ -93,7 +150,7 @@ export async function POST(request: Request) {
     }
 
     if (error instanceof ObjectNotFoundError) {
-      return Response.json({ error: "Uploaded audio not found" }, { status: 404 });
+      return Response.json({ error: "Uploaded file not found" }, { status: 404 });
     }
 
     if (error instanceof SharedOnlyAccessError) {

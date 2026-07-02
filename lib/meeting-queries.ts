@@ -72,12 +72,15 @@ import {
   getMeetingAccessScope,
   getReadableMeetingsCondition,
 } from "@/lib/meeting-access-policy";
+import { getMeetingManagerCondition } from "@/lib/meeting-write-policy";
 
 const uuidSchema = z.uuid();
 export const MEETING_LIBRARY_PAGE_SIZE = 50;
 export const DEFAULT_MEETING_LIBRARY_HISTORY_MONTHS = 6;
+export const DEFAULT_RELATED_MEETING_HISTORY_MONTHS = 2;
 export const MEETING_LIBRARY_HISTORY_MONTH_STEP = 6;
 export const MAX_MEETING_LIBRARY_HISTORY_MONTHS = 60;
+export const MEETING_DETAIL_RELATED_TRANSCRIPT_SEGMENT_LIMIT = 60;
 const genericMeetingGroupTitles = new Set([
   "google meet",
   "google meet recording",
@@ -104,6 +107,7 @@ export type MeetingTranscript = {
   speakerAliases: SpeakerAlias[];
   speakerSuggestions: SpeakerSuggestion[];
   accessScope: "workspace" | "shared";
+  canManage: boolean;
   accessPeople: MeetingAccessPerson[];
   entities: MeetingTranscriptEntity[];
 };
@@ -120,6 +124,21 @@ export type MeetingTranscriptEntity = {
   normalizedValue: string;
   type: string;
   value: string;
+};
+
+export type MeetingDetailRelatedTranscriptSegment = {
+  id: string;
+  speaker: string | null;
+  startMs: number;
+  text: string;
+};
+
+export type MeetingDetailRelatedMeeting = {
+  id: string;
+  title: string;
+  startedAt: string;
+  transcriptPreview: MeetingDetailRelatedTranscriptSegment[];
+  hasMoreTranscriptSegments: boolean;
 };
 
 export type ShareRecipient = {
@@ -298,9 +317,8 @@ export function buildMeetingLibraryPage(
   const sort = parseMeetingLibrarySort(options.sort);
   const status = parseMeetingLibraryStatusFilter(options.status);
   const historyMonths = normalizeHistoryMonths(options.historyMonths);
-  const relatedHistoryMonths = Math.max(
-    historyMonths,
-    normalizeHistoryMonths(options.relatedHistoryMonths ?? historyMonths),
+  const relatedHistoryMonths = normalizeRelatedHistoryMonths(
+    options.relatedHistoryMonths,
   );
   const historyCutoff = subtractMonths(now, historyMonths);
   const relatedHistoryCutoff = subtractMonths(now, relatedHistoryMonths);
@@ -346,7 +364,7 @@ export function buildMeetingLibraryPage(
     ]),
   );
   const meetingsForVisibleWindow = visibleMeetingsForLibrary
-    .filter((meeting) => relatedMeetingsByRoot.has(meeting.id))
+    .filter((meeting) => allRelatedMeetingsByRoot.has(meeting.id))
     .map((meeting) =>
       toLibraryRootMeeting({
         meeting,
@@ -815,6 +833,17 @@ function normalizeHistoryMonths(months: number | undefined) {
   );
 }
 
+function normalizeRelatedHistoryMonths(months: number | undefined) {
+  if (!months || !Number.isFinite(months)) {
+    return DEFAULT_RELATED_MEETING_HISTORY_MONTHS;
+  }
+
+  return Math.max(
+    DEFAULT_RELATED_MEETING_HISTORY_MONTHS,
+    Math.min(MAX_MEETING_LIBRARY_HISTORY_MONTHS, Math.floor(months)),
+  );
+}
+
 function getExternalParticipantKeys(
   attendeeEmails: unknown,
   workspaceDomain: string,
@@ -1057,6 +1086,7 @@ export async function getMeetingTranscriptForWorkspace(
       recallRecordingId: meetings.recallRecordingId,
       translationErrorMessage: meetings.translationErrorMessage,
       translationStatus: meetings.translationStatus,
+      canManage: getMeetingManagerCondition(workspace),
     })
     .from(meetings)
     .leftJoin(
@@ -1189,9 +1219,137 @@ export async function getMeetingTranscriptForWorkspace(
     speakerAliases,
     speakerSuggestions,
     accessScope,
+    canManage: Boolean(meeting.canManage),
     accessPeople,
     entities: normalizeMeetingTranscriptEntities(entities),
   };
+}
+
+export async function listMeetingDetailRelatedMeetingsForWorkspace(
+  workspace: WorkspaceContext,
+  meetingId: string,
+): Promise<MeetingDetailRelatedMeeting[]> {
+  const parsedMeetingId = uuidSchema.safeParse(meetingId);
+
+  if (!parsedMeetingId.success) {
+    return [];
+  }
+
+  const rows = await db
+    .select({
+      id: meetings.id,
+      title: meetings.title,
+      startedAt: meetings.startedAt,
+      createdAt: meetings.createdAt,
+      calendarAttendeeEmails: calendarEvents.attendeeEmails,
+    })
+    .from(meetings)
+    .leftJoin(calendarEvents, eq(calendarEvents.id, meetings.calendarEventId))
+    .where(
+      and(
+        getReadableMeetingsCondition(workspace),
+        ne(meetings.status, "cancelled"),
+      ),
+    )
+    .orderBy(desc(meetings.startedAt), desc(meetings.createdAt));
+  const meetingItems = rows.map((meeting) => ({
+    id: meeting.id,
+    title: meeting.title,
+    startedAt: (meeting.startedAt ?? meeting.createdAt).toISOString(),
+    externalParticipantKeys: getExternalParticipantKeys(
+      meeting.calendarAttendeeEmails,
+      workspace.domain,
+    ),
+  }));
+  const itemById = new Map(
+    meetingItems.map((meeting) => [meeting.id, meeting]),
+  );
+  const relatedMeetingIds = getRelatedMeetingIdsForDetail(
+    meetingItems,
+    parsedMeetingId.data,
+  );
+
+  if (relatedMeetingIds.length === 0) {
+    return [];
+  }
+
+  const transcriptPreviewEntries = await Promise.all(
+    relatedMeetingIds.map(async (relatedMeetingId) => {
+      const segments = await db
+        .select({
+          id: transcriptSegments.id,
+          speaker: transcriptSegments.speaker,
+          startMs: transcriptSegments.startMs,
+          text: transcriptSegments.text,
+        })
+        .from(transcriptSegments)
+        .where(
+          and(
+            eq(transcriptSegments.meetingId, relatedMeetingId),
+            eq(
+              transcriptSegments.jobId,
+              currentTranscriptJobIdSubquery(relatedMeetingId),
+            ),
+          ),
+        )
+        .orderBy(asc(transcriptSegments.startMs))
+        .limit(MEETING_DETAIL_RELATED_TRANSCRIPT_SEGMENT_LIMIT + 1);
+
+      return [relatedMeetingId, segments] as const;
+    }),
+  );
+  const transcriptPreviewByMeetingId = new Map(transcriptPreviewEntries);
+
+  return relatedMeetingIds.flatMap((relatedMeetingId) => {
+    const meeting = itemById.get(relatedMeetingId);
+
+    if (!meeting) {
+      return [];
+    }
+
+    const segments = transcriptPreviewByMeetingId.get(relatedMeetingId) ?? [];
+
+    return [
+      {
+        id: meeting.id,
+        title: meeting.title,
+        startedAt: meeting.startedAt,
+        transcriptPreview: segments.slice(
+          0,
+          MEETING_DETAIL_RELATED_TRANSCRIPT_SEGMENT_LIMIT,
+        ),
+        hasMoreTranscriptSegments:
+          segments.length > MEETING_DETAIL_RELATED_TRANSCRIPT_SEGMENT_LIMIT,
+      },
+    ];
+  });
+}
+
+function getRelatedMeetingIdsForDetail(
+  meetingsForGrouping: Array<{
+    externalParticipantKeys: string[];
+    id: string;
+    startedAt: string;
+    title: string;
+  }>,
+  meetingId: string,
+) {
+  const relatedGroup = groupRelatedMeetings(meetingsForGrouping, {
+    includeTitleKeys: true,
+  }).find(
+    (group) =>
+      group.id === meetingId ||
+      group.relatedMeetings.some((meeting) => meeting.id === meetingId),
+  );
+
+  if (!relatedGroup) {
+    return [];
+  }
+
+  return [
+    relatedGroup.id,
+    ...relatedGroup.relatedMeetings.map((meeting) => meeting.id),
+  ].filter((relatedMeetingId) => relatedMeetingId !== meetingId);
 }
 
 function normalizeMeetingTranscriptEntities(rows: MeetingTranscriptEntity[]) {

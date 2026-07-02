@@ -51,6 +51,7 @@ type CompleteTranscriptPersistence = {
 
 type FailTranscriptPersistence = {
   action: "fail";
+  errorMessage?: string;
   providerJobId?: string;
   transcriptJobId: string;
 };
@@ -101,12 +102,6 @@ export function buildElevenLabsTranscriptPersistence(
     };
   }
 
-  const meetingId = getMetadataString(event.metadata, "meetingId", "meeting_id");
-
-  if (!meetingId) {
-    return { action: "skip", reason: "missing_meeting_id" };
-  }
-
   const words = "transcriptionWords" in event ? event.transcriptionWords : undefined;
   const segments = buildTranscriptSegments(words, options.participantTimeline ?? []);
   const text =
@@ -117,7 +112,18 @@ export function buildElevenLabsTranscriptPersistence(
       .trim();
 
   if (!text && segments.length === 0) {
-    return { action: "skip", reason: "missing_transcript_text" };
+    return {
+      action: "fail",
+      errorMessage: "No transcript text returned",
+      providerJobId,
+      transcriptJobId,
+    };
+  }
+
+  const meetingId = getMetadataString(event.metadata, "meetingId", "meeting_id");
+
+  if (!meetingId) {
+    return { action: "skip", reason: "missing_meeting_id" };
   }
 
   return {
@@ -156,6 +162,7 @@ export async function applyElevenLabsTranscriptEvent(
   const now = new Date();
   const status = persistence.action === "complete" ? "completed" : "failed";
   const jobUpdate: {
+    errorMessage?: string;
     providerJobId?: string;
     status: "completed" | "failed";
     updatedAt: Date;
@@ -165,12 +172,23 @@ export async function applyElevenLabsTranscriptEvent(
     jobUpdate.providerJobId = persistence.providerJobId;
   }
 
+  if (persistence.action === "fail" && persistence.errorMessage) {
+    jobUpdate.errorMessage = persistence.errorMessage;
+  }
+
   await db
     .update(transcriptJobs)
     .set(jobUpdate)
     .where(eq(transcriptJobs.id, persistence.transcriptJobId));
 
   if (persistence.action === "fail") {
+    if (meetingId) {
+      await db
+        .update(meetings)
+        .set({ status: "failed", updatedAt: now })
+        .where(eq(meetings.id, meetingId));
+    }
+
     return persistence;
   }
 

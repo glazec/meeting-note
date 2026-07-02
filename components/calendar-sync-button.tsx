@@ -12,6 +12,7 @@ type SyncState =
   | "syncing"
   | "synced"
   | "needs_connection"
+  | "connecting"
   | "error";
 
 type CalendarSyncButtonProps = {
@@ -50,9 +51,7 @@ export function CalendarSyncButton({
       if (!response.ok) {
         if (response.status === 409 && result.reconnect) {
           setState("needs_connection");
-          setMessage(
-            "Connect the calendar in Recall first, then check again here.",
-          );
+          setMessage("Connect your calendar to start capturing meetings.");
           return;
         }
 
@@ -86,14 +85,22 @@ export function CalendarSyncButton({
     void syncCalendar();
   }, [autoSync, syncCalendar]);
 
+  function connectCalendar() {
+    setState("connecting");
+    setMessage(null);
+    window.location.href = "/api/calendar/oauth/start";
+  }
+
   const needsConnection = state === "needs_connection" || !connected;
-  const isBusy = state === "syncing";
+  const isBusy = state === "syncing" || state === "connecting";
   const buttonLabel =
     state === "syncing"
       ? "Syncing..."
-      : needsConnection
-        ? "Check Recall calendar"
-        : "Sync calendar";
+      : state === "connecting"
+        ? "Opening Google..."
+        : needsConnection
+          ? "Connect calendar"
+          : "Sync calendar";
   const alertTitle =
     state === "error"
       ? "Calendar not synced"
@@ -105,7 +112,7 @@ export function CalendarSyncButton({
     <div className="flex flex-col items-start gap-3">
       <Button
         type="button"
-        onClick={syncCalendar}
+        onClick={needsConnection ? connectCalendar : syncCalendar}
         disabled={isBusy}
         variant="outline"
       >
@@ -130,9 +137,14 @@ export function CalendarSyncButton({
           <AlertDescription className="flex flex-col items-start gap-3">
             <span>{message}</span>
             {needsConnection ? (
-              <span className="text-xs text-muted-foreground">
-                Calendar access is managed in Recall.
-              </span>
+              <Button
+                type="button"
+                onClick={connectCalendar}
+                disabled={isBusy}
+                size="sm"
+              >
+                Connect calendar
+              </Button>
             ) : null}
           </AlertDescription>
         </Alert>

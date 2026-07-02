@@ -7,6 +7,7 @@ import {
   createUploadUrl,
   UnsafeObjectKeySegmentError,
 } from "@/lib/r2";
+import { getSupportedUploadMedia } from "@/lib/upload-media";
 import {
   assertCanCreateMeetings,
   getOrCreateWorkspaceForSessionUser,
@@ -15,8 +16,8 @@ import {
 export const runtime = "nodejs";
 
 const uploadRequestSchema = z.strictObject({
-  extension: z.literal("mp3"),
-  contentType: z.literal("audio/mpeg"),
+  extension: z.string().trim().toLowerCase().min(1),
+  contentType: z.string().trim().toLowerCase().min(1),
 });
 
 export async function POST(request: Request) {
@@ -28,8 +29,11 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => null);
   const result = uploadRequestSchema.safeParse(body);
+  const uploadMedia = result.success
+    ? getSupportedUploadMedia(result.data)
+    : null;
 
-  if (!result.success) {
+  if (!result.success || !uploadMedia) {
     return Response.json({ error: "Invalid upload request" }, { status: 400 });
   }
 
@@ -41,11 +45,11 @@ export async function POST(request: Request) {
     const key = buildPendingUploadObjectKey({
       userId: user.id,
       uploadId,
-      extension: result.data.extension,
+      extension: uploadMedia.extension,
     });
     const uploadUrl = await createUploadUrl({
       key,
-      contentType: result.data.contentType,
+      contentType: uploadMedia.contentType,
     });
 
     return Response.json({ key, uploadUrl, uploadId });

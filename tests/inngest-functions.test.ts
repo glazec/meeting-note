@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const {
   createElevenLabsTranscriptJob,
+  completeUploadedVideoConversion,
+  convertVideoObjectToAudio,
   createReadUrl,
   scheduleRecallBot,
   syncRecallCalendarEventsForAllConnectedUsers,
@@ -9,6 +11,8 @@ const {
 } =
   vi.hoisted(() => ({
     createElevenLabsTranscriptJob: vi.fn(),
+    completeUploadedVideoConversion: vi.fn(),
+    convertVideoObjectToAudio: vi.fn(),
     createReadUrl: vi.fn(),
     scheduleRecallBot: vi.fn(),
     syncRecallCalendarEventsForAllConnectedUsers: vi.fn(),
@@ -23,6 +27,14 @@ vi.mock("@/db/client", () => ({
 
 vi.mock("@/lib/r2", () => ({
   createReadUrl,
+}));
+
+vi.mock("@/lib/media-conversion", () => ({
+  convertVideoObjectToAudio,
+}));
+
+vi.mock("@/lib/transcription-records", () => ({
+  completeUploadedVideoConversion,
 }));
 
 vi.mock("@/lib/vendors/elevenlabs", () => ({
@@ -64,6 +76,10 @@ describe("Inngest functions", () => {
       {
         id: "transcribe-audio",
         triggers: [{ event: "meeting/transcribe.audio" }],
+      },
+      {
+        id: "convert-video-to-audio",
+        triggers: [{ event: "meeting/convert.video-to-audio" }],
       },
       {
         id: "enrich-transcript",
@@ -130,5 +146,61 @@ describe("Inngest functions", () => {
       updatedAt: expect.any(Date),
     });
     expect(where).toHaveBeenCalledTimes(1);
+  });
+
+  it("converts video to audio before queuing transcription", async () => {
+    const send = vi.fn().mockResolvedValue({ ids: ["evt_789"] });
+    convertVideoObjectToAudio.mockResolvedValue(undefined);
+    completeUploadedVideoConversion.mockResolvedValue({
+      meetingId: "22222222-2222-4222-8222-222222222222",
+      mediaAssetId: "44444444-4444-4444-8444-444444444444",
+      objectKey:
+        "teams/team_123/meetings/22222222-2222-4222-8222-222222222222/assets/44444444-4444-4444-8444-444444444444.mp3",
+      transcriptJobId: "55555555-5555-4555-8555-555555555555",
+    });
+
+    const { convertVideoToAudio } = await import("@/inngest/functions");
+
+    await expect(
+      (convertVideoToAudio as unknown as RunnableInngestFunction).fn({
+        event: {
+          data: {
+            meetingId: "22222222-2222-4222-8222-222222222222",
+            sourceMediaAssetId: "33333333-3333-4333-8333-333333333333",
+            sourceObjectKey: "users/user_123/uploads/video.mp4",
+            audioMediaAssetId: "44444444-4444-4444-8444-444444444444",
+            audioObjectKey:
+              "teams/team_123/meetings/22222222-2222-4222-8222-222222222222/assets/44444444-4444-4444-8444-444444444444.mp3",
+            transcriptJobId: "55555555-5555-4555-8555-555555555555",
+          },
+        },
+        step: {
+          sendEvent: send,
+        },
+      }),
+    ).resolves.toEqual({ ids: ["evt_789"] });
+
+    expect(convertVideoObjectToAudio).toHaveBeenCalledWith({
+      sourceObjectKey: "users/user_123/uploads/video.mp4",
+      audioObjectKey:
+        "teams/team_123/meetings/22222222-2222-4222-8222-222222222222/assets/44444444-4444-4444-8444-444444444444.mp3",
+    });
+    expect(completeUploadedVideoConversion).toHaveBeenCalledWith({
+      meetingId: "22222222-2222-4222-8222-222222222222",
+      audioMediaAssetId: "44444444-4444-4444-8444-444444444444",
+      audioObjectKey:
+        "teams/team_123/meetings/22222222-2222-4222-8222-222222222222/assets/44444444-4444-4444-8444-444444444444.mp3",
+      transcriptJobId: "55555555-5555-4555-8555-555555555555",
+    });
+    expect(send).toHaveBeenCalledWith("queue-audio-transcription", {
+      name: "meeting/transcribe.audio",
+      data: {
+        meetingId: "22222222-2222-4222-8222-222222222222",
+        mediaAssetId: "44444444-4444-4444-8444-444444444444",
+        objectKey:
+          "teams/team_123/meetings/22222222-2222-4222-8222-222222222222/assets/44444444-4444-4444-8444-444444444444.mp3",
+        transcriptJobId: "55555555-5555-4555-8555-555555555555",
+      },
+    });
   });
 });
