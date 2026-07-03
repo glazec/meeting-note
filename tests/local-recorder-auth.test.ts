@@ -1,10 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { assertCanCreateMeetings, getCurrentUser, getWorkspace, limit, select, where } =
+const {
+  assertCanCreateMeetings,
+  getCurrentUser,
+  getWorkspace,
+  innerJoin,
+  limit,
+  select,
+  where,
+} =
   vi.hoisted(() => ({
     assertCanCreateMeetings: vi.fn(),
     getCurrentUser: vi.fn(),
     getWorkspace: vi.fn(),
+    innerJoin: vi.fn(),
     limit: vi.fn(),
     select: vi.fn(),
     where: vi.fn(),
@@ -30,6 +39,7 @@ describe("local recorder auth", () => {
     getCurrentUser.mockReset();
     getWorkspace.mockReset();
     assertCanCreateMeetings.mockReset();
+    innerJoin.mockReset();
     limit.mockReset();
     select.mockReset();
     where.mockReset();
@@ -63,13 +73,14 @@ describe("local recorder auth", () => {
   it("allows valid bearer device sessions for device API routes", async () => {
     select.mockReturnValue({
       from: () => ({
-        where,
+        innerJoin,
       }),
     });
+    innerJoin.mockReturnValue({ where });
     where.mockReturnValue({ limit });
     limit.mockResolvedValue([
       {
-        canCreateMeetings: true,
+        role: "member",
         teamId: "team_123",
         userId: "user_123",
       },
@@ -97,13 +108,14 @@ describe("local recorder auth", () => {
   it("rejects bearer device sessions after a user loses creator access", async () => {
     select.mockReturnValue({
       from: () => ({
-        where,
+        innerJoin,
       }),
     });
+    innerJoin.mockReturnValue({ where });
     where.mockReturnValue({ limit });
     limit.mockResolvedValue([
       {
-        canCreateMeetings: false,
+        role: "external",
         teamId: "team_123",
         userId: "user_123",
       },

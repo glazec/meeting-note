@@ -520,6 +520,10 @@ export async function deleteRecallCalendarEventBot(input: {
     },
   );
 
+  if (response.status === 404) {
+    return {};
+  }
+
   if (!response.ok) {
     throw new Error(
       `Recall calendar bot deletion failed with ${response.status} ${response.statusText}`,

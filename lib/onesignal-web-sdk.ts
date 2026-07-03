@@ -2,6 +2,7 @@ export const DEFAULT_ONESIGNAL_APP_ID =
   "117c1d1c-ada4-4b49-bb2e-9f4b5cb747ef";
 
 export const ONESIGNAL_SERVICE_WORKER_PATH = "OneSignalSDKWorker.js";
+export const ONESIGNAL_MOBILE_MEDIA_QUERY = "(hover: none) and (pointer: coarse)";
 export const DEFAULT_ONESIGNAL_ALLOWED_ORIGINS = [
   "https://meeting-note-swart.vercel.app",
 ];
@@ -40,7 +41,16 @@ export function buildOneSignalInitScript(
 	if (!window.MeetingNoteOneSignalReady) {
 	  window.MeetingNoteOneSignalReady = new Promise((resolve) => {
 	    const allowedOrigins = ${JSON.stringify(allowedOrigins)};
-	    if (!allowedOrigins.includes(window.location.origin)) {
+	    function isMeetingNoteMobileDevice() {
+	      const mobileMedia = window.matchMedia?.(${JSON.stringify(
+          ONESIGNAL_MOBILE_MEDIA_QUERY,
+        )})?.matches === true;
+	      const mobileUserAgent = /Android|iPhone|iPad|iPod/i.test(window.navigator.userAgent);
+
+	      return mobileMedia || mobileUserAgent;
+	    }
+
+	    if (!allowedOrigins.includes(window.location.origin) || !isMeetingNoteMobileDevice()) {
 	      resolve(null);
 	      return;
 	    }

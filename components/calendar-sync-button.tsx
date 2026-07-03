@@ -11,6 +11,7 @@ type SyncState =
   | "idle"
   | "syncing"
   | "synced"
+  | "partial"
   | "needs_connection"
   | "connecting"
   | "error";
@@ -22,9 +23,34 @@ type CalendarSyncButtonProps = {
 
 type CalendarSyncResponse = {
   error?: string;
+  failedEventCount?: number;
   reconnect?: boolean;
   syncedEventCount?: number;
 };
+
+export function formatCalendarSyncMessage(result: CalendarSyncResponse) {
+  const count = result.syncedEventCount ?? 0;
+  const failedCount = result.failedEventCount ?? 0;
+  const capturedMessage =
+    count === 1
+      ? "Captured 1 upcoming calendar event."
+      : `Captured ${count} upcoming calendar events.`;
+
+  if (failedCount === 0) {
+    return capturedMessage;
+  }
+
+  const reviewMessage =
+    failedCount === 1
+      ? "1 event needs review."
+      : `${failedCount} events need review.`;
+
+  if (count === 0) {
+    return `Calendar checked. ${reviewMessage}`;
+  }
+
+  return `${capturedMessage} ${reviewMessage}`;
+}
 
 export function CalendarSyncButton({
   autoSync = false,
@@ -58,14 +84,8 @@ export function CalendarSyncButton({
         throw new Error("Calendar sync failed");
       }
 
-      const count = result.syncedEventCount ?? 0;
-
-      setState("synced");
-      setMessage(
-        count === 1
-          ? "Captured 1 upcoming calendar event."
-          : `Captured ${count} upcoming calendar events.`,
-      );
+      setState(result.failedEventCount ? "partial" : "synced");
+      setMessage(formatCalendarSyncMessage(result));
 
       if (autoSync) {
         router.replace("/dashboard");
@@ -104,6 +124,8 @@ export function CalendarSyncButton({
   const alertTitle =
     state === "error"
       ? "Calendar not synced"
+      : state === "partial"
+        ? "Calendar checked"
       : needsConnection
         ? "Calendar access needed"
         : "Calendar synced";

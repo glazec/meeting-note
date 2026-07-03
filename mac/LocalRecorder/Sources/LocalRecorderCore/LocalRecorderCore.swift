@@ -32,9 +32,7 @@ public struct PermissionChecklist: Sendable, Equatable {
     }
 
     public var canMonitor: Bool {
-        microphone == .granted &&
-            screenCapture == .granted &&
-            notifications == .granted
+        microphone == .granted
     }
 
     public var setupState: PermissionSetupState {
@@ -42,7 +40,76 @@ public struct PermissionChecklist: Sendable, Equatable {
             return .blocked
         }
 
-        return startAtLogin == .granted ? .ready : .degraded
+        return notifications == .granted && startAtLogin == .granted
+            ? .ready
+            : .degraded
+    }
+}
+
+public enum SilencePromptDecision: Equatable, Sendable {
+    case prompt
+}
+
+public struct SilencePromptTracker: Equatable, Sendable {
+    public var activityThreshold: Float
+    public var silenceDuration: TimeInterval
+    public var dismissalSnoozeDuration: TimeInterval
+
+    private var silenceStartedAt: Date?
+    private var snoozedUntil: Date?
+    private var hasPromptPending = false
+
+    public init(
+        activityThreshold: Float = 0.005,
+        silenceDuration: TimeInterval = 60,
+        dismissalSnoozeDuration: TimeInterval = 300
+    ) {
+        self.activityThreshold = activityThreshold
+        self.silenceDuration = silenceDuration
+        self.dismissalSnoozeDuration = dismissalSnoozeDuration
+    }
+
+    public mutating func observe(
+        level: Float,
+        at date: Date = Date()
+    ) -> SilencePromptDecision? {
+        if level > activityThreshold {
+            silenceStartedAt = nil
+            return nil
+        }
+
+        if silenceStartedAt == nil {
+            silenceStartedAt = date
+        }
+
+        if hasPromptPending {
+            return nil
+        }
+
+        if let snoozedUntil, date < snoozedUntil {
+            return nil
+        }
+
+        guard
+            let silenceStartedAt,
+            date.timeIntervalSince(silenceStartedAt) >= silenceDuration
+        else {
+            return nil
+        }
+
+        hasPromptPending = true
+        return .prompt
+    }
+
+    public mutating func dismissPrompt(at date: Date = Date()) {
+        hasPromptPending = false
+        snoozedUntil = date.addingTimeInterval(dismissalSnoozeDuration)
+    }
+
+    public mutating func finishAfterPrompt() {
+        silenceStartedAt = nil
+        snoozedUntil = nil
+        hasPromptPending = false
     }
 }
 
@@ -75,6 +142,48 @@ public struct LocalRecorderAPIClient: Sendable {
         return try JSONDecoder.localRecorder
             .decode(MissedMeetingsResponse.self, from: data)
             .meetings
+    }
+
+    public func monitoringRequest() throws -> URLRequest {
+        var request = URLRequest(
+            url: serverURL.appending(path: "/api/local-recorder/monitoring")
+        )
+        request.httpMethod = "GET"
+        applyRecorderHeaders(to: &request)
+        return request
+    }
+
+    public func fetchMonitoringStatus() async throws -> LocalRecorderMonitoringResponse {
+        let (data, response) = try await URLSession.shared.data(
+            for: monitoringRequest()
+        )
+        try validateHTTPResponse(response)
+
+        return try JSONDecoder.localRecorder.decode(
+            LocalRecorderMonitoringResponse.self,
+            from: data
+        )
+    }
+
+    public func manualIntentRequest() throws -> URLRequest {
+        var request = URLRequest(
+            url: serverURL.appending(path: "/api/local-recorder/manual-intents")
+        )
+        request.httpMethod = "POST"
+        applyRecorderHeaders(to: &request)
+        return request
+    }
+
+    public func createManualIntent() async throws -> ManualRecordingIntentResponse {
+        let (data, response) = try await URLSession.shared.data(
+            for: manualIntentRequest()
+        )
+        try validateHTTPResponse(response)
+
+        return try JSONDecoder.localRecorder.decode(
+            ManualRecordingIntentResponse.self,
+            from: data
+        )
     }
 
     public func claimRequest(fallbackIntentId: String) throws -> URLRequest {
@@ -430,6 +539,28 @@ public struct MissedMeetingsResponse: Codable, Equatable, Sendable {
     public var meetings: [MissedMeeting]
 }
 
+public struct LocalRecorderMonitoringResponse: Codable, Equatable, Sendable {
+    public var nextMeeting: LocalRecorderMonitoringMeeting?
+    public var missedMeetings: [MissedMeeting]
+}
+
+public struct LocalRecorderMonitoringMeeting: Codable, Identifiable, Equatable, Sendable {
+    public var botStatus: String
+    public var botStatusDetail: String
+    public var botStatusLabel: String
+    public var endsAt: Date?
+    public var meetingId: String
+    public var startsAt: Date
+    public var title: String
+
+    public var id: String { meetingId }
+}
+
+public struct ManualRecordingIntentResponse: Codable, Equatable, Sendable {
+    public var fallbackIntentId: String
+    public var meetingTitle: String?
+}
+
 public struct MissedMeeting: Codable, Identifiable, Equatable, Sendable {
     public var fallbackIntentId: String
     public var title: String
@@ -502,7 +633,7 @@ public struct LocalRecordingUploadQueue: Sendable {
     }
 
     public func load() throws -> [LocalRecordingUploadPayload] {
-        guard FileManager.default.fileExists(atPath: directoryURL.path()) else {
+        guard FileManager.default.fileExists(atPath: directoryURL.path) else {
             return []
         }
 
@@ -526,7 +657,7 @@ public struct LocalRecordingUploadQueue: Sendable {
 
     public func remove(clientRecordingId: String) throws {
         let url = itemURL(clientRecordingId: clientRecordingId)
-        guard FileManager.default.fileExists(atPath: url.path()) else {
+        guard FileManager.default.fileExists(atPath: url.path) else {
             return
         }
 
@@ -683,7 +814,27 @@ public extension JSONEncoder {
 public extension JSONDecoder {
     static var localRecorder: JSONDecoder {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let value = try container.decode(String.self)
+            let fractionalFormatter = ISO8601DateFormatter()
+            fractionalFormatter.formatOptions = [
+                .withInternetDateTime,
+                .withFractionalSeconds,
+            ]
+            let standardFormatter = ISO8601DateFormatter()
+            standardFormatter.formatOptions = [.withInternetDateTime]
+
+            if let date = fractionalFormatter.date(from: value) ??
+                standardFormatter.date(from: value) {
+                return date
+            }
+
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Invalid ISO8601 date"
+            )
+        }
         return decoder
     }
 }

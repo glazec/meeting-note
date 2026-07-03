@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const createLocalRecorderDeviceSession = vi.fn();
 const getLocalRecorderDeviceRequestContext = vi.fn();
 const listMissedLocalRecorderMeetings = vi.fn();
+const createManualLocalRecorderIntent = vi.fn();
+const getLocalRecorderMonitoringStatus = vi.fn();
 const claimLocalRecorderIntent = vi.fn();
 const failLocalRecorderIntent = vi.fn();
 const completeLocalRecorderRecordingUpload = vi.fn();
@@ -16,7 +18,9 @@ vi.mock("@/lib/local-recorder-auth", () => ({
 vi.mock("@/lib/local-recorder-records", () => ({
   claimLocalRecorderIntent,
   completeLocalRecorderRecordingUpload,
+  createManualLocalRecorderIntent,
   failLocalRecorderIntent,
+  getLocalRecorderMonitoringStatus,
   listMissedLocalRecorderMeetings,
   prepareLocalRecorderRecordingUpload,
 }));
@@ -37,6 +41,8 @@ describe("local recorder API routes", () => {
     createLocalRecorderDeviceSession.mockReset();
     getLocalRecorderDeviceRequestContext.mockReset();
     listMissedLocalRecorderMeetings.mockReset();
+    createManualLocalRecorderIntent.mockReset();
+    getLocalRecorderMonitoringStatus.mockReset();
     claimLocalRecorderIntent.mockReset();
     failLocalRecorderIntent.mockReset();
     completeLocalRecorderRecordingUpload.mockReset();
@@ -82,6 +88,83 @@ describe("local recorder API routes", () => {
       ],
     });
     expect(listMissedLocalRecorderMeetings).toHaveBeenCalledWith({
+      deviceId: "mac_123",
+      now: expect.any(Date),
+      workspace: {
+        teamId: "team_123",
+        userId: "user_123",
+      },
+    });
+  });
+
+  it("returns monitoring status for a signed in Mac device", async () => {
+    mockSignedInDevice();
+    getLocalRecorderMonitoringStatus.mockResolvedValue({
+      missedMeetings: [],
+      nextMeeting: {
+        botStatus: "planned",
+        botStatusDetail: "Bot is scheduled",
+        botStatusLabel: "Planned",
+        endsAt: "2026-06-30T13:00:00.000Z",
+        meetingId: "meeting_123",
+        startsAt: "2026-06-30T12:00:00.000Z",
+        title: "Weekly sync",
+      },
+    });
+
+    const { GET } = await import("@/app/api/local-recorder/monitoring/route");
+    const response = await GET(
+      new Request("https://app.example.com/api/local-recorder/monitoring", {
+        headers: { "x-local-recorder-device-id": "mac_123" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      missedMeetings: [],
+      nextMeeting: {
+        botStatus: "planned",
+        botStatusDetail: "Bot is scheduled",
+        botStatusLabel: "Planned",
+        endsAt: "2026-06-30T13:00:00.000Z",
+        meetingId: "meeting_123",
+        startsAt: "2026-06-30T12:00:00.000Z",
+        title: "Weekly sync",
+      },
+    });
+    expect(getLocalRecorderMonitoringStatus).toHaveBeenCalledWith({
+      deviceId: "mac_123",
+      now: expect.any(Date),
+      workspace: {
+        teamId: "team_123",
+        userId: "user_123",
+      },
+    });
+  });
+
+  it("creates a manual recording intent for a signed in Mac device", async () => {
+    mockSignedInDevice();
+    createManualLocalRecorderIntent.mockResolvedValue({
+      fallbackIntentId: "manual_intent_123",
+      meetingTitle: "Manual recording",
+    });
+
+    const { POST } = await import(
+      "@/app/api/local-recorder/manual-intents/route"
+    );
+    const response = await POST(
+      new Request("https://app.example.com/api/local-recorder/manual-intents", {
+        method: "POST",
+        headers: { "x-local-recorder-device-id": "mac_123" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      fallbackIntentId: "manual_intent_123",
+      meetingTitle: "Manual recording",
+    });
+    expect(createManualLocalRecorderIntent).toHaveBeenCalledWith({
       deviceId: "mac_123",
       now: expect.any(Date),
       workspace: {

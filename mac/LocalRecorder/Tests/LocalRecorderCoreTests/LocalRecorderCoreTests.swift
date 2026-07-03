@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import LocalRecorderCore
 
-@Test func permissionChecklistRequiresRecordingAndNotifications() {
+@Test func permissionChecklistRequiresMicrophonePermission() {
     let ready = PermissionChecklist(
         microphone: .granted,
         screenCapture: .granted,
@@ -10,15 +10,57 @@ import Testing
         startAtLogin: .denied
     )
     let blocked = PermissionChecklist(
+        microphone: .denied,
+        screenCapture: .granted,
+        notifications: .granted,
+        startAtLogin: .granted
+    )
+    let degraded = PermissionChecklist(
         microphone: .granted,
         screenCapture: .denied,
-        notifications: .granted,
+        notifications: .denied,
         startAtLogin: .granted
     )
 
     #expect(ready.canMonitor)
     #expect(!blocked.canMonitor)
+    #expect(degraded.canMonitor)
     #expect(ready.setupState == .degraded)
+    #expect(degraded.setupState == .degraded)
+}
+
+@Test func silencePromptAppearsAfterOneMinuteOfSilence() {
+    var tracker = SilencePromptTracker()
+    let startedAt = Date(timeIntervalSince1970: 100)
+
+    #expect(tracker.observe(level: 0, at: startedAt) == nil)
+    #expect(tracker.observe(level: 0, at: startedAt.addingTimeInterval(59)) == nil)
+    #expect(tracker.observe(level: 0, at: startedAt.addingTimeInterval(60)) == .prompt)
+}
+
+@Test func silencePromptResetsWhenAudioReturns() {
+    var tracker = SilencePromptTracker()
+    let startedAt = Date(timeIntervalSince1970: 100)
+
+    #expect(tracker.observe(level: 0, at: startedAt) == nil)
+    #expect(tracker.observe(level: 0, at: startedAt.addingTimeInterval(45)) == nil)
+    #expect(tracker.observe(level: 0.02, at: startedAt.addingTimeInterval(46)) == nil)
+    #expect(tracker.observe(level: 0, at: startedAt.addingTimeInterval(47)) == nil)
+    #expect(tracker.observe(level: 0, at: startedAt.addingTimeInterval(106)) == nil)
+    #expect(tracker.observe(level: 0, at: startedAt.addingTimeInterval(107)) == .prompt)
+}
+
+@Test func dismissedSilencePromptDoesNotRepeatForFiveMinutes() {
+    var tracker = SilencePromptTracker()
+    let startedAt = Date(timeIntervalSince1970: 100)
+
+    #expect(tracker.observe(level: 0, at: startedAt) == nil)
+    #expect(tracker.observe(level: 0, at: startedAt.addingTimeInterval(60)) == .prompt)
+
+    tracker.dismissPrompt(at: startedAt.addingTimeInterval(60))
+
+    #expect(tracker.observe(level: 0, at: startedAt.addingTimeInterval(359)) == nil)
+    #expect(tracker.observe(level: 0, at: startedAt.addingTimeInterval(360)) == .prompt)
 }
 
 @Test func missedMeetingRequestIncludesBearerTokenAndDeviceId() throws {
@@ -34,6 +76,34 @@ import Testing
     #expect(request.value(forHTTPHeaderField: "x-local-recorder-device-id") == "device_123")
 }
 
+@Test func monitoringRequestIncludesBearerTokenAndDeviceId() throws {
+    let client = LocalRecorderAPIClient(
+        serverURL: URL(string: "https://app.example.com")!,
+        bearerToken: "token_123",
+        deviceId: "device_123"
+    )
+    let request = try client.monitoringRequest()
+
+    #expect(request.url?.absoluteString == "https://app.example.com/api/local-recorder/monitoring")
+    #expect(request.httpMethod == "GET")
+    #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer token_123")
+    #expect(request.value(forHTTPHeaderField: "x-local-recorder-device-id") == "device_123")
+}
+
+@Test func manualIntentRequestIncludesBearerTokenAndDeviceId() throws {
+    let client = LocalRecorderAPIClient(
+        serverURL: URL(string: "https://app.example.com")!,
+        bearerToken: "token_123",
+        deviceId: "device_123"
+    )
+    let request = try client.manualIntentRequest()
+
+    #expect(request.url?.absoluteString == "https://app.example.com/api/local-recorder/manual-intents")
+    #expect(request.httpMethod == "POST")
+    #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer token_123")
+    #expect(request.value(forHTTPHeaderField: "x-local-recorder-device-id") == "device_123")
+}
+
 @Test func decodesMissedMeetingResponse() throws {
     let data = """
     {
@@ -41,10 +111,10 @@ import Testing
         {
           "fallbackIntentId": "intent_123",
           "title": "Weekly sync",
-          "expiresAt": "2026-06-30T13:15:00.000Z",
+          "expiresAt": "2026-06-30T13:15:00.123Z",
           "displayTimeWindow": {
-            "startsAt": "2026-06-30T12:00:00.000Z",
-            "endsAt": "2026-06-30T13:00:00.000Z"
+            "startsAt": "2026-06-30T12:00:00.456Z",
+            "endsAt": "2026-06-30T13:00:00.789Z"
           }
         }
       ]
@@ -55,6 +125,9 @@ import Testing
 
     #expect(response.meetings.first?.fallbackIntentId == "intent_123")
     #expect(response.meetings.first?.title == "Weekly sync")
+    #expect(response.meetings.first?.expiresAt.timeIntervalSince1970 == 1782825300.123)
+    #expect(response.meetings.first?.displayTimeWindow.startsAt.timeIntervalSince1970 == 1782820800.456)
+    #expect(response.meetings.first?.displayTimeWindow.endsAt?.timeIntervalSince1970 == 1782824400.789)
 }
 
 @Test func recordingManifestKeepsSeparateTrackMetadata() throws {

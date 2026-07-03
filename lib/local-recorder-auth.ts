@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { localRecorderDeviceSessions, teamMemberships } from "@/db/schema";
@@ -25,17 +25,18 @@ export async function getLocalRecorderWorkspace(
   const tokenHash = await hashLocalRecorderSecret(bearerToken);
   const [session] = await db
     .select({
-      canCreateMeetings: sql<boolean>`coalesce((
-        select ${teamMemberships.role} <> 'external'
-        from ${teamMemberships}
-        where ${teamMemberships.teamId} = ${localRecorderDeviceSessions.teamId}
-          and ${teamMemberships.userId} = ${localRecorderDeviceSessions.userId}
-        limit 1
-      ), false)`,
+      role: teamMemberships.role,
       teamId: localRecorderDeviceSessions.teamId,
       userId: localRecorderDeviceSessions.userId,
     })
     .from(localRecorderDeviceSessions)
+    .innerJoin(
+      teamMemberships,
+      and(
+        eq(teamMemberships.teamId, localRecorderDeviceSessions.teamId),
+        eq(teamMemberships.userId, localRecorderDeviceSessions.userId),
+      ),
+    )
     .where(
       and(
         eq(localRecorderDeviceSessions.tokenHash, tokenHash),
@@ -45,7 +46,7 @@ export async function getLocalRecorderWorkspace(
     )
     .limit(1);
 
-  return session?.canCreateMeetings
+  return session && session.role !== "external"
     ? {
         canCreateMeetings: true,
         domain: "",

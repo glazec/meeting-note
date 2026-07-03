@@ -260,4 +260,25 @@ describe("Recall Calendar V2 adapter", () => {
       },
     });
   });
+
+  it("treats a missing Calendar V2 event bot as already deleted", async () => {
+    vi.stubEnv("RECALL_API_KEY", "recall-key\n");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("", {
+        status: 404,
+        statusText: "Not Found",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { deleteRecallCalendarEventBot } = await import(
+      "@/lib/vendors/recall"
+    );
+
+    await expect(
+      deleteRecallCalendarEventBot({
+        calendarEventId: "55555555-5555-4555-8555-555555555555",
+      }),
+    ).resolves.toEqual({});
+  });
 });

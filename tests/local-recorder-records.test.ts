@@ -34,6 +34,7 @@ vi.mock("@/lib/r2", async (importOriginal) => {
 import {
   buildLocalRecorderTranscriptionEvent,
   completeLocalRecorderRecordingUpload,
+  getLocalRecorderMonitoringStatus,
   isLocalRecorderCandidateVisibleInLookup,
   isLocalRecorderPrimaryClaimConflict,
 } from "@/lib/local-recorder-records";
@@ -183,7 +184,18 @@ describe("local recorder records", () => {
     expect(db.transaction).not.toHaveBeenCalled();
     expect(insertMediaValues).toHaveBeenCalledOnce();
     expect(insertMediaOnConflictDoNothing).toHaveBeenCalledOnce();
-    expect(updateWhere).toHaveBeenCalledOnce();
+    expect(updateSet).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ attemptState: "uploaded" }),
+    );
+    expect(updateSet).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        endedAt: new Date("2026-07-01T12:01:00.000Z"),
+        status: "processing",
+      }),
+    );
+    expect(updateWhere).toHaveBeenCalledTimes(2);
     expect(inngestSend).toHaveBeenCalledOnce();
   });
 
@@ -208,5 +220,61 @@ describe("local recorder records", () => {
         startedAt: null,
       }),
     ).toBe(false);
+  });
+
+  it("returns the next monitored meeting with the bot status", async () => {
+    const deviceOnConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
+    const deviceValues = vi.fn(() => ({
+      onConflictDoUpdate: deviceOnConflictDoUpdate,
+    }));
+
+    db.insert.mockReturnValueOnce({ values: deviceValues });
+    db.select
+      .mockReturnValueOnce(selectRows([]))
+      .mockReturnValueOnce(
+        selectRows([
+          {
+            endedAt: new Date("2026-07-01T12:30:00.000Z"),
+            id: "meeting_123",
+            recallBotId: "bot_123",
+            recallRecordingId: null,
+            startedAt: new Date("2026-07-01T12:10:00.000Z"),
+            status: "scheduled",
+            title: "Weekly sync",
+          },
+        ]),
+      );
+
+    await expect(
+      getLocalRecorderMonitoringStatus({
+        deviceId: "mac_123",
+        now: new Date("2026-07-01T12:00:00.000Z"),
+        workspace: {
+          canCreateMeetings: true,
+          domain: "",
+          teamId: "team_123",
+          userId: "user_123",
+        },
+      }),
+    ).resolves.toEqual({
+      missedMeetings: [],
+      nextMeeting: {
+        botStatus: "planned",
+        botStatusDetail: "Bot is scheduled",
+        botStatusLabel: "Planned",
+        endsAt: "2026-07-01T12:30:00.000Z",
+        meetingId: "meeting_123",
+        startsAt: "2026-07-01T12:10:00.000Z",
+        title: "Weekly sync",
+      },
+    });
+    expect(deviceValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lastSeenAt: new Date("2026-07-01T12:00:00.000Z"),
+        teamId: "team_123",
+        userId: "user_123",
+      }),
+    );
+    expect(db.select).toHaveBeenCalledTimes(2);
   });
 });

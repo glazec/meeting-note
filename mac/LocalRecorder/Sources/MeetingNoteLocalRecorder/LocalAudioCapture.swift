@@ -39,14 +39,19 @@ enum LocalRecordingCaptureError: LocalizedError {
 final class LocalRecordingCaptureController {
     private var activeSession: LocalRecordingCaptureSession?
 
-    func start(fallbackIntentId: String, appVersion: String) async throws {
+    func start(
+        fallbackIntentId: String,
+        appVersion: String,
+        onAudioLevel: @escaping @Sendable (Float) -> Void = { _ in }
+    ) async throws {
         if activeSession != nil {
             throw LocalRecordingCaptureError.alreadyRecording
         }
 
         let session = try LocalRecordingCaptureSession(
             fallbackIntentId: fallbackIntentId,
-            appVersion: appVersion
+            appVersion: appVersion,
+            onAudioLevel: onAudioLevel
         )
         try await session.start()
         activeSession = session
@@ -72,9 +77,14 @@ final class LocalRecordingCaptureSession {
     private let microphoneRecorder: MicrophoneTrackRecorder
     private let startedAt: Date
     private let synthesizedAudioURL: URL
+    private var isSystemAudioRecording = false
     private let systemRecorder: SystemAudioTrackRecorder
 
-    init(fallbackIntentId: String, appVersion: String) throws {
+    init(
+        fallbackIntentId: String,
+        appVersion: String,
+        onAudioLevel: @escaping @Sendable (Float) -> Void
+    ) throws {
         let directoryURL = LocalRecorderFileLocations.recordingsDirectoryURL()
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(
@@ -89,8 +99,14 @@ final class LocalRecordingCaptureSession {
         self.microphoneAudioURL = directoryURL.appending(path: "microphone.wav")
         self.startedAt = Date()
         self.synthesizedAudioURL = directoryURL.appending(path: "synthesized.wav")
-        self.microphoneRecorder = try MicrophoneTrackRecorder(outputURL: microphoneAudioURL)
-        self.systemRecorder = try SystemAudioTrackRecorder(outputURL: computerAudioURL)
+        self.microphoneRecorder = try MicrophoneTrackRecorder(
+            outputURL: microphoneAudioURL,
+            onAudioLevel: onAudioLevel
+        )
+        self.systemRecorder = try SystemAudioTrackRecorder(
+            outputURL: computerAudioURL,
+            onAudioLevel: onAudioLevel
+        )
     }
 
     func start() async throws {
@@ -98,15 +114,17 @@ final class LocalRecordingCaptureSession {
 
         do {
             try await systemRecorder.start()
+            isSystemAudioRecording = true
         } catch {
-            microphoneRecorder.stop()
-            throw error
+            await systemRecorder.stop()
         }
     }
 
     func stop() async throws -> LocalRecordingCaptureResult {
         let stoppedAt = Date()
-        await systemRecorder.stop()
+        if isSystemAudioRecording {
+            await systemRecorder.stop()
+        }
         microphoneRecorder.stop()
         try LocalTrackSynthesizer.synthesize(
             computerAudioURL: computerAudioURL,
@@ -187,6 +205,15 @@ enum LocalTrackAudioFormat {
             interleaved: false
         )!
     }
+
+    static var processingFormat: AVAudioFormat {
+        AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sampleRate,
+            channels: AVAudioChannelCount(channelCount),
+            interleaved: false
+        )!
+    }
 }
 
 enum LocalTrackSynthesizer {
@@ -197,7 +224,7 @@ enum LocalTrackSynthesizer {
         microphoneAudioURL: URL,
         outputURL: URL
     ) throws {
-        if FileManager.default.fileExists(atPath: outputURL.path()) {
+        if FileManager.default.fileExists(atPath: outputURL.path) {
             try FileManager.default.removeItem(at: outputURL)
         }
 
@@ -237,6 +264,10 @@ enum LocalTrackSynthesizer {
         from file: AVAudioFile,
         format: AVAudioFormat
     ) throws -> AVAudioPCMBuffer? {
+        guard file.framePosition < file.length else {
+            return nil
+        }
+
         guard let buffer = AVAudioPCMBuffer(
             pcmFormat: file.processingFormat,
             frameCapacity: frameCapacity
@@ -331,9 +362,14 @@ enum LocalTrackSynthesizer {
 
 final class MicrophoneTrackRecorder {
     private let engine = AVAudioEngine()
+    private let onAudioLevel: @Sendable (Float) -> Void
     private let writer: PCM16WavWriter
 
-    init(outputURL: URL) throws {
+    init(
+        outputURL: URL,
+        onAudioLevel: @escaping @Sendable (Float) -> Void
+    ) throws {
+        self.onAudioLevel = onAudioLevel
         self.writer = try PCM16WavWriter(outputURL: outputURL)
     }
 
@@ -341,7 +377,12 @@ final class MicrophoneTrackRecorder {
         let input = engine.inputNode
         let inputFormat = input.outputFormat(forBus: 0)
 
-        input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [writer] buffer, _ in
+        input.installTap(
+            onBus: 0,
+            bufferSize: 4096,
+            format: inputFormat
+        ) { [onAudioLevel, writer] buffer, _ in
+            onAudioLevel(LocalAudioLevelMeter.rmsLevel(from: buffer))
             writer.write(buffer)
         }
         engine.prepare()
@@ -356,11 +397,16 @@ final class MicrophoneTrackRecorder {
 }
 
 final class SystemAudioTrackRecorder: NSObject, @unchecked Sendable, SCStreamOutput, SCStreamDelegate {
+    private let onAudioLevel: @Sendable (Float) -> Void
     private let queue = DispatchQueue(label: "tech.inevitable.meeting-note.local-recorder.system-audio")
     private let writer: PCM16WavWriter
     private var stream: SCStream?
 
-    init(outputURL: URL) throws {
+    init(
+        outputURL: URL,
+        onAudioLevel: @escaping @Sendable (Float) -> Void
+    ) throws {
+        self.onAudioLevel = onAudioLevel
         self.writer = try PCM16WavWriter(outputURL: outputURL)
     }
 
@@ -412,6 +458,7 @@ final class SystemAudioTrackRecorder: NSObject, @unchecked Sendable, SCStreamOut
 
         do {
             let buffer = try AVAudioPCMBuffer.localRecorderBuffer(from: sampleBuffer)
+            onAudioLevel(LocalAudioLevelMeter.rmsLevel(from: buffer))
             writer.write(buffer)
         } catch {
             writer.record(error)
@@ -424,17 +471,24 @@ final class SystemAudioTrackRecorder: NSObject, @unchecked Sendable, SCStreamOut
 }
 
 final class PCM16WavWriter: @unchecked Sendable {
-    private let file: AVAudioFile
+    private let fileHandle: FileHandle
     private let lock = NSLock()
-    private let outputFormat = LocalTrackAudioFormat.avFormat
+    private let outputFormat = LocalTrackAudioFormat.processingFormat
+    private var dataByteCount: UInt32 = 0
     private var error: Error?
     private var isClosed = false
 
     init(outputURL: URL) throws {
-        self.file = try AVAudioFile(
-            forWriting: outputURL,
-            settings: outputFormat.settings
+        if FileManager.default.fileExists(atPath: outputURL.path) {
+            try FileManager.default.removeItem(at: outputURL)
+        }
+
+        FileManager.default.createFile(
+            atPath: outputURL.path,
+            contents: Self.wavHeader(dataByteCount: 0),
         )
+        self.fileHandle = try FileHandle(forWritingTo: outputURL)
+        try fileHandle.seekToEnd()
     }
 
     func write(_ buffer: AVAudioPCMBuffer) {
@@ -452,7 +506,7 @@ final class PCM16WavWriter: @unchecked Sendable {
                 return
             }
 
-            try file.write(from: converted)
+            try writePCM(converted)
         } catch {
             self.error = error
         }
@@ -466,13 +520,13 @@ final class PCM16WavWriter: @unchecked Sendable {
 
     func close() {
         lock.lock()
-        isClosed = true
+        closeLocked()
         lock.unlock()
     }
 
     func finish() throws {
         lock.lock()
-        isClosed = true
+        closeLocked()
         let recordedError = error
         lock.unlock()
 
@@ -483,6 +537,91 @@ final class PCM16WavWriter: @unchecked Sendable {
 
     private func convert(_ buffer: AVAudioPCMBuffer) throws -> AVAudioPCMBuffer? {
         try LocalAudioBufferConverter.convert(buffer, to: outputFormat)
+    }
+
+    private func writePCM(_ buffer: AVAudioPCMBuffer) throws {
+        guard buffer.frameLength > 0,
+              let channels = buffer.floatChannelData else {
+            return
+        }
+
+        let frameLength = Int(buffer.frameLength)
+        let channelCount = Int(outputFormat.channelCount)
+        var data = Data()
+        data.reserveCapacity(frameLength * channelCount * MemoryLayout<Int16>.size)
+
+        for frame in 0..<frameLength {
+            for channel in 0..<channelCount {
+                let sample = channels[channel][frame]
+                var pcm = Int16(
+                    max(
+                        Double(Int16.min),
+                        min(Double(Int16.max), Double(sample) * Double(Int16.max))
+                    )
+                ).littleEndian
+                withUnsafeBytes(of: &pcm) { bytes in
+                    data.append(contentsOf: bytes)
+                }
+            }
+        }
+
+        try fileHandle.write(contentsOf: data)
+        dataByteCount = dataByteCount &+ UInt32(data.count)
+    }
+
+    private func closeLocked() {
+        guard !isClosed else {
+            return
+        }
+
+        isClosed = true
+        do {
+            try fileHandle.seek(toOffset: 0)
+            try fileHandle.write(contentsOf: Self.wavHeader(dataByteCount: dataByteCount))
+            try fileHandle.close()
+        } catch {
+            self.error = error
+        }
+    }
+
+    private static func wavHeader(dataByteCount: UInt32) -> Data {
+        var data = Data()
+        data.append(contentsOf: [0x52, 0x49, 0x46, 0x46])
+        appendUInt32(36 &+ dataByteCount, to: &data)
+        data.append(contentsOf: [0x57, 0x41, 0x56, 0x45])
+        data.append(contentsOf: [0x66, 0x6d, 0x74, 0x20])
+        appendUInt32(16, to: &data)
+        appendUInt16(1, to: &data)
+        appendUInt16(UInt16(LocalTrackAudioFormat.channelCount), to: &data)
+        appendUInt32(UInt32(LocalTrackAudioFormat.sampleRate), to: &data)
+        appendUInt32(
+            UInt32(LocalTrackAudioFormat.sampleRate) *
+                UInt32(LocalTrackAudioFormat.channelCount) *
+                UInt32(MemoryLayout<Int16>.size),
+            to: &data
+        )
+        appendUInt16(
+            UInt16(LocalTrackAudioFormat.channelCount * MemoryLayout<Int16>.size),
+            to: &data
+        )
+        appendUInt16(16, to: &data)
+        data.append(contentsOf: [0x64, 0x61, 0x74, 0x61])
+        appendUInt32(dataByteCount, to: &data)
+        return data
+    }
+
+    private static func appendUInt16(_ value: UInt16, to data: inout Data) {
+        var littleEndian = value.littleEndian
+        withUnsafeBytes(of: &littleEndian) { bytes in
+            data.append(contentsOf: bytes)
+        }
+    }
+
+    private static func appendUInt32(_ value: UInt32, to data: inout Data) {
+        var littleEndian = value.littleEndian
+        withUnsafeBytes(of: &littleEndian) { bytes in
+            data.append(contentsOf: bytes)
+        }
     }
 }
 
@@ -545,6 +684,57 @@ final class AudioConverterInput: @unchecked Sendable {
         didProvideBuffer = true
         status.pointee = .haveData
         return buffer
+    }
+}
+
+enum LocalAudioLevelMeter {
+    static func rmsLevel(from buffer: AVAudioPCMBuffer) -> Float {
+        guard buffer.frameLength > 0, buffer.format.channelCount > 0 else {
+            return 0
+        }
+
+        guard let measurableBuffer = makeFloatBuffer(from: buffer),
+              let channels = measurableBuffer.floatChannelData else {
+            return 0
+        }
+
+        let channelCount = Int(measurableBuffer.format.channelCount)
+        let frameLength = Int(measurableBuffer.frameLength)
+        var squareSum: Float = 0
+        var sampleCount = 0
+
+        for channel in 0..<channelCount {
+            let channelData = channels[channel]
+            for frame in 0..<frameLength {
+                let sample = channelData[frame]
+                squareSum += sample * sample
+                sampleCount += 1
+            }
+        }
+
+        guard sampleCount > 0 else {
+            return 0
+        }
+
+        return sqrt(squareSum / Float(sampleCount))
+    }
+
+    private static func makeFloatBuffer(from buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        if buffer.format.commonFormat == .pcmFormatFloat32,
+           !buffer.format.isInterleaved {
+            return buffer
+        }
+
+        guard let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: buffer.format.sampleRate,
+            channels: buffer.format.channelCount,
+            interleaved: false
+        ) else {
+            return nil
+        }
+
+        return try? LocalAudioBufferConverter.convert(buffer, to: format)
     }
 }
 

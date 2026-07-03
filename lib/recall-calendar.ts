@@ -262,6 +262,7 @@ export async function syncRecallCalendarEventsForWorkspace(input: {
     startTimeGte: getRecallCalendarRepairStart(now).toISOString(),
   });
   let count = 0;
+  let failedCount = 0;
 
   for (const recallEvent of events) {
     const syncedEvent = normalizeRecallCalendarEvent(recallEvent);
@@ -274,12 +275,20 @@ export async function syncRecallCalendarEventsForWorkspace(input: {
       continue;
     }
 
-    await autoJoinCalendarEvent({
-      connection: activeConnection,
-      event: syncedEvent,
-      repairMode: true,
-    });
-    count += 1;
+    try {
+      await autoJoinCalendarEvent({
+        connection: activeConnection,
+        event: syncedEvent,
+        repairMode: true,
+      });
+      count += 1;
+    } catch (error) {
+      if (!isRecoverableCalendarEventSyncError(error)) {
+        throw error;
+      }
+
+      failedCount += 1;
+    }
   }
 
   await db
@@ -292,6 +301,7 @@ export async function syncRecallCalendarEventsForWorkspace(input: {
 
   return {
     connectionId: connection.id,
+    failedEventCount: failedCount,
     syncedEventCount: count,
   };
 }
@@ -308,6 +318,10 @@ function shouldSyncRepairCalendarEvent(event: SyncedCalendarEvent, now: Date) {
   }
 
   return startTime >= getRecallCalendarRepairStart(now).getTime();
+}
+
+function isRecoverableCalendarEventSyncError(error: unknown) {
+  return error instanceof Error && error.message.startsWith("Recall ");
 }
 
 async function findRecallManagedCalendarForWorkspace(

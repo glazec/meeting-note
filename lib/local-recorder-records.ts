@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
@@ -33,6 +33,31 @@ export type LocalRecorderMeetingItem = {
   title: string;
 };
 
+export type LocalRecorderBotStatus =
+  | "not_planned"
+  | "planned"
+  | "in_meeting_room"
+  | "joined"
+  | "recording"
+  | "done"
+  | "failed"
+  | "cancelled";
+
+export type LocalRecorderMonitoringMeeting = {
+  botStatus: LocalRecorderBotStatus;
+  botStatusDetail: string;
+  botStatusLabel: string;
+  endsAt: string | null;
+  meetingId: string;
+  startsAt: string;
+  title: string;
+};
+
+export type LocalRecorderMonitoringStatus = {
+  missedMeetings: LocalRecorderMeetingItem[];
+  nextMeeting: LocalRecorderMonitoringMeeting | null;
+};
+
 export type LocalRecorderUploadAssetIds = {
   computerAudioAssetId: string;
   microphoneAudioAssetId: string;
@@ -49,6 +74,8 @@ type LocalRecorderTranscriptionEventInput = {
 const intentTokenBytes = 18;
 const activeAttemptStates = ["started", "uploading", "uploaded"];
 const localRecorderAudioContentType = "audio/wav";
+const manualRecordingIntentTtlMs = 6 * 60 * 60 * 1000;
+const scheduleLookbackMs = 30 * 60 * 1000;
 
 export function buildLocalRecorderTranscriptionEvent(
   input: LocalRecorderTranscriptionEventInput,
@@ -202,6 +229,216 @@ export async function listMissedLocalRecorderMeetings(input: {
   }
 
   return items;
+}
+
+export async function getLocalRecorderMonitoringStatus(input: {
+  deviceId: string;
+  now: Date;
+  workspace: WorkspaceContext;
+}): Promise<LocalRecorderMonitoringStatus> {
+  const missedMeetings = await listMissedLocalRecorderMeetings(input);
+  const [row] = await db
+    .select({
+      endedAt: meetings.endedAt,
+      id: meetings.id,
+      recallBotId: meetings.recallBotId,
+      recallRecordingId: meetings.recallRecordingId,
+      startedAt: meetings.startedAt,
+      status: meetings.status,
+      title: meetings.title,
+    })
+    .from(meetings)
+    .where(
+      and(
+        eq(meetings.teamId, input.workspace.teamId),
+        isNotNull(meetings.startedAt),
+        inArray(meetings.status, ["scheduled", "recording"]),
+        or(
+          eq(meetings.status, "recording"),
+          gte(meetings.startedAt, new Date(input.now.getTime() - scheduleLookbackMs)),
+        ),
+      ),
+    )
+    .orderBy(asc(meetings.startedAt))
+    .limit(1);
+
+  return {
+    missedMeetings,
+    nextMeeting: row?.startedAt
+      ? {
+          botStatus: getLocalRecorderBotStatus(row, input.now),
+          botStatusDetail: getLocalRecorderBotStatusDetail(row, input.now),
+          botStatusLabel: getLocalRecorderBotStatusLabel(row, input.now),
+          endsAt: row.endedAt?.toISOString() ?? null,
+          meetingId: row.id,
+          startsAt: row.startedAt.toISOString(),
+          title: row.title,
+        }
+      : null,
+  };
+}
+
+export async function createManualLocalRecorderIntent(input: {
+  deviceId: string;
+  now: Date;
+  title?: string | null;
+  workspace: WorkspaceContext;
+}) {
+  const deviceIdHash = await hashLocalRecorderValue(input.deviceId);
+  const title = input.title?.trim() || "Manual recording";
+  const fallbackIntentId = createFallbackIntentId();
+  const fallbackIntentIdHash = await hashLocalRecorderValue(fallbackIntentId);
+
+  await db
+    .insert(localRecorderDevices)
+    .values({
+      appVersion: null,
+      deviceIdHash,
+      lastSeenAt: input.now,
+      teamId: input.workspace.teamId,
+      userId: input.workspace.userId,
+    })
+    .onConflictDoUpdate({
+      target: [
+        localRecorderDevices.teamId,
+        localRecorderDevices.userId,
+        localRecorderDevices.deviceIdHash,
+      ],
+      set: { lastSeenAt: input.now },
+    });
+
+  const [meeting] = await db
+    .insert(meetings)
+    .values({
+      ownerUserId: input.workspace.userId,
+      platform: "in_person",
+      startedAt: input.now,
+      status: "recording",
+      teamId: input.workspace.teamId,
+      title,
+    })
+    .returning({ id: meetings.id, title: meetings.title });
+
+  await db.insert(localRecordingAttempts).values({
+    attemptState: "started",
+    claimedAt: input.now,
+    deviceIdHash,
+    expiresAt: new Date(input.now.getTime() + manualRecordingIntentTtlMs),
+    fallbackIntentIdHash,
+    meetingId: meeting.id,
+    notificationState: "manual",
+    userId: input.workspace.userId,
+  });
+
+  return {
+    fallbackIntentId,
+    meetingTitle: meeting.title,
+  };
+}
+
+function getLocalRecorderBotStatus(
+  meeting: {
+    endedAt: Date | null;
+    recallBotId: string | null;
+    recallRecordingId: string | null;
+    startedAt: Date | null;
+    status: string;
+  },
+  now: Date,
+): LocalRecorderBotStatus {
+  if (meeting.status === "cancelled") {
+    return "cancelled";
+  }
+
+  if (meeting.status === "failed" || meeting.status === "missed") {
+    return "failed";
+  }
+
+  if (
+    meeting.status === "processing" ||
+    meeting.status === "ready" ||
+    meeting.recallRecordingId
+  ) {
+    return "done";
+  }
+
+  if (!meeting.recallBotId) {
+    return "not_planned";
+  }
+
+  if (meeting.status === "recording") {
+    return meeting.recallRecordingId ? "recording" : "joined";
+  }
+
+  if (
+    meeting.startedAt &&
+    meeting.startedAt <= now &&
+    (!meeting.endedAt || meeting.endedAt >= now)
+  ) {
+    return "in_meeting_room";
+  }
+
+  return "planned";
+}
+
+function getLocalRecorderBotStatusLabel(
+  meeting: {
+    endedAt: Date | null;
+    recallBotId: string | null;
+    recallRecordingId: string | null;
+    startedAt: Date | null;
+    status: string;
+  },
+  now: Date,
+) {
+  switch (getLocalRecorderBotStatus(meeting, now)) {
+    case "cancelled":
+      return "Cancelled";
+    case "done":
+      return "Done";
+    case "failed":
+      return "Failed";
+    case "in_meeting_room":
+      return "In meeting room";
+    case "joined":
+      return "Joined";
+    case "not_planned":
+      return "Not planned";
+    case "planned":
+      return "Planned";
+    case "recording":
+      return "Recording";
+  }
+}
+
+function getLocalRecorderBotStatusDetail(
+  meeting: {
+    endedAt: Date | null;
+    recallBotId: string | null;
+    recallRecordingId: string | null;
+    startedAt: Date | null;
+    status: string;
+  },
+  now: Date,
+) {
+  switch (getLocalRecorderBotStatus(meeting, now)) {
+    case "cancelled":
+      return "Meeting was cancelled";
+    case "done":
+      return "Bot recording finished";
+    case "failed":
+      return "Bot could not record";
+    case "in_meeting_room":
+      return "Bot is waiting or joining";
+    case "joined":
+      return "Bot joined the call";
+    case "not_planned":
+      return "No bot is scheduled";
+    case "planned":
+      return "Bot is scheduled";
+    case "recording":
+      return "Bot is recording";
+  }
 }
 
 export async function claimLocalRecorderIntent(input: {
@@ -554,6 +791,16 @@ export async function completeLocalRecorderRecordingUpload(input: {
     .update(localRecordingAttempts)
     .set({ attemptState: "uploaded", updatedAt: now })
     .where(eq(localRecordingAttempts.id, attempt.id));
+
+  await db
+    .update(meetings)
+    .set({
+      endedAt: input.recordingStoppedAt,
+      status: "processing",
+      updatedAt: now,
+    })
+    .where(eq(meetings.id, attempt.meetingId));
+
   const transcriptionEventInput =
     await getOrCreateLocalRecorderTranscriptionEventInput({
       localRecordingId: recording.id,
