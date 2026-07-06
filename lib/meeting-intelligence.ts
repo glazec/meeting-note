@@ -1,4 +1,9 @@
-import { getExternalOrganizationDomain } from "@/lib/email-domains";
+import {
+  getEmailDomain,
+  getExternalOrganizationDomain,
+  normalizeEmailAddress,
+} from "@/lib/email-domains";
+import { formatNameFromEmail } from "@/lib/speaker-labels";
 
 type VocabularyTerm = {
   term: string;
@@ -142,21 +147,31 @@ export function buildSmartMeetingTitle(input: {
   workspaceDomain: string;
 }) {
   const eventTitle = input.eventTitle.replace(/\s+/g, " ").trim();
+  const workspaceName = formatOrganizationName(input.workspaceDomain);
+  const normalizedEventTitle = normalizeEntityValue(eventTitle);
+  const normalizedWorkspaceName = normalizeEntityValue(workspaceName);
+  const isWorkspaceDefaultTitle =
+    normalizedEventTitle === normalizedWorkspaceName ||
+    normalizedEventTitle === `meeting with ${normalizedWorkspaceName}`;
 
-  if (eventTitle && !genericMeetingTitles.has(eventTitle.toLowerCase())) {
+  if (
+    eventTitle &&
+    !genericMeetingTitles.has(eventTitle.toLowerCase()) &&
+    !isWorkspaceDefaultTitle
+  ) {
     return eventTitle;
   }
 
-  const workspaceName = formatOrganizationName(input.workspaceDomain);
-  const externalDomain = input.attendeeEmails
-    .map((email) => email.split("@")[1]?.trim().toLowerCase())
-    .find((domain) => domain && domain !== input.workspaceDomain.toLowerCase());
+  const externalParticipantName = getExternalMeetingParticipantName(
+    input.attendeeEmails,
+    input.workspaceDomain,
+  );
 
-  if (!externalDomain) {
+  if (!externalParticipantName) {
     return eventTitle || "Meeting";
   }
 
-  return `${workspaceName} <> ${formatOrganizationName(externalDomain)}`;
+  return `${workspaceName} <> ${externalParticipantName}`;
 }
 
 export function extractMeetingEntities(
@@ -557,6 +572,12 @@ function getMeetingGroupingKeys(
 }
 
 function getMeetingTitleGroupingKey(title: string) {
+  const companyPairKey = getCompanyPairTitleGroupingKey(title);
+
+  if (companyPairKey) {
+    return companyPairKey;
+  }
+
   const normalized = normalizeEntityValue(title);
 
   if (!normalized || genericMeetingGroupingTitles.has(normalized)) {
@@ -564,6 +585,44 @@ function getMeetingTitleGroupingKey(title: string) {
   }
 
   return normalized;
+}
+
+function getCompanyPairTitleGroupingKey(title: string) {
+  const parts = title.split("<>").map((part) => normalizeEntityValue(part));
+
+  if (parts.length !== 2 || parts.some((part) => !part)) {
+    return null;
+  }
+
+  return parts.toSorted().join(" <> ");
+}
+
+function getExternalMeetingParticipantName(
+  attendeeEmails: string[],
+  workspaceDomain: string,
+) {
+  const normalizedWorkspaceDomain = workspaceDomain.trim().toLowerCase();
+  let personalEmailName: string | null = null;
+
+  for (const rawEmail of attendeeEmails) {
+    const email = normalizeEmailAddress(rawEmail);
+    const organizationDomain = getExternalOrganizationDomain(
+      email,
+      workspaceDomain,
+    );
+
+    if (organizationDomain) {
+      return formatOrganizationName(organizationDomain);
+    }
+
+    const domain = getEmailDomain(email);
+
+    if (!personalEmailName && domain && domain !== normalizedWorkspaceDomain) {
+      personalEmailName = formatNameFromEmail(email);
+    }
+  }
+
+  return personalEmailName;
 }
 
 function getWorkspaceOrganizationEntity(workspaceDomain?: string | null) {

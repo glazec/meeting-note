@@ -7,6 +7,7 @@ import {
   getSpeakerPreviewTransition,
   getSpeakerRenameSuggestions,
   getWaveformHoverSnapshot,
+  shouldDecodeAudioWaveform,
   TranscriptViewer,
   type EditingSpeaker,
   type TranscriptSegment,
@@ -361,6 +362,27 @@ describe("TranscriptViewer", () => {
     expect(getSpeakerRenameSuggestions(suggestions).map((item) => item.name)).toEqual(
       suggestions.map((item) => item.name),
     );
+  });
+
+  it("skips full audio waveform decoding for long recordings", () => {
+    expect(
+      shouldDecodeAudioWaveform({
+        duration: 60 * 60 * 2,
+        timelineDuration: 60 * 60 * 2,
+      }),
+    ).toBe(false);
+    expect(
+      shouldDecodeAudioWaveform({
+        duration: 60 * 20,
+        timelineDuration: 60 * 20,
+      }),
+    ).toBe(true);
+    expect(
+      shouldDecodeAudioWaveform({
+        duration: 0,
+        timelineDuration: 0,
+      }),
+    ).toBe(true);
   });
 
   it("builds speaker preview clips that skip over other speakers", () => {

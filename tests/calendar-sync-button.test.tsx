@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { formatCalendarSyncMessage } from "@/components/calendar-sync-button";
+import {
+  formatCalendarSyncMessage,
+  getCalendarSyncPostSuccessAction,
+} from "@/components/calendar-sync-button";
 
 describe("formatCalendarSyncMessage", () => {
   it("shows the captured event count when sync succeeds cleanly", () => {
@@ -25,5 +28,18 @@ describe("formatCalendarSyncMessage", () => {
         syncedEventCount: 0,
       }),
     ).toBe("Calendar checked. 3 events need review.");
+  });
+
+  it("refreshes the dashboard after a manual sync succeeds", () => {
+    expect(getCalendarSyncPostSuccessAction(false)).toEqual({
+      type: "refresh",
+    });
+  });
+
+  it("clears the auto sync URL after an OAuth sync succeeds", () => {
+    expect(getCalendarSyncPostSuccessAction(true)).toEqual({
+      href: "/dashboard",
+      type: "replace",
+    });
   });
 });

@@ -67,7 +67,10 @@ import {
   getOrCreateWorkspaceForSessionUser,
   type WorkspaceContext,
 } from "@/lib/workspace";
-import { groupRelatedMeetings } from "@/lib/meeting-intelligence";
+import {
+  buildSmartMeetingTitle,
+  groupRelatedMeetings,
+} from "@/lib/meeting-intelligence";
 import {
   getMeetingAccessScope,
   getReadableMeetingsCondition,
@@ -281,7 +284,11 @@ export async function listMeetingLibraryPageForWorkspace(
 
       return {
         id: meeting.id,
-        title: meeting.title,
+        title: getMeetingDisplayTitle({
+          title: meeting.title,
+          attendeeEmails: meeting.calendarAttendeeEmails,
+          workspaceDomain: workspace.domain,
+        }),
         platform: meeting.platform,
         status: meeting.status,
         transcriptJobStatus: meeting.transcriptJobStatus,
@@ -960,6 +967,33 @@ function getAttendeeCount(attendeeEmails: unknown) {
   return count > 0 ? count : undefined;
 }
 
+function getMeetingDisplayTitle(input: {
+  title: string;
+  attendeeEmails: unknown;
+  workspaceDomain?: string | null;
+}) {
+  if (!input.workspaceDomain) {
+    return input.title;
+  }
+
+  return buildSmartMeetingTitle({
+    eventTitle: input.title,
+    attendeeEmails: getStringAttendeeEmails(input.attendeeEmails),
+    workspaceDomain: input.workspaceDomain,
+  });
+}
+
+function getStringAttendeeEmails(attendeeEmails: unknown) {
+  if (!Array.isArray(attendeeEmails)) {
+    return [];
+  }
+
+  return attendeeEmails.filter(
+    (email): email is string =>
+      typeof email === "string" && email.trim().length > 0,
+  );
+}
+
 export async function getMeetingDashboardSummaryForWorkspace(
   workspace: WorkspaceContext,
   options: {
@@ -1190,7 +1224,11 @@ export async function getMeetingTranscriptForWorkspace(
 
   return {
     id: meeting.id,
-    title: meeting.title,
+    title: getMeetingDisplayTitle({
+      title: meeting.title,
+      attendeeEmails: meeting.calendarAttendeeEmails,
+      workspaceDomain: workspace.domain,
+    }),
     platform: meeting.platform,
     status: meeting.status,
     transcriptJobStatus: meeting.transcriptJobStatus,
@@ -1254,7 +1292,11 @@ export async function listMeetingDetailRelatedMeetingsForWorkspace(
     .orderBy(desc(meetings.startedAt), desc(meetings.createdAt));
   const meetingItems = rows.map((meeting) => ({
     id: meeting.id,
-    title: meeting.title,
+    title: getMeetingDisplayTitle({
+      title: meeting.title,
+      attendeeEmails: meeting.calendarAttendeeEmails,
+      workspaceDomain: workspace.domain,
+    }),
     startedAt: (meeting.startedAt ?? meeting.createdAt).toISOString(),
     externalParticipantKeys: getExternalParticipantKeys(
       meeting.calendarAttendeeEmails,

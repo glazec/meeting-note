@@ -286,6 +286,7 @@ export const meetings = pgTable(
     ),
     teamMeetingKey: text("team_meeting_key"),
     title: text("title").notNull(),
+    titleSource: text("title_source").notNull().default("calendar"),
     platform: meetingPlatform("platform").notNull(),
     status: meetingStatus("status").notNull().default("scheduled"),
     meetingUrl: text("meeting_url"),

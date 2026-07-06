@@ -1,4 +1,16 @@
-import { and, asc, desc, eq, gte, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
@@ -21,6 +33,7 @@ import {
   getObjectMetadata,
   parseR2Env,
 } from "@/lib/r2";
+import { retrieveRecallBot } from "@/lib/vendors/recall";
 import type { WorkspaceContext } from "@/lib/workspace";
 
 export type LocalRecorderMeetingItem = {
@@ -99,6 +112,18 @@ export function isLocalRecorderCandidateVisibleInLookup(input: {
   return Boolean(input.startedAt && input.startedAt <= input.now);
 }
 
+export function isLocalRecorderMonitoringMeetingCurrent(input: {
+  endedAt: Date | null;
+  now: Date;
+  startedAt: Date | null;
+}) {
+  return Boolean(
+    input.startedAt &&
+      input.startedAt <= input.now &&
+      (!input.endedAt || input.endedAt >= input.now),
+  );
+}
+
 export async function listMissedLocalRecorderMeetings(input: {
   deviceId: string;
   now: Date;
@@ -136,9 +161,8 @@ export async function listMissedLocalRecorderMeetings(input: {
       )`,
       endedAt: meetings.endedAt,
       id: meetings.id,
-      latestRecallCode: sql<string | null>`null`,
-      latestRecallStatus: sql<string | null>`null`,
       meetingUrl: meetings.meetingUrl,
+      recallBotId: meetings.recallBotId,
       recallAudioAsset: sql<boolean>`exists (
         select 1 from ${mediaAssets}
         where ${mediaAssets.meetingId} = ${meetings.id}
@@ -173,11 +197,12 @@ export async function listMissedLocalRecorderMeetings(input: {
       continue;
     }
 
+    const recallState = await getLatestRecallBotState(row.recallBotId);
     const candidate: LocalRecorderCandidate = {
       activeTranscriptJob: row.activeTranscriptJob,
       endedAt: row.endedAt,
-      latestRecallCode: row.latestRecallCode,
-      latestRecallStatus: row.latestRecallStatus,
+      latestRecallCode: recallState.latestRecallCode,
+      latestRecallStatus: recallState.latestRecallStatus,
       meetingId: row.id,
       meetingUrl: row.meetingUrl,
       recallAudioAsset: row.recallAudioAsset,
@@ -256,10 +281,18 @@ export async function getLocalRecorderMonitoringStatus(input: {
         or(
           eq(meetings.status, "recording"),
           gte(meetings.startedAt, new Date(input.now.getTime() - scheduleLookbackMs)),
+          and(
+            lte(meetings.startedAt, input.now),
+            or(isNull(meetings.endedAt), gte(meetings.endedAt, input.now)),
+          ),
         ),
       ),
     )
-    .orderBy(asc(meetings.startedAt))
+    .orderBy(
+      desc(sql`case when ${meetings.status} = 'recording' then 1 else 0 end`),
+      desc(sql`case when ${meetings.startedAt} <= ${input.now} and (${meetings.endedAt} is null or ${meetings.endedAt} >= ${input.now}) then 1 else 0 end`),
+      asc(meetings.startedAt),
+    )
     .limit(1);
 
   return {
@@ -334,6 +367,72 @@ export async function createManualLocalRecorderIntent(input: {
     fallbackIntentId,
     meetingTitle: meeting.title,
   };
+}
+
+async function getLatestRecallBotState(recallBotId: string | null) {
+  if (!recallBotId) {
+    return {
+      latestRecallCode: null,
+      latestRecallStatus: null,
+    };
+  }
+
+  try {
+    return extractLatestRecallBotState(await retrieveRecallBot(recallBotId));
+  } catch {
+    return {
+      latestRecallCode: null,
+      latestRecallStatus: null,
+    };
+  }
+}
+
+function extractLatestRecallBotState(bot: unknown) {
+  const record = getRecord(bot);
+  const statusChange = getLatestRecallStatusChange(record?.status_changes);
+
+  return {
+    latestRecallCode:
+      getString(record?.sub_code) ??
+      getString(record?.subCode) ??
+      getString(statusChange?.sub_code) ??
+      getString(statusChange?.subCode),
+    latestRecallStatus:
+      getString(record?.status) ??
+      getString(record?.status_code) ??
+      getString(record?.statusCode) ??
+      getString(record?.code) ??
+      getString(statusChange?.status) ??
+      getString(statusChange?.status_code) ??
+      getString(statusChange?.statusCode) ??
+      getString(statusChange?.code),
+  };
+}
+
+function getLatestRecallStatusChange(value: unknown) {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  for (const item of value.slice().reverse()) {
+    const record = getRecord(item);
+
+    if (record) {
+      return record;
+    }
+  }
+
+  return null;
+}
+
+function getRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value
+    : null;
+}
+
+function getString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function getLocalRecorderBotStatus(

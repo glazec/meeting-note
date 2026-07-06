@@ -52,6 +52,7 @@ export async function PATCH(
     .update(meetings)
     .set({
       title: parsedBody.data.title,
+      titleSource: "manual",
       updatedAt: new Date(),
     })
     .where(getManageableMeetingCondition(workspace, parsedMeetingId.data));

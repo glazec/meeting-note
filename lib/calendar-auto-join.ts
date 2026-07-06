@@ -87,6 +87,8 @@ type ExistingMeeting = {
   id: string;
   calendarEventId?: string | null;
   teamMeetingKey?: string | null;
+  title: string;
+  titleSource: string | null;
   recallBotId: string | null;
   meetingUrl: string | null;
   startedAt: Date | null;
@@ -236,7 +238,8 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
           nextStatus: "cancelled",
           recallCalendarEventId: input.event.recallCalendarEventId,
           startsAt,
-          title,
+          title: getCalendarMeetingTitle(existingMeeting, title),
+          titleSource: getCalendarMeetingTitleSource(existingMeeting),
         });
 
         return {
@@ -278,7 +281,8 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
         recallCalendarEventId: input.event.recallCalendarEventId,
         skipVendorDelete: input.event.isDeleted === true,
         startsAt,
-        title,
+        title: getCalendarMeetingTitle(existingMeeting, title),
+        titleSource: getCalendarMeetingTitleSource(existingMeeting),
       });
 
       return {
@@ -321,7 +325,8 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
         meetingUrl,
         recallCalendarEventId: input.event.recallCalendarEventId,
         startsAt,
-        title,
+        title: getCalendarMeetingTitle(existingMeeting, title),
+        titleSource: getCalendarMeetingTitleSource(existingMeeting),
       });
 
       return {
@@ -353,13 +358,14 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
   if (existingMeeting?.status === "failed" && isPastCalendarEvent({ startsAt, endsAt })) {
     await markMeetingMissedFromCalendar({
       meetingId: existingMeeting.id,
-      title,
+      title: getCalendarMeetingTitle(existingMeeting, title),
       platform,
       meetingUrl,
       startsAt,
       endsAt,
       teamMeetingKey: activeTeamMeetingKey,
       recallBotId: existingMeeting.recallBotId,
+      titleSource: getCalendarMeetingTitleSource(existingMeeting),
     });
 
     return {
@@ -400,6 +406,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
             calendarEventId: calendarEvent.id,
             teamMeetingKey: activeTeamMeetingKey,
             title,
+            titleSource: "calendar",
             platform,
             status: "scheduled",
             meetingUrl,
@@ -489,7 +496,14 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
       .set({
         recallBotId,
         teamMeetingKey: activeTeamMeetingKey,
-        title,
+        title: getCalendarMeetingTitle(
+          "titleSource" in meeting ? meeting : null,
+          title,
+        ),
+        titleSource:
+          "titleSource" in meeting && meeting.titleSource === "manual"
+            ? "manual"
+            : "calendar",
         platform,
         meetingUrl,
         startedAt: startsAt,
@@ -525,6 +539,8 @@ async function syncLocationCalendarMeeting(input: {
   teamMeetingKey?: string | null;
 }) {
   let meeting = input.existingMeeting;
+  const title = getCalendarMeetingTitle(meeting, input.title);
+  const titleSource = getCalendarMeetingTitleSource(meeting);
 
   if (!meeting) {
     meeting = (
@@ -535,7 +551,8 @@ async function syncLocationCalendarMeeting(input: {
           ownerUserId: input.connection.userId,
           calendarEventId: input.calendarEvent.id,
           teamMeetingKey: input.teamMeetingKey,
-          title: input.title,
+          title,
+          titleSource,
           platform: "in_person",
           status: "scheduled",
           startedAt: input.startsAt,
@@ -545,6 +562,8 @@ async function syncLocationCalendarMeeting(input: {
           id: meetings.id,
           calendarEventId: meetings.calendarEventId,
           teamMeetingKey: meetings.teamMeetingKey,
+          title: meetings.title,
+          titleSource: meetings.titleSource,
           recallBotId: meetings.recallBotId,
           meetingUrl: meetings.meetingUrl,
           startedAt: meetings.startedAt,
@@ -557,7 +576,8 @@ async function syncLocationCalendarMeeting(input: {
       .set({
         calendarEventId: input.calendarEvent.id,
         teamMeetingKey: input.teamMeetingKey,
-        title: input.title,
+        title,
+        titleSource,
         platform: "in_person",
         status: "scheduled",
         meetingUrl: null,
@@ -682,7 +702,8 @@ async function syncExistingCalendarMeeting(input: {
 
     await updateMeetingFromCalendar({
       meetingId: input.meeting.id,
-      title: input.title,
+      title: getCalendarMeetingTitle(input.meeting, input.title),
+      titleSource: getCalendarMeetingTitleSource(input.meeting),
       platform: input.platform,
       meetingUrl: input.meetingUrl,
       startsAt: input.startsAt,
@@ -734,6 +755,7 @@ async function syncExistingCalendarMeeting(input: {
 async function updateMeetingFromCalendar(input: {
   meetingId: string;
   title: string;
+  titleSource: string;
   platform: SupportedMeetingPlatform;
   meetingUrl: string;
   startsAt: Date;
@@ -744,6 +766,7 @@ async function updateMeetingFromCalendar(input: {
 }) {
   const updates = {
     title: input.title,
+    titleSource: input.titleSource,
     platform: input.platform,
     teamMeetingKey: input.teamMeetingKey,
     meetingUrl: input.meetingUrl,
@@ -761,6 +784,19 @@ async function updateMeetingFromCalendar(input: {
     .where(eq(meetings.id, input.meetingId));
 }
 
+function getCalendarMeetingTitle(
+  meeting: ExistingMeeting | null | undefined,
+  calendarTitle: string,
+) {
+  return meeting?.titleSource === "manual" ? meeting.title : calendarTitle;
+}
+
+function getCalendarMeetingTitleSource(
+  meeting: ExistingMeeting | null | undefined,
+) {
+  return meeting?.titleSource === "manual" ? "manual" : "calendar";
+}
+
 async function findExistingMeeting(input: {
   teamId: string;
   calendarEventId: string;
@@ -771,6 +807,8 @@ async function findExistingMeeting(input: {
       id: meetings.id,
       calendarEventId: meetings.calendarEventId,
       teamMeetingKey: meetings.teamMeetingKey,
+      title: meetings.title,
+      titleSource: meetings.titleSource,
       recallBotId: meetings.recallBotId,
       meetingUrl: meetings.meetingUrl,
       startedAt: meetings.startedAt,
@@ -850,6 +888,7 @@ async function markMeetingFailed(meetingId: string) {
 async function markMeetingMissedFromCalendar(input: {
   meetingId: string;
   title: string;
+  titleSource?: string | null;
   platform: SupportedMeetingPlatform;
   meetingUrl: string;
   startsAt: Date;
@@ -861,6 +900,7 @@ async function markMeetingMissedFromCalendar(input: {
     .update(meetings)
     .set({
       title: input.title,
+      titleSource: input.titleSource === "manual" ? "manual" : "calendar",
       platform: input.platform,
       teamMeetingKey: input.teamMeetingKey,
       meetingUrl: input.meetingUrl,
@@ -877,6 +917,7 @@ async function cancelScheduledMeetingBotFromCalendar(input: {
   botId?: string | null;
   meetingId: string;
   title: string;
+  titleSource?: string | null;
   meetingUrl: string | null;
   nextStatus?: "cancelled" | "failed";
   recallCalendarEventId?: string | null;
@@ -897,6 +938,7 @@ async function cancelScheduledMeetingBotFromCalendar(input: {
     .update(meetings)
     .set({
       title: input.title,
+      titleSource: input.titleSource === "manual" ? "manual" : "calendar",
       meetingUrl: input.meetingUrl,
       teamMeetingKey: null,
       startedAt: input.startsAt,

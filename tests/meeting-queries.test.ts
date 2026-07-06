@@ -146,6 +146,109 @@ describe("getWorkspaceMeetingTranscript", () => {
     expect(query.params).not.toContain("cancelled");
   });
 
+  it("renames default meeting titles on the detail page", async () => {
+    getWorkspace.mockResolvedValue({
+      teamId: "team_123",
+      userId: "user_123",
+      domain: "iosg.vc",
+    });
+    select
+      .mockReturnValueOnce({
+        from: () => ({
+          leftJoin: () => ({
+            leftJoin: () => ({
+              where: () => ({
+                orderBy: () => ({
+                  limit: vi.fn().mockResolvedValue([
+                    {
+                      id: "11111111-1111-4111-8111-111111111111",
+                      teamId: "team_123",
+                      title: "meeting with IOSG",
+                      platform: "google_meet",
+                      status: "ready",
+                      transcriptJobStatus: null,
+                      audioObjectKey: null,
+                      calendarAttendeeEmails: [
+                        "alice@iosg.vc",
+                        "founder@nascent.xyz",
+                      ],
+                      recallRecordingId: null,
+                      translationErrorMessage: null,
+                      translationStatus: null,
+                    },
+                  ]),
+                }),
+              }),
+            }),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          leftJoin: () => ({
+            where: () => ({
+              orderBy: () => ({
+                limit: vi.fn().mockResolvedValue([]),
+              }),
+            }),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: () => ({
+              limit: vi.fn().mockResolvedValue([]),
+            }),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      });
+    const { getWorkspaceMeetingTranscript } = await import(
+      "@/lib/meeting-queries"
+    );
+
+    await expect(
+      getWorkspaceMeetingTranscript(
+        {
+          id: "user_123",
+          email: "user@example.com",
+          name: null,
+        },
+        "11111111-1111-4111-8111-111111111111",
+      ),
+    ).resolves.toMatchObject({
+      title: "IOSG <> Nascent",
+    });
+  });
+
   it("exposes the audio route for Recall recordings without an R2 asset", async () => {
     const segmentWhere = vi.fn((condition: SQL) => {
       void condition;
@@ -590,6 +693,69 @@ describe("listMeetingDetailRelatedMeetingsForWorkspace", () => {
     expect(meetingQuery.sql).toContain('"meeting_access"');
     expect(meetingQuery.params).toContain("cancelled");
     expectUsesCurrentTranscriptJob(previewWhere.mock.calls[0][0]);
+  });
+
+  it("renames default titles in detail related meetings", async () => {
+    select
+      .mockReturnValueOnce({
+        from: () => ({
+          leftJoin: () => ({
+            where: () => ({
+              orderBy: vi.fn().mockResolvedValue([
+                {
+                  id: "22222222-2222-4222-8222-222222222222",
+                  title: "Custom partner follow up",
+                  startedAt: new Date("2026-06-27T12:00:00.000Z"),
+                  createdAt: new Date("2026-06-27T11:59:00.000Z"),
+                  calendarAttendeeEmails: [
+                    "alice@iosg.vc",
+                    "founder@nascent.xyz",
+                  ],
+                },
+                {
+                  id: "11111111-1111-4111-8111-111111111111",
+                  title: "meeting with IOSG",
+                  startedAt: new Date("2026-06-20T12:00:00.000Z"),
+                  createdAt: new Date("2026-06-20T11:59:00.000Z"),
+                  calendarAttendeeEmails: [
+                    "bob@iosg.vc",
+                    "founder@nascent.xyz",
+                  ],
+                },
+              ]),
+            }),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: () => ({
+              limit: vi.fn().mockResolvedValue([]),
+            }),
+          }),
+        }),
+      });
+    const { listMeetingDetailRelatedMeetingsForWorkspace } = await import(
+      "@/lib/meeting-queries"
+    );
+
+    await expect(
+      listMeetingDetailRelatedMeetingsForWorkspace(
+        {
+          teamId: "team_123",
+          userId: "user_123",
+          domain: "iosg.vc",
+          canCreateMeetings: false,
+        },
+        "22222222-2222-4222-8222-222222222222",
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: "11111111-1111-4111-8111-111111111111",
+        title: "IOSG <> Nascent",
+      }),
+    ]);
   });
 });
 
@@ -1094,6 +1260,57 @@ describe("listMeetingsForWorkspace", () => {
             status: "ready",
           }),
         ],
+      }),
+    ]);
+  });
+
+  it("renames workspace default titles from external attendee domains in the library", async () => {
+    select
+      .mockReturnValueOnce({
+        from: () => ({
+          leftJoin: () => ({
+            where: () => ({
+              orderBy: vi.fn().mockResolvedValue([
+                {
+                  id: "11111111-1111-4111-8111-111111111111",
+                  teamId: "team_123",
+                  title: "meeting with IOSG",
+                  platform: "google_meet",
+                  status: "ready",
+                  transcriptJobStatus: null,
+                  recallBotId: null,
+                  startedAt: new Date("2026-06-27T10:00:00.000Z"),
+                  createdAt: new Date("2026-06-27T09:00:00.000Z"),
+                  calendarAttendeeEmails: [
+                    "alice@iosg.vc",
+                    "founder@nascent.xyz",
+                  ],
+                },
+              ]),
+            }),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      });
+    const { listMeetingsForWorkspace } = await import("@/lib/meeting-queries");
+
+    await expect(
+      listMeetingsForWorkspace({
+        teamId: "team_123",
+        userId: "user_123",
+        domain: "iosg.vc",
+        canCreateMeetings: true,
+      }),
+    ).resolves.toMatchObject([
+      expect.objectContaining({
+        id: "11111111-1111-4111-8111-111111111111",
+        title: "IOSG <> Nascent",
       }),
     ]);
   });

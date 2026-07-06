@@ -113,6 +113,185 @@ public struct SilencePromptTracker: Equatable, Sendable {
     }
 }
 
+public enum LocalRecorderAudioSource: String, Codable, Equatable, Sendable {
+    case microphone
+    case computerAudio
+}
+
+public struct LocalRecorderActivityWindow: Codable, Equatable, Sendable {
+    public var startsAt: TimeInterval
+    public var endsAt: TimeInterval
+    public var microphoneActive: Bool
+    public var computerAudioActive: Bool
+    public var microphoneLevel: Float
+    public var computerAudioLevel: Float
+
+    public init(
+        startsAt: TimeInterval,
+        endsAt: TimeInterval,
+        microphoneActive: Bool,
+        computerAudioActive: Bool,
+        microphoneLevel: Float,
+        computerAudioLevel: Float
+    ) {
+        self.startsAt = startsAt
+        self.endsAt = endsAt
+        self.microphoneActive = microphoneActive
+        self.computerAudioActive = computerAudioActive
+        self.microphoneLevel = microphoneLevel
+        self.computerAudioLevel = computerAudioLevel
+    }
+}
+
+public final class LocalRecorderActivitySampler: @unchecked Sendable {
+    private let activityThreshold: Float
+    private let lock = NSLock()
+    private let startedAt: Date
+    private let windowDuration: TimeInterval
+    private var windowsByIndex: [Int: LocalRecorderActivityWindow] = [:]
+
+    public init(
+        startedAt: Date,
+        windowDuration: TimeInterval = 0.5,
+        activityThreshold: Float = 0.005
+    ) {
+        self.startedAt = startedAt
+        self.windowDuration = max(0.1, windowDuration)
+        self.activityThreshold = max(0, activityThreshold)
+    }
+
+    public func observe(
+        source: LocalRecorderAudioSource,
+        level: Float,
+        at date: Date = Date()
+    ) {
+        let elapsed = max(0, date.timeIntervalSince(startedAt))
+        let index = Int(floor(elapsed / windowDuration))
+        let startsAt = TimeInterval(index) * windowDuration
+        let endsAt = startsAt + windowDuration
+
+        lock.lock()
+        var window = windowsByIndex[index] ?? LocalRecorderActivityWindow(
+            startsAt: startsAt,
+            endsAt: endsAt,
+            microphoneActive: false,
+            computerAudioActive: false,
+            microphoneLevel: 0,
+            computerAudioLevel: 0
+        )
+
+        switch source {
+        case .microphone:
+            window.microphoneLevel = max(window.microphoneLevel, level)
+            window.microphoneActive = window.microphoneActive || level > activityThreshold
+        case .computerAudio:
+            window.computerAudioLevel = max(window.computerAudioLevel, level)
+            window.computerAudioActive = window.computerAudioActive || level > activityThreshold
+        }
+
+        windowsByIndex[index] = window
+        lock.unlock()
+    }
+
+    public func snapshot(stoppedAt: Date = Date()) -> [LocalRecorderActivityWindow] {
+        let stoppedElapsed = max(0, stoppedAt.timeIntervalSince(startedAt))
+
+        lock.lock()
+        let windows = windowsByIndex
+            .sorted { $0.key < $1.key }
+            .map { _, value in
+                var window = value
+                window.endsAt = min(window.endsAt, max(window.startsAt, stoppedElapsed))
+                return window
+            }
+        lock.unlock()
+
+        return windows
+    }
+}
+
+public struct LocalRecorderTranscriptSegmentWindow: Equatable, Sendable {
+    public var startsAt: TimeInterval
+    public var endsAt: TimeInterval
+
+    public init(startsAt: TimeInterval, endsAt: TimeInterval) {
+        self.startsAt = startsAt
+        self.endsAt = endsAt
+    }
+}
+
+public enum LocalRecorderSpeakerAttribution: String, Codable, Equatable, Sendable {
+    case localUser
+    case remoteSpeaker
+    case overlap
+    case silence
+    case unknown
+}
+
+public struct LocalRecorderActivityAttributor: Equatable, Sendable {
+    public var minimumCoverageRatio: Double
+
+    public init(minimumCoverageRatio: Double = 0.2) {
+        self.minimumCoverageRatio = minimumCoverageRatio
+    }
+
+    public func attribution(
+        for segment: LocalRecorderTranscriptSegmentWindow,
+        activityWindows: [LocalRecorderActivityWindow]
+    ) -> LocalRecorderSpeakerAttribution {
+        let segmentDuration = segment.endsAt - segment.startsAt
+        guard segmentDuration > 0 else {
+            return .unknown
+        }
+
+        var localUserDuration: TimeInterval = 0
+        var remoteSpeakerDuration: TimeInterval = 0
+        var overlapDuration: TimeInterval = 0
+        var silenceDuration: TimeInterval = 0
+        var coveredDuration: TimeInterval = 0
+
+        for window in activityWindows {
+            let startsAt = max(segment.startsAt, window.startsAt)
+            let endsAt = min(segment.endsAt, window.endsAt)
+            let overlap = endsAt - startsAt
+
+            guard overlap > 0 else {
+                continue
+            }
+
+            coveredDuration += overlap
+
+            switch (window.microphoneActive, window.computerAudioActive) {
+            case (true, false):
+                localUserDuration += overlap
+            case (false, true):
+                remoteSpeakerDuration += overlap
+            case (true, true):
+                overlapDuration += overlap
+            case (false, false):
+                silenceDuration += overlap
+            }
+        }
+
+        guard coveredDuration / segmentDuration >= minimumCoverageRatio else {
+            return .unknown
+        }
+
+        let candidates: [(duration: TimeInterval, attribution: LocalRecorderSpeakerAttribution)] = [
+            (localUserDuration, .localUser),
+            (remoteSpeakerDuration, .remoteSpeaker),
+            (overlapDuration, .overlap),
+            (silenceDuration, .silence),
+        ]
+        guard let winner = candidates.max(by: { $0.duration < $1.duration }),
+              winner.duration > 0 else {
+            return .unknown
+        }
+
+        return winner.attribution
+    }
+}
+
 public struct LocalRecorderAPIClient: Sendable {
     public var serverURL: URL
     public var bearerToken: String
@@ -554,6 +733,56 @@ public struct LocalRecorderMonitoringMeeting: Codable, Identifiable, Equatable, 
     public var title: String
 
     public var id: String { meetingId }
+
+    public func isOngoing(at date: Date) -> Bool {
+        guard startsAt <= date else {
+            return false
+        }
+
+        guard let endsAt else {
+            return true
+        }
+
+        return endsAt >= date
+    }
+}
+
+public enum LocalRecorderMonitoringPollSchedule {
+    public static let fallbackGraceDuration: TimeInterval = 70
+    public static let activeMeetingInterval: TimeInterval = 60
+    public static let idleInterval: TimeInterval = 60 * 60
+
+    public static func nextDelay(
+        now: Date,
+        nextMeeting: LocalRecorderMonitoringMeeting?,
+        pendingMeetings: [MissedMeeting]
+    ) -> TimeInterval {
+        if !pendingMeetings.isEmpty {
+            return activeMeetingInterval
+        }
+
+        guard let nextMeeting else {
+            return idleInterval
+        }
+
+        let fallbackCheckAt = nextMeeting.startsAt.addingTimeInterval(
+            fallbackGraceDuration
+        )
+
+        if now < fallbackCheckAt {
+            return max(1, fallbackCheckAt.timeIntervalSince(now))
+        }
+
+        guard let endsAt = nextMeeting.endsAt else {
+            return activeMeetingInterval
+        }
+
+        if endsAt >= now {
+            return activeMeetingInterval
+        }
+
+        return idleInterval
+    }
 }
 
 public struct ManualRecordingIntentResponse: Codable, Equatable, Sendable {
@@ -763,15 +992,34 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
     public var appVersion: String
     public var computerAudio: TrackMetadata
     public var microphoneAudio: TrackMetadata
+    public var activityWindows: [LocalRecorderActivityWindow]
+
+    private enum CodingKeys: String, CodingKey {
+        case appVersion
+        case computerAudio
+        case microphoneAudio
+        case activityWindows
+    }
 
     public init(
         appVersion: String,
         computerAudio: TrackMetadata,
-        microphoneAudio: TrackMetadata
+        microphoneAudio: TrackMetadata,
+        activityWindows: [LocalRecorderActivityWindow] = []
     ) {
         self.appVersion = appVersion
         self.computerAudio = computerAudio
         self.microphoneAudio = microphoneAudio
+        self.activityWindows = activityWindows
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.appVersion = try container.decode(String.self, forKey: .appVersion)
+        self.computerAudio = try container.decode(TrackMetadata.self, forKey: .computerAudio)
+        self.microphoneAudio = try container.decode(TrackMetadata.self, forKey: .microphoneAudio)
+        self.activityWindows =
+            try container.decodeIfPresent([LocalRecorderActivityWindow].self, forKey: .activityWindows) ?? []
     }
 }
 

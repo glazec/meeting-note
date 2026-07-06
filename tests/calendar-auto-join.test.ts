@@ -1092,6 +1092,80 @@ describe("calendar auto join", () => {
     );
   });
 
+  it("keeps a manually renamed meeting title when the calendar event changes", async () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com");
+
+    const calendarEventReturning = vi
+      .fn()
+      .mockResolvedValue([{ id: "33333333-3333-4333-8333-333333333333" }]);
+    const calendarEventOnConflictDoUpdate = vi
+      .fn()
+      .mockReturnValue({ returning: calendarEventReturning });
+    const calendarEventValues = vi
+      .fn()
+      .mockReturnValue({ onConflictDoUpdate: calendarEventOnConflictDoUpdate });
+
+    const existingLimit = vi.fn().mockResolvedValue([
+      {
+        id: "44444444-4444-4444-8444-444444444444",
+        title: "Custom diligence call",
+        titleSource: "manual",
+        recallBotId: "bot_123",
+        meetingUrl: "https://meet.google.com/old-link",
+        startedAt: new Date("2026-06-30T12:00:00.000Z"),
+        status: "scheduled",
+      },
+    ]);
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
+    const updateSet = vi.fn().mockReturnValue({ where: updateWhere });
+
+    insert.mockReturnValueOnce({ values: calendarEventValues });
+    select.mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: existingLimit,
+        }),
+      }),
+    });
+    update.mockReturnValue({ set: updateSet });
+    updateScheduledRecallBot.mockResolvedValue({ id: "bot_123" });
+
+    const { autoJoinCalendarEvent } = await import("@/lib/calendar-auto-join");
+
+    await expect(
+      autoJoinCalendarEvent({
+        connection: {
+          id: "11111111-1111-4111-8111-111111111111",
+          teamId: "22222222-2222-4222-8222-222222222222",
+          userId: "55555555-5555-4555-8555-555555555555",
+          autoJoinEnabled: true,
+        },
+        event: {
+          externalEventId: "google_event_123",
+          title: "Calendar renamed title",
+          startsAt: "2026-06-30T13:00:00.000Z",
+          endsAt: null,
+          location: "New room https://meet.google.com/new-link",
+        },
+      }),
+    ).resolves.toEqual({
+      action: "updated",
+      calendarEventId: "33333333-3333-4333-8333-333333333333",
+      meetingId: "44444444-4444-4444-8444-444444444444",
+      meetingUrl: "https://meet.google.com/new-link",
+      platform: "google_meet",
+      recallBotId: "bot_123",
+    });
+
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        meetingUrl: "https://meet.google.com/new-link",
+        startedAt: new Date("2026-06-30T13:00:00.000Z"),
+        title: "Custom diligence call",
+      }),
+    );
+  });
+
   it("replaces an existing Recall Calendar V2 bot when the event time changes", async () => {
     const calendarEventReturning = vi.fn().mockResolvedValue([
       {

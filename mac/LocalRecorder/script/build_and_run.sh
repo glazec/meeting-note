@@ -68,7 +68,40 @@ cat >"$INFO_PLIST" <<PLIST
 </plist>
 PLIST
 
-codesign --force --deep --sign - --identifier "$BUNDLE_ID" "$APP_BUNDLE"
+# Prefer a stable signing certificate: TCC pins grants to the certificate,
+# so microphone and screen capture stay granted across rebuilds. Create one
+# with script/create_signing_cert.sh. Ad-hoc fallback pins grants to the
+# per-build cdhash, which invalidates them silently on every binary change.
+LOCAL_CERT_NAME="Meeting Note Local Dev"
+if [[ -z "${CODESIGN_IDENTITY:-}" ]]; then
+  if security find-identity -v -p codesigning 2>/dev/null | grep -qF "$LOCAL_CERT_NAME"; then
+    CODESIGN_IDENTITY="$LOCAL_CERT_NAME"
+  else
+    CODESIGN_IDENTITY="-"
+    echo "No signing certificate found; using ad-hoc signing." >&2
+    echo "Run script/create_signing_cert.sh once to stop macOS from dropping mic/screen permissions on every rebuild." >&2
+  fi
+fi
+codesign --force --deep --sign "$CODESIGN_IDENTITY" --identifier "$BUNDLE_ID" "$APP_BUNDLE"
+
+# Reset stale TCC grants when the signature identity changes, or on every
+# binary change while ad-hoc signed. Otherwise macOS keeps the old grant for
+# the bundle id and silently denies capture instead of prompting again.
+SIGNATURE_CACHE="$ROOT_DIR/.build/last-app-signature"
+NEW_CDHASH="$(codesign --display -vvv "$APP_BUNDLE" 2>&1 | awk -F= '/^CDHash=/ { print $2 }')"
+if [[ "$CODESIGN_IDENTITY" == "-" ]]; then
+  NEW_SIGNATURE="adhoc:$NEW_CDHASH"
+else
+  NEW_SIGNATURE="cert:$CODESIGN_IDENTITY"
+fi
+OLD_SIGNATURE="$(cat "$SIGNATURE_CACHE" 2>/dev/null || true)"
+if [[ -n "$NEW_SIGNATURE" && "$NEW_SIGNATURE" != "$OLD_SIGNATURE" ]]; then
+  echo "App signature changed; resetting microphone and screen capture permissions so macOS prompts again."
+  tccutil reset Microphone "$BUNDLE_ID" >/dev/null 2>&1 || true
+  tccutil reset ScreenCapture "$BUNDLE_ID" >/dev/null 2>&1 || true
+fi
+mkdir -p "$(dirname "$SIGNATURE_CACHE")"
+printf '%s' "$NEW_SIGNATURE" >"$SIGNATURE_CACHE"
 
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"

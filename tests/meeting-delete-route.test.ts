@@ -158,8 +158,9 @@ describe("PATCH /api/meetings/[meetingId]", () => {
     });
     getWorkspace.mockResolvedValue({ teamId: "team_123" });
     limit.mockResolvedValue([{ id: "11111111-1111-4111-8111-111111111111" }]);
+    const updateSet = vi.fn().mockReturnValue({ where });
     updateMeeting.mockReturnValue({
-      set: vi.fn().mockReturnValue({ where }),
+      set: updateSet,
     });
     where.mockResolvedValue(undefined);
 
@@ -171,6 +172,12 @@ describe("PATCH /api/meetings/[meetingId]", () => {
       title: "New weekly sync",
     });
     expect(updateMeeting).toHaveBeenCalled();
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "New weekly sync",
+        titleSource: "manual",
+      }),
+    );
     expect(where).toHaveBeenCalled();
     const query = toQuery(selectWhere.mock.calls[0][0]);
     expect(query.sql).toContain('"meetings"."owner_user_id"');

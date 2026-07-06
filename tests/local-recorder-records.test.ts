@@ -1,15 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { db, getObjectMetadata, inngestSend } = vi.hoisted(() => ({
-  db: {
-    insert: vi.fn(),
-    select: vi.fn(),
-    transaction: vi.fn(),
-    update: vi.fn(),
-  },
-  getObjectMetadata: vi.fn(),
-  inngestSend: vi.fn(),
-}));
+const { db, getObjectMetadata, inngestSend, retrieveRecallBot } = vi.hoisted(
+  () => ({
+    db: {
+      insert: vi.fn(),
+      select: vi.fn(),
+      transaction: vi.fn(),
+      update: vi.fn(),
+    },
+    getObjectMetadata: vi.fn(),
+    inngestSend: vi.fn(),
+    retrieveRecallBot: vi.fn(),
+  }),
+);
 
 vi.mock("@/db/client", () => ({
   db,
@@ -31,12 +34,18 @@ vi.mock("@/lib/r2", async (importOriginal) => {
   };
 });
 
+vi.mock("@/lib/vendors/recall", () => ({
+  retrieveRecallBot,
+}));
+
 import {
   buildLocalRecorderTranscriptionEvent,
   completeLocalRecorderRecordingUpload,
   getLocalRecorderMonitoringStatus,
   isLocalRecorderCandidateVisibleInLookup,
+  isLocalRecorderMonitoringMeetingCurrent,
   isLocalRecorderPrimaryClaimConflict,
+  listMissedLocalRecorderMeetings,
 } from "@/lib/local-recorder-records";
 
 function selectRows(rows: unknown[]) {
@@ -60,6 +69,7 @@ describe("local recorder records", () => {
     db.update.mockReset();
     getObjectMetadata.mockReset();
     inngestSend.mockReset();
+    retrieveRecallBot.mockReset();
   });
 
   it("builds a deterministic transcription event for completion retries", () => {
@@ -220,6 +230,92 @@ describe("local recorder records", () => {
         startedAt: null,
       }),
     ).toBe(false);
+  });
+
+  it("detects scheduled meetings that are currently in their time window", () => {
+    const now = new Date("2026-07-01T14:00:00.000Z");
+
+    expect(
+      isLocalRecorderMonitoringMeetingCurrent({
+        endedAt: new Date("2026-07-01T16:30:00.000Z"),
+        now,
+        startedAt: new Date("2026-07-01T12:00:00.000Z"),
+      }),
+    ).toBe(true);
+    expect(
+      isLocalRecorderMonitoringMeetingCurrent({
+        endedAt: null,
+        now,
+        startedAt: new Date("2026-07-01T12:00:00.000Z"),
+      }),
+    ).toBe(true);
+    expect(
+      isLocalRecorderMonitoringMeetingCurrent({
+        endedAt: new Date("2026-07-01T13:00:00.000Z"),
+        now,
+        startedAt: new Date("2026-07-01T12:00:00.000Z"),
+      }),
+    ).toBe(false);
+    expect(
+      isLocalRecorderMonitoringMeetingCurrent({
+        endedAt: new Date("2026-07-01T16:30:00.000Z"),
+        now,
+        startedAt: new Date("2026-07-01T15:00:00.000Z"),
+      }),
+    ).toBe(false);
+  });
+
+  it("does not notify fallback when Recall says the bot is already in call", async () => {
+    const deviceOnConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
+    const deviceValues = vi.fn(() => ({
+      onConflictDoUpdate: deviceOnConflictDoUpdate,
+    }));
+    const attemptValues = vi.fn();
+
+    db.insert
+      .mockReturnValueOnce({ values: deviceValues })
+      .mockReturnValueOnce({ values: attemptValues });
+    db.select
+      .mockReturnValueOnce(
+        selectRows([
+          {
+            activeTranscriptJob: false,
+            endedAt: new Date("2026-07-01T12:30:00.000Z"),
+            id: "meeting_123",
+            meetingUrl: "https://meet.google.com/abc-defg-hij",
+            recallAudioAsset: false,
+            recallBotId: "bot_123",
+            recallRecordingId: null,
+            startedAt: new Date("2026-07-01T12:00:00.000Z"),
+            status: "scheduled",
+            title: "Weekly sync",
+          },
+        ]),
+      )
+      .mockReturnValueOnce(selectRows([]));
+    retrieveRecallBot.mockResolvedValue({
+      status_changes: [
+        {
+          code: "in_call",
+          sub_code: null,
+        },
+      ],
+    });
+
+    await expect(
+      listMissedLocalRecorderMeetings({
+        deviceId: "mac_123",
+        now: new Date("2026-07-01T12:02:00.000Z"),
+        workspace: {
+          canCreateMeetings: true,
+          domain: "",
+          teamId: "team_123",
+          userId: "user_123",
+        },
+      }),
+    ).resolves.toEqual([]);
+    expect(retrieveRecallBot).toHaveBeenCalledWith("bot_123");
+    expect(attemptValues).not.toHaveBeenCalled();
   });
 
   it("returns the next monitored meeting with the bot status", async () => {

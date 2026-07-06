@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   calendarEvents,
+  localRecordings,
   meetingEntities,
   meetings,
   transcriptJobs,
@@ -76,10 +77,23 @@ type EntityExtractionContext = {
   workspaceDomain?: string | null;
 };
 
+type LocalRecorderActivityWindow = {
+  startsAt: number;
+  endsAt: number;
+  microphoneActive: boolean;
+  computerAudioActive: boolean;
+};
+
+type LocalRecorderAttributionContext = {
+  localUserSpeaker: string;
+  activityWindows: LocalRecorderActivityWindow[];
+};
+
 export function buildElevenLabsTranscriptPersistence(
   event: ElevenLabsTranscriptEvent,
   options: {
     entityContext?: EntityExtractionContext;
+    localRecorderAttribution?: LocalRecorderAttributionContext | null;
     participantTimeline?: ParticipantTimelineEntry[];
   } = {},
 ): TranscriptPersistence {
@@ -103,7 +117,11 @@ export function buildElevenLabsTranscriptPersistence(
   }
 
   const words = "transcriptionWords" in event ? event.transcriptionWords : undefined;
-  const segments = buildTranscriptSegments(words, options.participantTimeline ?? []);
+  const segments = buildTranscriptSegments(
+    words,
+    options.participantTimeline ?? [],
+    options.localRecorderAttribution ?? null,
+  );
   const text =
     event.transcriptionText?.trim() ??
     segments
@@ -144,14 +162,27 @@ export async function applyElevenLabsTranscriptEvent(
   event: ElevenLabsTranscriptEvent,
 ) {
   const meetingId = getMetadataString(event.metadata, "meetingId", "meeting_id");
-  const participantTimeline = meetingId
-    ? await listMeetingParticipantTimeline(meetingId)
-    : [];
-  const entityContext = meetingId
-    ? await loadMeetingEntityContext(meetingId)
-    : {};
+  const transcriptJobId = getMetadataString(
+    event.metadata,
+    "transcriptJobId",
+    "transcript_job_id",
+  );
+  let participantTimeline: ParticipantTimelineEntry[] = [];
+  let entityContext: EntityExtractionContext = {};
+  let localRecorderAttribution: LocalRecorderAttributionContext | null = null;
+
+  if (meetingId) {
+    [participantTimeline, entityContext, localRecorderAttribution] =
+      await Promise.all([
+        listMeetingParticipantTimeline(meetingId),
+        loadMeetingEntityContext(meetingId),
+        loadLocalRecorderAttributionContext(transcriptJobId),
+      ]);
+  }
+
   const persistence = buildElevenLabsTranscriptPersistence(event, {
     entityContext,
+    localRecorderAttribution,
     participantTimeline,
   });
 
@@ -313,6 +344,94 @@ async function loadMeetingEntityContext(
   };
 }
 
+async function loadLocalRecorderAttributionContext(
+  transcriptJobId: string | null,
+): Promise<LocalRecorderAttributionContext | null> {
+  if (!transcriptJobId) {
+    return null;
+  }
+
+  let recording:
+    | {
+        manifest: unknown;
+        ownerEmail: string | null;
+        ownerName: string | null;
+      }
+    | undefined;
+
+  try {
+    [recording] = await db
+      .select({
+        manifest: localRecordings.manifest,
+        ownerEmail: users.email,
+        ownerName: users.name,
+      })
+      .from(transcriptJobs)
+      .innerJoin(
+        localRecordings,
+        eq(localRecordings.synthesizedAudioAssetId, transcriptJobs.mediaAssetId),
+      )
+      .innerJoin(users, eq(users.id, localRecordings.ownerUserId))
+      .where(eq(transcriptJobs.id, transcriptJobId))
+      .limit(1);
+  } catch {
+    return null;
+  }
+
+  const activityWindows = parseLocalRecorderActivityWindows(recording?.manifest);
+
+  if (!recording || activityWindows.length === 0) {
+    return null;
+  }
+
+  return {
+    activityWindows,
+    localUserSpeaker:
+      getPreferredParticipantSpeakerName({
+        email: recording.ownerEmail,
+        name: recording.ownerName,
+      }) ?? "Local user",
+  };
+}
+
+function parseLocalRecorderActivityWindows(
+  manifest: unknown,
+): LocalRecorderActivityWindow[] {
+  if (!isRecord(manifest) || !Array.isArray(manifest.activityWindows)) {
+    return [];
+  }
+
+  return manifest.activityWindows.flatMap((value) => {
+    if (!isRecord(value)) {
+      return [];
+    }
+
+    const startsAt = getFiniteNumber(value.startsAt);
+    const endsAt = getFiniteNumber(value.endsAt);
+
+    if (startsAt === null || endsAt === null || endsAt <= startsAt) {
+      return [];
+    }
+
+    return [
+      {
+        startsAt,
+        endsAt,
+        microphoneActive: value.microphoneActive === true,
+        computerAudioActive: value.computerAudioActive === true,
+      },
+    ];
+  });
+}
+
+function getFiniteNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function normalizeAttendeeEmails(attendeeEmails: unknown) {
   if (!Array.isArray(attendeeEmails)) {
     return [];
@@ -364,6 +483,7 @@ type TranscriptWord = {
 function buildTranscriptSegments(
   words: TranscriptWord[] | undefined,
   participantTimeline: ParticipantTimelineEntry[],
+  localRecorderAttribution: LocalRecorderAttributionContext | null,
 ): TranscriptSegmentInput[] {
   if (!words?.length) {
     return [];
@@ -385,6 +505,7 @@ function buildTranscriptSegments(
       secondsToMs(word.start),
       secondsToMs(word.end),
       participantTimeline,
+      localRecorderAttribution,
     );
     const shouldStartSegment =
       !current ||
@@ -492,12 +613,104 @@ function extractEntitiesFromSegments(
   );
 }
 
+function formatLocalRecorderSpeaker(input: {
+  startMs: number | null;
+  endMs: number | null;
+  localRecorderAttribution: LocalRecorderAttributionContext | null;
+}) {
+  if (!input.localRecorderAttribution || input.startMs === null) {
+    return null;
+  }
+
+  const startSeconds = input.startMs / 1000;
+  const endSeconds =
+    input.endMs !== null && input.endMs > input.startMs
+      ? input.endMs / 1000
+      : startSeconds + 0.001;
+  const attribution = classifyLocalRecorderSegment({
+    activityWindows: input.localRecorderAttribution.activityWindows,
+    endSeconds,
+    startSeconds,
+  });
+
+  return attribution === "local_user"
+    ? input.localRecorderAttribution.localUserSpeaker
+    : null;
+}
+
+function classifyLocalRecorderSegment(input: {
+  activityWindows: LocalRecorderActivityWindow[];
+  startSeconds: number;
+  endSeconds: number;
+}) {
+  const segmentDuration = input.endSeconds - input.startSeconds;
+
+  if (segmentDuration <= 0) {
+    return "unknown";
+  }
+
+  let localUserDuration = 0;
+  let remoteSpeakerDuration = 0;
+  let overlapDuration = 0;
+  let silenceDuration = 0;
+  let coveredDuration = 0;
+
+  for (const window of input.activityWindows) {
+    const startsAt = Math.max(input.startSeconds, window.startsAt);
+    const endsAt = Math.min(input.endSeconds, window.endsAt);
+    const overlap = endsAt - startsAt;
+
+    if (overlap <= 0) {
+      continue;
+    }
+
+    coveredDuration += overlap;
+
+    if (window.microphoneActive && !window.computerAudioActive) {
+      localUserDuration += overlap;
+    } else if (!window.microphoneActive && window.computerAudioActive) {
+      remoteSpeakerDuration += overlap;
+    } else if (window.microphoneActive && window.computerAudioActive) {
+      overlapDuration += overlap;
+    } else {
+      silenceDuration += overlap;
+    }
+  }
+
+  if (coveredDuration / segmentDuration < 0.2) {
+    return "unknown";
+  }
+
+  const candidates = [
+    { duration: localUserDuration, attribution: "local_user" },
+    { duration: remoteSpeakerDuration, attribution: "remote_speaker" },
+    { duration: overlapDuration, attribution: "overlap" },
+    { duration: silenceDuration, attribution: "silence" },
+  ] as const;
+  const winner = candidates.reduce((best, candidate) =>
+    candidate.duration > best.duration ? candidate : best,
+  );
+
+  return winner.duration > 0 ? winner.attribution : "unknown";
+}
+
 function formatSpeaker(
   speakerId: string | null,
   startMs: number | null,
   endMs: number | null,
   participantTimeline: ParticipantTimelineEntry[],
+  localRecorderAttribution: LocalRecorderAttributionContext | null,
 ) {
+  const localRecorderSpeaker = formatLocalRecorderSpeaker({
+    endMs,
+    localRecorderAttribution,
+    startMs,
+  });
+
+  if (localRecorderSpeaker) {
+    return localRecorderSpeaker;
+  }
+
   if (!speakerId) {
     return null;
   }

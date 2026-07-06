@@ -56,6 +56,36 @@ describe("meeting intelligence helpers", () => {
     ).toBe("Nascent founder follow up");
   });
 
+  it("renames a workspace default meeting title from the external email domain", () => {
+    expect(
+      buildSmartMeetingTitle({
+        eventTitle: "IOSG",
+        attendeeEmails: ["alice@iosg.vc", "founder@nascent.xyz"],
+        workspaceDomain: "iosg.vc",
+      }),
+    ).toBe("IOSG <> Nascent");
+  });
+
+  it("renames a booking default meeting title from the external email domain", () => {
+    expect(
+      buildSmartMeetingTitle({
+        eventTitle: "meeting with IOSG",
+        attendeeEmails: ["alice@iosg.vc", "founder@nascent.xyz"],
+        workspaceDomain: "iosg.vc",
+      }),
+    ).toBe("IOSG <> Nascent");
+  });
+
+  it("uses the external email name when a default meeting only has a personal email domain", () => {
+    expect(
+      buildSmartMeetingTitle({
+        eventTitle: "meeting with IOSG",
+        attendeeEmails: ["alice@iosg.vc", "jane.doe@gmail.com"],
+        workspaceDomain: "iosg.vc",
+      }),
+    ).toBe("IOSG <> Jane Doe");
+  });
+
   it("extracts normalized organization and product entities", () => {
     expect(
       extractMeetingEntities([
@@ -337,6 +367,36 @@ describe("meeting intelligence helpers", () => {
           {
             id: "meeting_1",
             title: "Internal Meeting - Investment Strategy",
+            startedAt: "2026-06-20T10:00:00.000Z",
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("groups company pair titles even when IOSG appears on a different side", () => {
+    expect(
+      groupRelatedMeetings([
+        {
+          id: "meeting_1",
+          title: "Nascent <> IOSG",
+          startedAt: "2026-06-20T10:00:00.000Z",
+          primaryEntity: null,
+        },
+        {
+          id: "meeting_2",
+          title: "IOSG <> Nascent",
+          startedAt: "2026-06-27T10:00:00.000Z",
+          primaryEntity: null,
+        },
+      ]),
+    ).toEqual([
+      {
+        id: "meeting_2",
+        relatedMeetings: [
+          {
+            id: "meeting_1",
+            title: "Nascent <> IOSG",
             startedAt: "2026-06-20T10:00:00.000Z",
           },
         ],

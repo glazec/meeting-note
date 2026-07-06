@@ -28,6 +28,12 @@ type CalendarSyncResponse = {
   syncedEventCount?: number;
 };
 
+export function getCalendarSyncPostSuccessAction(autoSync: boolean) {
+  return autoSync
+    ? ({ href: "/dashboard", type: "replace" } as const)
+    : ({ type: "refresh" } as const);
+}
+
 export function formatCalendarSyncMessage(result: CalendarSyncResponse) {
   const count = result.syncedEventCount ?? 0;
   const failedCount = result.failedEventCount ?? 0;
@@ -87,8 +93,12 @@ export function CalendarSyncButton({
       setState(result.failedEventCount ? "partial" : "synced");
       setMessage(formatCalendarSyncMessage(result));
 
-      if (autoSync) {
-        router.replace("/dashboard");
+      const postSuccessAction = getCalendarSyncPostSuccessAction(autoSync);
+
+      if (postSuccessAction.type === "replace") {
+        router.replace(postSuccessAction.href);
+      } else {
+        router.refresh();
       }
     } catch {
       setState("error");

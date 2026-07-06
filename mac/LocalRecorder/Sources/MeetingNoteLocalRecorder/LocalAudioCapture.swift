@@ -42,7 +42,7 @@ final class LocalRecordingCaptureController {
     func start(
         fallbackIntentId: String,
         appVersion: String,
-        onAudioLevel: @escaping @Sendable (Float) -> Void = { _ in }
+        onAudioLevel: @escaping @Sendable (LocalRecorderAudioSource, Float) -> Void = { _, _ in }
     ) async throws {
         if activeSession != nil {
             throw LocalRecordingCaptureError.alreadyRecording
@@ -70,6 +70,7 @@ final class LocalRecordingCaptureController {
 @MainActor
 final class LocalRecordingCaptureSession {
     private let appVersion: String
+    private let activitySampler: LocalRecorderActivitySampler
     private let clientRecordingId: String
     private let computerAudioURL: URL
     private let fallbackIntentId: String
@@ -83,7 +84,7 @@ final class LocalRecordingCaptureSession {
     init(
         fallbackIntentId: String,
         appVersion: String,
-        onAudioLevel: @escaping @Sendable (Float) -> Void
+        onAudioLevel: @escaping @Sendable (LocalRecorderAudioSource, Float) -> Void
     ) throws {
         let directoryURL = LocalRecorderFileLocations.recordingsDirectoryURL()
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)
@@ -97,15 +98,24 @@ final class LocalRecordingCaptureSession {
         self.computerAudioURL = directoryURL.appending(path: "computer.wav")
         self.fallbackIntentId = fallbackIntentId
         self.microphoneAudioURL = directoryURL.appending(path: "microphone.wav")
-        self.startedAt = Date()
+        let startedAt = Date()
+        let activitySampler = LocalRecorderActivitySampler(startedAt: startedAt)
+        self.activitySampler = activitySampler
+        self.startedAt = startedAt
         self.synthesizedAudioURL = directoryURL.appending(path: "synthesized.wav")
         self.microphoneRecorder = try MicrophoneTrackRecorder(
             outputURL: microphoneAudioURL,
-            onAudioLevel: onAudioLevel
+            onAudioLevel: { level in
+                activitySampler.observe(source: .microphone, level: level)
+                onAudioLevel(.microphone, level)
+            }
         )
         self.systemRecorder = try SystemAudioTrackRecorder(
             outputURL: computerAudioURL,
-            onAudioLevel: onAudioLevel
+            onAudioLevel: { level in
+                activitySampler.observe(source: .computerAudio, level: level)
+                onAudioLevel(.computerAudio, level)
+            }
         )
     }
 
@@ -116,7 +126,9 @@ final class LocalRecordingCaptureSession {
             try await systemRecorder.start()
             isSystemAudioRecording = true
         } catch {
+            microphoneRecorder.stop()
             await systemRecorder.stop()
+            throw error
         }
     }
 
@@ -126,11 +138,16 @@ final class LocalRecordingCaptureSession {
             await systemRecorder.stop()
         }
         microphoneRecorder.stop()
-        try LocalTrackSynthesizer.synthesize(
-            computerAudioURL: computerAudioURL,
-            microphoneAudioURL: microphoneAudioURL,
-            outputURL: synthesizedAudioURL
-        )
+        let computerAudioURL = computerAudioURL
+        let microphoneAudioURL = microphoneAudioURL
+        let synthesizedAudioURL = synthesizedAudioURL
+        try await Task.detached(priority: .userInitiated) {
+            try LocalTrackSynthesizer.synthesize(
+                computerAudioURL: computerAudioURL,
+                microphoneAudioURL: microphoneAudioURL,
+                outputURL: synthesizedAudioURL
+            )
+        }.value
 
         let manifest = RecordingManifest(
             appVersion: appVersion,
@@ -151,7 +168,8 @@ final class LocalRecordingCaptureSession {
                 codec: "pcm_s16le",
                 container: "wav",
                 firstSampleTime: 0
-            )
+            ),
+            activityWindows: activitySampler.snapshot(stoppedAt: stoppedAt)
         )
         let payload = LocalRecordingUploadPayload(
             fallbackIntentId: fallbackIntentId,
@@ -168,6 +186,55 @@ final class LocalRecordingCaptureSession {
             cleanupDirectoryURL: payload.computerAudioURL.deletingLastPathComponent(),
             payload: payload
         )
+    }
+}
+
+@MainActor
+final class AudioLevelTestSession {
+    private let directoryURL: URL
+    private let microphoneRecorder: MicrophoneTrackRecorder
+    private let systemRecorder: SystemAudioTrackRecorder
+
+    init(onAudioLevel: @escaping @Sendable (LocalRecorderAudioSource, Float) -> Void) throws {
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appending(path: "level-test-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(
+            at: directoryURL,
+            withIntermediateDirectories: true
+        )
+
+        self.directoryURL = directoryURL
+        self.microphoneRecorder = try MicrophoneTrackRecorder(
+            outputURL: directoryURL.appending(path: "microphone.wav"),
+            onAudioLevel: { level in
+                onAudioLevel(.microphone, level)
+            }
+        )
+        self.systemRecorder = try SystemAudioTrackRecorder(
+            outputURL: directoryURL.appending(path: "computer.wav"),
+            onAudioLevel: { level in
+                onAudioLevel(.computerAudio, level)
+            }
+        )
+    }
+
+    func start() async throws {
+        try microphoneRecorder.start()
+
+        do {
+            try await systemRecorder.start()
+        } catch {
+            microphoneRecorder.stop()
+            await systemRecorder.stop()
+            try? FileManager.default.removeItem(at: directoryURL)
+            throw error
+        }
+    }
+
+    func stop() async {
+        await systemRecorder.stop()
+        microphoneRecorder.stop()
+        try? FileManager.default.removeItem(at: directoryURL)
     }
 }
 

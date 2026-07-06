@@ -102,6 +102,92 @@ describe("buildElevenLabsTranscriptPersistence", () => {
     });
   });
 
+  it("labels local recorder mic dominated segments as the recorder owner", () => {
+    expect(
+      buildElevenLabsTranscriptPersistence(
+        {
+          eventType: "speech_to_text_transcription",
+          type: "speech_to_text_transcription",
+          requestId: "req_123",
+          transcriptId: null,
+          status: "completed",
+          transcriptionText: "My update. Their update. Crosstalk.",
+          transcriptionWords: [
+            {
+              text: "My update.",
+              type: "word",
+              start: 1,
+              end: 2,
+              speakerId: "speaker_0",
+            },
+            {
+              text: "Their update.",
+              type: "word",
+              start: 3,
+              end: 4,
+              speakerId: "speaker_1",
+            },
+            {
+              text: "Crosstalk.",
+              type: "word",
+              start: 5,
+              end: 6,
+              speakerId: "speaker_2",
+            },
+          ],
+          metadata: {
+            meetingId: "11111111-1111-4111-8111-111111111111",
+            transcriptJobId: "22222222-2222-4222-8222-222222222222",
+          },
+        },
+        {
+          localRecorderAttribution: {
+            localUserSpeaker: "Glaze",
+            activityWindows: [
+              {
+                startsAt: 1,
+                endsAt: 2,
+                microphoneActive: true,
+                computerAudioActive: false,
+              },
+              {
+                startsAt: 3,
+                endsAt: 4,
+                microphoneActive: false,
+                computerAudioActive: true,
+              },
+              {
+                startsAt: 5,
+                endsAt: 6,
+                microphoneActive: true,
+                computerAudioActive: true,
+              },
+            ],
+          },
+        },
+      ),
+    ).toMatchObject({
+      action: "complete",
+      segments: [
+        {
+          speaker: "Glaze",
+          startMs: 1000,
+          endMs: 2000,
+        },
+        {
+          speaker: "Speaker 2",
+          startMs: 3000,
+          endMs: 4000,
+        },
+        {
+          speaker: "Speaker 3",
+          startMs: 5000,
+          endMs: 6000,
+        },
+      ],
+    });
+  });
+
   it("maps ElevenLabs speakers to Recall participants by timestamp", () => {
     expect(
       buildElevenLabsTranscriptPersistence(

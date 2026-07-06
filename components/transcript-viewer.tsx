@@ -82,6 +82,7 @@ export type SpeakerApplyScope = "matching_speaker" | "segment";
 const WAVEFORM_DESKTOP_BAR_COUNT = 120;
 const WAVEFORM_MOBILE_BAR_COUNT = 56;
 const WAVEFORM_MOBILE_QUERY = "(max-width: 640px)";
+const WAVEFORM_AUDIO_DECODE_MAX_SECONDS = 45 * 60;
 const WAVEFORM_SECTION_COLORS = [
   "#2563eb",
   "#059669",
@@ -1438,6 +1439,10 @@ function TranscriptAudioPlayer({
   const timelineDuration = safeDuration || segmentDuration;
   const progressValue = safeDuration ? currentTime : 0;
   const audioWaveformPeaks =
+    shouldDecodeAudioWaveform({
+      duration: safeDuration,
+      timelineDuration,
+    }) &&
     audioWaveform?.audioUrl === audioUrl &&
     audioWaveform.barCount === waveformBarCount
       ? audioWaveform.peaks
@@ -1493,8 +1498,16 @@ function TranscriptAudioPlayer({
   const progressPercent = timelineDuration
     ? clamp((currentTime / timelineDuration) * 100, 0, 100)
     : 0;
+  const shouldLoadAudioWaveform = shouldDecodeAudioWaveform({
+    duration: safeDuration,
+    timelineDuration,
+  });
 
   useEffect(() => {
+    if (!shouldLoadAudioWaveform) {
+      return;
+    }
+
     let isCancelled = false;
     const controller = new AbortController();
     const idleWindow = window as typeof window & {
@@ -1571,7 +1584,7 @@ function TranscriptAudioPlayer({
         window.clearTimeout(timeoutHandle);
       }
     };
-  }, [audioUrl, waveformBarCount]);
+  }, [audioUrl, shouldLoadAudioWaveform, waveformBarCount]);
 
   async function togglePlayback() {
     const audio = audioRef.current;
@@ -2023,6 +2036,20 @@ function getWaveformAudioUrl(audioUrl: string) {
   const separator = audioUrl.includes("?") ? "&" : "?";
 
   return `${audioUrl}${separator}proxy=1`;
+}
+
+export function shouldDecodeAudioWaveform(input: {
+  duration: number;
+  timelineDuration: number;
+}) {
+  const knownDuration = Math.max(
+    Number.isFinite(input.duration) ? input.duration : 0,
+    Number.isFinite(input.timelineDuration) ? input.timelineDuration : 0,
+  );
+
+  return (
+    knownDuration <= 0 || knownDuration <= WAVEFORM_AUDIO_DECODE_MAX_SECONDS
+  );
 }
 
 function buildAudioPeaks(audioBuffer: AudioBuffer, count: number) {

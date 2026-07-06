@@ -97,6 +97,11 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
     @Published var serverURLText: String
     @Published var bearerToken: String
     @Published var isRecording = false
+    @Published var isTestingLevels = false
+    @Published var microphoneLevel: Float = 0
+    @Published var systemAudioLevel: Float = 0
+    @Published var isFinishingRecording = false
+    @Published var isRefreshingSchedule = false
     @Published var isAdvancedExpanded = false
     @Published var nextScheduleMeeting: LocalRecorderMonitoringMeeting?
     @Published var pendingMeetings: [MissedMeeting] = []
@@ -111,6 +116,8 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
     private var isUploadingQueuedRecordings = false
     private var isSilencePromptVisible = false
     private var appActivationObserver: NSObjectProtocol?
+    private var levelTestSession: AudioLevelTestSession?
+    private var levelTestTimeoutTask: Task<Void, Never>?
     private var monitoringTimer: Timer?
     private var permissionRefreshTask: Task<Void, Never>?
     private var silencePromptTracker = SilencePromptTracker()
@@ -375,6 +382,10 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
     }
 
     func checkNow() {
+        guard !isRefreshingSchedule else {
+            return
+        }
+
         guard canMonitor else {
             statusText = "Login and permissions are needed first"
             return
@@ -385,7 +396,12 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
             return
         }
 
+        isRefreshingSchedule = true
         Task {
+            defer {
+                isRefreshingSchedule = false
+            }
+
             do {
                 let client = LocalRecorderAPIClient(
                     serverURL: serverURL,
@@ -400,21 +416,33 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
                     : monitoringStatus.missedMeetings
                 statusText = nextScheduleMeeting == nil
                     ? "No upcoming meetings"
-                    : "Monitoring schedule"
+                    : "Watching your calendar"
+                scheduleNextMonitoringCheck(
+                    after: LocalRecorderMonitoringPollSchedule.nextDelay(
+                        now: Date(),
+                        nextMeeting: monitoringStatus.nextMeeting,
+                        pendingMeetings: pendingMeetings
+                    )
+                )
                 if let first = pendingMeetings.first {
                     try await notify(meeting: first)
                 }
             } catch {
                 statusText = "Could not refresh schedule"
+                scheduleNextMonitoringCheck(after: 5 * 60)
             }
         }
     }
 
     private func startMonitoring() {
         monitoringTimer?.invalidate()
-        statusText = "Monitoring schedule"
+        statusText = "Checking your calendar"
         checkNow()
-        monitoringTimer = Timer.scheduledTimer(withTimeInterval: 60 * 60, repeats: true) { [weak self] _ in
+    }
+
+    private func scheduleNextMonitoringCheck(after delay: TimeInterval) {
+        monitoringTimer?.invalidate()
+        monitoringTimer = Timer.scheduledTimer(withTimeInterval: max(1, delay), repeats: false) { [weak self] _ in
             Task { @MainActor in
                 self?.checkNow()
             }
@@ -478,15 +506,17 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
         fallbackIntentId: String,
         title: String
     ) async {
+        stopLevelTest()
+
         do {
             silencePromptTracker = SilencePromptTracker()
             audioLevels = Array(repeating: 0, count: Self.audioLevelSampleCount)
             try await captureController.start(
                 fallbackIntentId: fallbackIntentId,
                 appVersion: appVersion,
-                onAudioLevel: { [weak self] level in
+                onAudioLevel: { [weak self] source, level in
                     Task { @MainActor in
-                        self?.observeAudioLevel(level)
+                        self?.observeAudioLevel(source: source, level: level)
                     }
                 }
             )
@@ -495,7 +525,8 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
                 fallbackIntentId: fallbackIntentId,
                 errorMessage: error.localizedDescription
             )
-            statusText = "Could not start recording"
+            statusText = "Could not start recording: \(error.localizedDescription)"
+            await refreshPermissions()
             return
         }
 
@@ -505,18 +536,98 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
         statusText = "Recording \(title)"
     }
 
-    private func observeAudioLevel(_ level: Float) {
+    private func observeAudioLevel(source: LocalRecorderAudioSource, level: Float) {
+        guard isRecording || isTestingLevels else {
+            return
+        }
+
+        let scaled = max(0, min(1, level * 16))
+        switch source {
+        case .microphone:
+            microphoneLevel = scaled
+        case .computerAudio:
+            systemAudioLevel = scaled
+        }
+
         guard isRecording else {
             return
         }
 
-        audioLevels.append(max(0, min(1, level * 16)))
-        if audioLevels.count > Self.audioLevelSampleCount {
-            audioLevels.removeFirst(audioLevels.count - Self.audioLevelSampleCount)
+        if source == .microphone {
+            audioLevels.append(scaled)
+            if audioLevels.count > Self.audioLevelSampleCount {
+                audioLevels.removeFirst(audioLevels.count - Self.audioLevelSampleCount)
+            }
         }
 
         if silencePromptTracker.observe(level: level) == .prompt {
             showSilencePrompt()
+        }
+    }
+
+    func toggleLevelTest() {
+        if isTestingLevels {
+            stopLevelTest()
+        } else {
+            startLevelTest()
+        }
+    }
+
+    private func startLevelTest() {
+        guard !isRecording, !isFinishingRecording, levelTestSession == nil else {
+            return
+        }
+
+        guard hasRequiredPermissions else {
+            statusText = "Grant permissions to test audio"
+            return
+        }
+
+        Task {
+            do {
+                let session = try AudioLevelTestSession(
+                    onAudioLevel: { [weak self] source, level in
+                        Task { @MainActor in
+                            self?.observeAudioLevel(source: source, level: level)
+                        }
+                    }
+                )
+                try await session.start()
+                levelTestSession = session
+                isTestingLevels = true
+                statusText = "Testing audio levels"
+                levelTestTimeoutTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .seconds(30))
+                    guard !Task.isCancelled else {
+                        return
+                    }
+
+                    self?.stopLevelTest()
+                }
+            } catch {
+                statusText = "Could not test audio: \(error.localizedDescription)"
+                await refreshPermissions()
+            }
+        }
+    }
+
+    private func stopLevelTest() {
+        levelTestTimeoutTask?.cancel()
+        levelTestTimeoutTask = nil
+
+        guard let session = levelTestSession else {
+            return
+        }
+
+        levelTestSession = nil
+        isTestingLevels = false
+        Task {
+            await session.stop()
+            microphoneLevel = 0
+            systemAudioLevel = 0
+            if canMonitor, !isRecording {
+                statusText = "Watching your calendar"
+            }
         }
     }
 
@@ -566,23 +677,32 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
     }
 
     func stopRecording() {
+        guard !isFinishingRecording else {
+            return
+        }
+
         guard isRecording else {
             statusText = "No active recording"
             return
         }
 
-        statusText = "Stopping recording"
+        isFinishingRecording = true
+        statusText = "Saving recording"
         silencePromptTracker.finishAfterPrompt()
         Task {
+            defer {
+                isFinishingRecording = false
+            }
+
             do {
                 let result = try await captureController.stop()
                 isRecording = false
-                statusText = "Uploading recording"
+                try uploadQueue.save(result.payload)
                 guard let client = activeClient else {
                     throw LocalRecorderAPIError.invalidResponse
                 }
 
-                try uploadQueue.save(result.payload)
+                statusText = "Uploading recording"
                 try await uploadWithRetry(
                     client: client,
                     payload: result.payload
@@ -591,13 +711,13 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
                 try? FileManager.default.removeItem(at: result.cleanupDirectoryURL)
                 activeClient = nil
                 activeRecordingTitle = nil
-                audioLevels = Array(repeating: 0, count: Self.audioLevelSampleCount)
+                resetAudioLevels()
                 statusText = "Recording uploaded"
             } catch {
                 isRecording = false
                 activeClient = nil
                 activeRecordingTitle = nil
-                audioLevels = Array(repeating: 0, count: Self.audioLevelSampleCount)
+                resetAudioLevels()
                 statusText = "Could not upload recording. Files kept locally."
             }
         }
@@ -652,13 +772,16 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
             return
         }
 
+        stopLevelTest()
         monitoringTimer?.invalidate()
         monitoringTimer = nil
         permissionRefreshTask?.cancel()
         permissionRefreshTask = nil
         activeClient = nil
         activeRecordingTitle = nil
-        audioLevels = Array(repeating: 0, count: Self.audioLevelSampleCount)
+        resetAudioLevels()
+        isFinishingRecording = false
+        isRefreshingSchedule = false
         nextScheduleMeeting = nil
         pendingMeetings = []
         bearerToken = ""
@@ -666,10 +789,18 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
         statusText = "Signed out"
     }
 
+    private func resetAudioLevels() {
+        audioLevels = Array(repeating: 0, count: Self.audioLevelSampleCount)
+        microphoneLevel = 0
+        systemAudioLevel = 0
+    }
+
     func restartApp() {
         guard canCloseApp() else {
             return
         }
+
+        stopLevelTest()
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
@@ -683,15 +814,20 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
             return
         }
 
+        stopLevelTest()
         NSApp.terminate(nil)
     }
 
     private func canCloseApp() -> Bool {
-        guard !isRecording else {
+        guard !isRecording && !isFinishingRecording else {
             let alert = NSAlert()
             alert.alertStyle = .warning
-            alert.messageText = "Recording is active"
-            alert.informativeText = "Stop recording before closing the recorder."
+            alert.messageText = isFinishingRecording
+                ? "Recording is saving"
+                : "Recording is active"
+            alert.informativeText = isFinishingRecording
+                ? "Wait for the recorder to finish saving before closing."
+                : "Stop recording before closing the recorder."
             alert.addButton(withTitle: "OK")
             alert.runModal()
             return false
@@ -910,6 +1046,7 @@ struct RecorderMenuView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
+            .disabled(model.isFinishingRecording)
 
             advancedSection
         }
@@ -942,16 +1079,27 @@ struct RecorderMenuView: View {
                 Spacer()
                 if isSignedIn, model.nextPermissionStep == nil {
                     Button(action: model.checkNow) {
-                        Image(systemName: "arrow.clockwise")
-                            .frame(width: 18, height: 18)
+                        if model.isRefreshingSchedule {
+                            ProgressView()
+                                .controlSize(.small)
+                                .frame(width: 18, height: 18)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .frame(width: 18, height: 18)
+                        }
                     }
                     .buttonStyle(.plain)
-                    .disabled(!model.canMonitor)
+                    .disabled(!model.canMonitor || model.isRefreshingSchedule)
                     .help("Refresh schedule")
                 }
             }
 
-            if let meeting = model.nextScheduleMeeting,
+            if model.isRecording || model.isFinishingRecording {
+                ActiveRecordingStatusView(
+                    detail: supportingStatus,
+                    title: model.activeRecordingTitle ?? "Recording"
+                )
+            } else if let meeting = model.nextScheduleMeeting,
                model.nextPermissionStep == nil,
                isSignedIn {
                 MonitoringMeetingView(meeting: meeting)
@@ -996,6 +1144,10 @@ struct RecorderMenuView: View {
 
             Divider()
 
+            audioCheckSection
+
+            Divider()
+
             VStack(alignment: .leading, spacing: 12) {
                 TextField("Server", text: $model.serverURLText)
                     .textFieldStyle(.roundedBorder)
@@ -1019,6 +1171,37 @@ struct RecorderMenuView: View {
         .padding(.top, 2)
     }
 
+    private var audioCheckSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Audio check")
+                    .font(.subheadline)
+                Spacer()
+                if !model.isRecording {
+                    Button(
+                        model.isTestingLevels ? "Stop test" : "Test levels",
+                        action: model.toggleLevelTest
+                    )
+                    .controlSize(.small)
+                    .disabled(!model.hasRequiredPermissions || model.isFinishingRecording)
+                }
+            }
+
+            AudioLevelMeterRow(title: "Microphone", level: model.microphoneLevel)
+            AudioLevelMeterRow(title: "Mac sound", level: model.systemAudioLevel)
+
+            if model.isTestingLevels {
+                Text("Speak and play any sound — both bars should move.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if !model.isRecording {
+                Text("Levels are live while recording or testing.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     private var primaryMeeting: MissedMeeting? {
         model.pendingMeetings.first
     }
@@ -1028,6 +1211,11 @@ struct RecorderMenuView: View {
     }
 
     private var headlineStatus: String {
+        if model.isFinishingRecording {
+            return model.statusText.localizedCaseInsensitiveContains("upload")
+                ? "Uploading"
+                : "Saving recording"
+        }
         if model.isRecording {
             return "Recording"
         }
@@ -1038,7 +1226,10 @@ struct RecorderMenuView: View {
             return "Signed out"
         }
         if primaryMeeting != nil {
-            return "Monitoring"
+            return "Missed meeting"
+        }
+        if let meeting = model.nextScheduleMeeting {
+            return meeting.isOngoing(at: Date()) ? "Meeting in progress" : "Next meeting"
         }
         if model.canMonitor {
             return "Monitoring"
@@ -1050,6 +1241,9 @@ struct RecorderMenuView: View {
     }
 
     private var supportingStatus: String {
+        if model.isFinishingRecording {
+            return model.statusText
+        }
         if model.isRecording {
             return "Audio capture is active"
         }
@@ -1072,6 +1266,9 @@ struct RecorderMenuView: View {
     }
 
     private var statusColor: Color {
+        if model.isFinishingRecording {
+            return .orange
+        }
         if model.isRecording {
             return .red
         }
@@ -1088,6 +1285,11 @@ struct RecorderMenuView: View {
     }
 
     private var primaryActionTitle: String {
+        if model.isFinishingRecording {
+            return model.statusText.localizedCaseInsensitiveContains("upload")
+                ? "Uploading"
+                : "Saving"
+        }
         if model.isRecording {
             return "End recording"
         }
@@ -1105,6 +1307,9 @@ struct RecorderMenuView: View {
     }
 
     private var primaryActionIcon: String {
+        if model.isFinishingRecording {
+            return "hourglass"
+        }
         if model.isRecording {
             return "stop.fill"
         }
@@ -1118,7 +1323,9 @@ struct RecorderMenuView: View {
     }
 
     private func performPrimaryAction() {
-        if model.isRecording {
+        if model.isFinishingRecording {
+            return
+        } else if model.isRecording {
             model.stopRecording()
         } else if model.nextPermissionStep != nil {
             model.requestNextPermission()
@@ -1127,6 +1334,26 @@ struct RecorderMenuView: View {
         } else {
             model.startRecording()
         }
+    }
+}
+
+struct ActiveRecordingStatusView: View {
+    var detail: String
+    var title: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(2)
+                .truncationMode(.tail)
+
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -1170,6 +1397,36 @@ struct RecordingWaveformView: View {
     }
 }
 
+struct AudioLevelMeterRow: View {
+    var title: String
+    var level: Float
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 84, alignment: .leading)
+
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(.quaternary)
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(fillColor)
+                        .frame(width: max(0, proxy.size.width * CGFloat(min(1, level))))
+                }
+            }
+            .frame(height: 8)
+            .animation(.linear(duration: 0.1), value: level)
+        }
+    }
+
+    private var fillColor: Color {
+        level > 0.9 ? .orange : .green
+    }
+}
+
 struct MonitoringMeetingView: View {
     var meeting: LocalRecorderMonitoringMeeting
 
@@ -1181,23 +1438,23 @@ struct MonitoringMeetingView: View {
                 .truncationMode(.tail)
 
             HStack(spacing: 8) {
-                Label(timeText, systemImage: "clock")
+                Label(timeText, systemImage: isOngoing ? "dot.radiowaves.left.and.right" : "clock")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(isOngoing ? AnyShapeStyle(.green) : AnyShapeStyle(.secondary))
                     .lineLimit(1)
                 Spacer(minLength: 8)
                 Text(meeting.botStatusLabel)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(statusColor)
                     .lineLimit(1)
+                    .help(meeting.botStatusDetail)
             }
-
-            Text(meeting.botStatusDetail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var isOngoing: Bool {
+        meeting.isOngoing(at: Date())
     }
 
     private var statusColor: Color {
@@ -1220,10 +1477,11 @@ struct MonitoringMeetingView: View {
 
         let startsAt = formatter.string(from: meeting.startsAt)
         guard let endsAt = meeting.endsAt else {
-            return startsAt
+            return isOngoing ? "Now · started \(startsAt)" : startsAt
         }
 
-        return "\(startsAt) to \(formatter.string(from: endsAt))"
+        let range = "\(startsAt) to \(formatter.string(from: endsAt))"
+        return isOngoing ? "Now · \(range)" : range
     }
 }
 
