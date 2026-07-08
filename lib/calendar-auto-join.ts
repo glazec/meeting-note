@@ -2,6 +2,7 @@ import { and, eq, isNotNull, ne, or, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
+  auditEvents,
   calendarEvents,
   meetingAttendees,
   meetingReminders,
@@ -377,6 +378,16 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
     };
   }
 
+  if (isPastRepairEvent && existingMeeting && !existingMeeting.recallBotId) {
+    return {
+      action: "skipped" as const,
+      calendarEventId: calendarEvent.id,
+      meetingId: existingMeeting.id,
+      meetingUrl,
+      reason: "already_scheduled" as const,
+    };
+  }
+
   if (existingMeeting?.recallBotId) {
     return syncExistingCalendarMeeting({
       meeting: existingMeeting,
@@ -523,6 +534,18 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
     };
   } catch (error) {
     await markMeetingFailed(meeting.id);
+    await recordCalendarAutoJoinFailure({
+      calendarEventId: calendarEvent.id,
+      error,
+      event: input.event,
+      meetingId: meeting.id,
+      meetingUrl,
+      reason: "schedule_bot_failed",
+      startsAt,
+      teamId: input.connection.teamId,
+      title,
+      userId: input.connection.userId,
+    });
 
     throw error;
   }
@@ -713,7 +736,33 @@ async function syncExistingCalendarMeeting(input: {
       status: canRecoverCalendarMeeting ? "scheduled" : undefined,
     });
   } catch (error) {
-    await markMeetingFailed(input.meeting.id);
+    await recordCalendarAutoJoinFailure({
+      calendarEventId: input.calendarEvent.id,
+      error,
+      event: input.event,
+      meetingId: input.meeting.id,
+      meetingUrl: input.meetingUrl,
+      reason: "schedule_bot_failed",
+      startsAt: input.startsAt,
+      teamId: input.teamId,
+      title: input.title,
+    });
+    if (canRecoverCalendarMeeting) {
+      await updateMeetingFromCalendar({
+        meetingId: input.meeting.id,
+        title: getCalendarMeetingTitle(input.meeting, input.title),
+        titleSource: getCalendarMeetingTitleSource(input.meeting),
+        platform: input.platform,
+        meetingUrl: input.meetingUrl,
+        startsAt: input.startsAt,
+        endsAt: input.endsAt,
+        teamMeetingKey: input.teamMeetingKey,
+        recallBotId: null,
+        status: "scheduled",
+      });
+    } else {
+      await markMeetingFailed(input.meeting.id);
+    }
     throw error;
   }
 
@@ -885,6 +934,106 @@ async function markMeetingFailed(meetingId: string) {
     .where(eq(meetings.id, meetingId));
 }
 
+async function recordCalendarAutoJoinFailure(input: {
+  calendarEventId: string;
+  error: unknown;
+  event: SyncedCalendarEvent;
+  meetingId: string;
+  meetingUrl: string;
+  reason: "schedule_bot_failed";
+  startsAt: Date;
+  teamId: string;
+  title: string;
+  userId?: string;
+}) {
+  const metadata = {
+    calendarEventId: input.calendarEventId,
+    errorMessage: getErrorMessage(input.error),
+    externalEventId: input.event.externalEventId,
+    meetingId: input.meetingId,
+    meetingUrl: input.meetingUrl,
+    reason: input.reason,
+    recallCalendarEventId: input.event.recallCalendarEventId ?? null,
+    startsAt: input.startsAt.toISOString(),
+    title: input.title,
+  };
+
+  console.error("calendar_auto_join_failure", metadata);
+
+  await capturePostHogEvent("calendar_auto_join_failure", {
+    distinctId: input.userId ?? input.meetingId,
+    properties: {
+      ...metadata,
+      service: "meeting-note",
+      teamId: input.teamId,
+      userId: input.userId ?? null,
+    },
+  });
+
+  try {
+    await db.insert(auditEvents).values({
+      action: "calendar_auto_join_failure",
+      actorUserId: input.userId ?? null,
+      metadata,
+      targetId: input.meetingId,
+      targetType: "meeting",
+      teamId: input.teamId,
+    });
+  } catch {
+    // Keep the original scheduling error as the authoritative failure.
+  }
+}
+
+async function capturePostHogEvent(
+  event: string,
+  input: {
+    distinctId: string;
+    properties: Record<string, unknown>;
+  },
+) {
+  const apiKey = process.env.POSTHOG_API_KEY?.trim();
+
+  if (!apiKey) {
+    return;
+  }
+
+  const host = getPostHogHost();
+
+  try {
+    const response = await fetch(`${host}/i/v0/e/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: apiKey,
+        distinct_id: input.distinctId,
+        event,
+        properties: input.properties,
+      }),
+    });
+
+    if (!response.ok) {
+      console.error("posthog_capture_failed", {
+        event,
+        status: response.status,
+      });
+    }
+  } catch (error) {
+    console.error("posthog_capture_failed", {
+      errorMessage: getErrorMessage(error),
+      event,
+    });
+  }
+}
+
+function getPostHogHost() {
+  const host = process.env.POSTHOG_HOST?.trim() || "https://us.i.posthog.com";
+  return host.replace(/\/+$/, "");
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown calendar sync error";
+}
+
 async function markMeetingMissedFromCalendar(input: {
   meetingId: string;
   title: string;
@@ -1007,13 +1156,19 @@ async function scheduleBotForCalendarEvent(input: {
   }
 
   if (input.existingBotId) {
-    return (await updateScheduledRecallBot({
-      botId: input.existingBotId,
-      meetingUrl: input.meetingUrl,
-      ...getMeetingBotRecallUpdateInput(botProfile),
-      startAt: input.startsAt.toISOString(),
-      metadata,
-    })) as RecallBotResponse;
+    try {
+      return (await updateScheduledRecallBot({
+        botId: input.existingBotId,
+        meetingUrl: input.meetingUrl,
+        ...getMeetingBotRecallUpdateInput(botProfile),
+        startAt: input.startsAt.toISOString(),
+        metadata,
+      })) as RecallBotResponse;
+    } catch (error) {
+      if (!isMissingRecallBotUpdateError(error)) {
+        throw error;
+      }
+    }
   }
 
   return (await scheduleRecallBot({
@@ -1101,6 +1256,13 @@ function getRecallBotResponseId(
   }
 
   return typeof bot.id === "string" ? bot.id : null;
+}
+
+function isMissingRecallBotUpdateError(error: unknown) {
+  return (
+    error instanceof Error &&
+    error.message.startsWith("Recall bot update failed with 404 ")
+  );
 }
 
 function hasConflictingRecallCalendarEventBot(

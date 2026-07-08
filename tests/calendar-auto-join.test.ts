@@ -86,6 +86,7 @@ describe("calendar auto join", () => {
     update.mockReset();
     updateScheduledRecallBot.mockReset();
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     vi.useRealTimers();
     vi.resetModules();
   });
@@ -769,6 +770,13 @@ describe("calendar auto join", () => {
   });
 
   it("rejects a Recall Calendar V2 bot response without a nested bot id", async () => {
+    vi.stubEnv("POSTHOG_API_KEY", "ph_project_key");
+    vi.stubEnv("POSTHOG_HOST", "https://us.i.posthog.com");
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
     const calendarEventReturning = vi
       .fn()
       .mockResolvedValue([{ id: "33333333-3333-4333-8333-333333333333" }]);
@@ -783,6 +791,7 @@ describe("calendar auto join", () => {
       .fn()
       .mockResolvedValue([{ id: "44444444-4444-4444-8444-444444444444" }]);
     const meetingValues = vi.fn().mockReturnValue({ returning: meetingReturning });
+    const auditValues = vi.fn().mockResolvedValue(undefined);
 
     const existingLimit = vi.fn().mockResolvedValue([]);
     const updateWhere = vi.fn().mockResolvedValue(undefined);
@@ -790,7 +799,8 @@ describe("calendar auto join", () => {
 
     insert
       .mockReturnValueOnce({ values: calendarEventValues })
-      .mockReturnValueOnce({ values: meetingValues });
+      .mockReturnValueOnce({ values: meetingValues })
+      .mockReturnValueOnce({ values: auditValues });
     select.mockReturnValue({
       from: () => ({
         where: () => ({
@@ -824,6 +834,59 @@ describe("calendar auto join", () => {
         },
       }),
     ).rejects.toThrow("Recall bot response missing id");
+
+    expect(consoleError).toHaveBeenCalledWith(
+      "calendar_auto_join_failure",
+      expect.objectContaining({
+        calendarEventId: "33333333-3333-4333-8333-333333333333",
+        errorMessage: "Recall bot response missing id",
+        meetingId: "44444444-4444-4444-8444-444444444444",
+        recallCalendarEventId: "55555555-5555-4555-8555-555555555555",
+        reason: "schedule_bot_failed",
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://us.i.posthog.com/i/v0/e/",
+      expect.objectContaining({
+        body: expect.any(String),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      }),
+    );
+    const posthogBody = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+    expect(posthogBody).toEqual(
+      expect.objectContaining({
+        api_key: "ph_project_key",
+        distinct_id: "55555555-5555-4555-8555-555555555555",
+        event: "calendar_auto_join_failure",
+        properties: expect.objectContaining({
+          calendarEventId: "33333333-3333-4333-8333-333333333333",
+          errorMessage: "Recall bot response missing id",
+          meetingId: "44444444-4444-4444-8444-444444444444",
+          recallCalendarEventId: "55555555-5555-4555-8555-555555555555",
+          reason: "schedule_bot_failed",
+          service: "meeting-note",
+          teamId: "22222222-2222-4222-8222-222222222222",
+        }),
+      }),
+    );
+    expect(auditValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "calendar_auto_join_failure",
+        actorUserId: "55555555-5555-4555-8555-555555555555",
+        metadata: expect.objectContaining({
+          calendarEventId: "33333333-3333-4333-8333-333333333333",
+          errorMessage: "Recall bot response missing id",
+          meetingId: "44444444-4444-4444-8444-444444444444",
+          recallCalendarEventId: "55555555-5555-4555-8555-555555555555",
+          reason: "schedule_bot_failed",
+        }),
+        targetId: "44444444-4444-4444-8444-444444444444",
+        targetType: "meeting",
+        teamId: "22222222-2222-4222-8222-222222222222",
+      }),
+    );
+    consoleError.mockRestore();
   });
 
   it("retries Recall scheduling for an existing calendar meeting without a bot", async () => {
@@ -1088,6 +1151,163 @@ describe("calendar auto join", () => {
         startedAt: new Date("2026-06-30T13:00:00.000Z"),
         title: "Partner sync moved",
         updatedAt: expect.any(Date),
+      }),
+    );
+  });
+
+  it("reschedules a failed future meeting when the stored direct bot was deleted", async () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com");
+
+    const calendarEventReturning = vi
+      .fn()
+      .mockResolvedValue([{ id: "33333333-3333-4333-8333-333333333333" }]);
+    const calendarEventOnConflictDoUpdate = vi
+      .fn()
+      .mockReturnValue({ returning: calendarEventReturning });
+    const calendarEventValues = vi
+      .fn()
+      .mockReturnValue({ onConflictDoUpdate: calendarEventOnConflictDoUpdate });
+
+    const existingLimit = vi.fn().mockResolvedValue([
+      {
+        id: "44444444-4444-4444-8444-444444444444",
+        recallBotId: "deleted_bot",
+        meetingUrl: "https://zoom.us/j/8436420171",
+        startedAt: new Date("2099-07-08T17:00:00.000Z"),
+        status: "failed",
+      },
+    ]);
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
+    const updateSet = vi.fn().mockReturnValue({ where: updateWhere });
+
+    insert.mockReturnValueOnce({ values: calendarEventValues });
+    select.mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: existingLimit,
+        }),
+      }),
+    });
+    update.mockReturnValue({ set: updateSet });
+    updateScheduledRecallBot.mockRejectedValue(
+      new Error("Recall bot update failed with 404 Not Found"),
+    );
+    scheduleRecallBot.mockResolvedValue({ id: "replacement_bot" });
+
+    const { autoJoinCalendarEvent } = await import("@/lib/calendar-auto-join");
+
+    await expect(
+      autoJoinCalendarEvent({
+        connection: {
+          id: "11111111-1111-4111-8111-111111111111",
+          teamId: "22222222-2222-4222-8222-222222222222",
+          userId: "55555555-5555-4555-8555-555555555555",
+          autoJoinEnabled: true,
+        },
+        event: {
+          externalEventId: "google_event_123",
+          title: "Anchorage <> IOSG",
+          startsAt: "2099-07-08T17:00:00.000Z",
+          endsAt: "2099-07-08T17:30:00.000Z",
+          meetingUrl: "https://zoom.us/j/8436420171",
+        },
+      }),
+    ).resolves.toEqual({
+      action: "scheduled",
+      calendarEventId: "33333333-3333-4333-8333-333333333333",
+      meetingId: "44444444-4444-4444-8444-444444444444",
+      meetingUrl: "https://zoom.us/j/8436420171",
+      platform: "zoom",
+      recallBotId: "replacement_bot",
+    });
+
+    expect(scheduleRecallBot).toHaveBeenCalledWith({
+      botName: "IOSG Old Friend",
+      meetingUrl: "https://zoom.us/j/8436420171",
+      metadata: {
+        calendarEventId: "33333333-3333-4333-8333-333333333333",
+        meetingId: "44444444-4444-4444-8444-444444444444",
+      },
+      startAt: "2099-07-08T17:00:00.000Z",
+      webhookUrl: "https://app.example.com/api/recall/webhook",
+    });
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recallBotId: "replacement_bot",
+        recallRecordingId: null,
+        status: "scheduled",
+      }),
+    );
+  });
+
+  it("resets a failed future meeting when replacement bot scheduling fails", async () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com");
+
+    const calendarEventReturning = vi
+      .fn()
+      .mockResolvedValue([{ id: "33333333-3333-4333-8333-333333333333" }]);
+    const calendarEventOnConflictDoUpdate = vi
+      .fn()
+      .mockReturnValue({ returning: calendarEventReturning });
+    const calendarEventValues = vi
+      .fn()
+      .mockReturnValue({ onConflictDoUpdate: calendarEventOnConflictDoUpdate });
+
+    const existingLimit = vi.fn().mockResolvedValue([
+      {
+        id: "44444444-4444-4444-8444-444444444444",
+        title: "Anchorage <> IOSG",
+        titleSource: "calendar",
+        recallBotId: "deleted_bot",
+        meetingUrl: "https://zoom.us/j/8436420171",
+        startedAt: new Date("2099-07-08T17:00:00.000Z"),
+        status: "failed",
+      },
+    ]);
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
+    const updateSet = vi.fn().mockReturnValue({ where: updateWhere });
+
+    insert.mockReturnValueOnce({ values: calendarEventValues });
+    select.mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: existingLimit,
+        }),
+      }),
+    });
+    update.mockReturnValue({ set: updateSet });
+    updateScheduledRecallBot.mockRejectedValue(
+      new Error("Recall bot update failed with 404 Not Found"),
+    );
+    scheduleRecallBot.mockRejectedValue(
+      new Error("Recall bot scheduling failed with 402 Payment Required"),
+    );
+
+    const { autoJoinCalendarEvent } = await import("@/lib/calendar-auto-join");
+
+    await expect(
+      autoJoinCalendarEvent({
+        connection: {
+          id: "11111111-1111-4111-8111-111111111111",
+          teamId: "22222222-2222-4222-8222-222222222222",
+          userId: "55555555-5555-4555-8555-555555555555",
+          autoJoinEnabled: true,
+        },
+        event: {
+          externalEventId: "google_event_123",
+          title: "Anchorage <> IOSG",
+          startsAt: "2099-07-08T17:00:00.000Z",
+          endsAt: "2099-07-08T17:30:00.000Z",
+          meetingUrl: "https://zoom.us/j/8436420171",
+        },
+      }),
+    ).rejects.toThrow("Recall bot scheduling failed with 402 Payment Required");
+
+    expect(updateSet).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        recallBotId: null,
+        recallRecordingId: null,
+        status: "scheduled",
       }),
     );
   });
@@ -1728,6 +1948,88 @@ describe("calendar auto join", () => {
     );
     expect(scheduleRecallCalendarEventBot).not.toHaveBeenCalled();
     expect(scheduleRecallBot).not.toHaveBeenCalled();
+  });
+
+  it("does not reschedule or fail an existing past meeting that already has transcript work", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-06T21:12:00.000Z"));
+
+    const calendarEventReturning = vi.fn().mockResolvedValue([
+      {
+        id: "33333333-3333-4333-8333-333333333333",
+        teamMeetingKey:
+          "team:22222222-2222-4222-8222-222222222222:start:2026-07-06T17:00:00.000Z:url:https://zoom.us/j/85921730294",
+      },
+    ]);
+    const calendarEventOnConflictDoUpdate = vi
+      .fn()
+      .mockReturnValue({ returning: calendarEventReturning });
+    const calendarEventValues = vi
+      .fn()
+      .mockReturnValue({ onConflictDoUpdate: calendarEventOnConflictDoUpdate });
+
+    const existingLimit = vi.fn().mockResolvedValue([
+      {
+        id: "44444444-4444-4444-8444-444444444444",
+        calendarEventId: "33333333-3333-4333-8333-333333333333",
+        teamMeetingKey:
+          "team:22222222-2222-4222-8222-222222222222:start:2026-07-06T17:00:00.000Z:url:https://zoom.us/j/85921730294",
+        recallBotId: null,
+        meetingUrl: "https://zoom.us/j/85921730294",
+        startedAt: new Date("2026-07-06T17:00:00.000Z"),
+        status: "ready",
+      },
+    ]);
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
+    const updateSet = vi.fn().mockReturnValue({ where: updateWhere });
+
+    insert.mockReturnValueOnce({ values: calendarEventValues });
+    select.mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: existingLimit,
+        }),
+      }),
+    });
+    update.mockReturnValue({ set: updateSet });
+    scheduleRecallBot.mockRejectedValue(
+      new Error("Recall bot scheduling failed with 400 Bad Request"),
+    );
+
+    const { autoJoinCalendarEvent } = await import("@/lib/calendar-auto-join");
+
+    await expect(
+      autoJoinCalendarEvent({
+        repairMode: true,
+        connection: {
+          id: "11111111-1111-4111-8111-111111111111",
+          teamId: "22222222-2222-4222-8222-222222222222",
+          userId: "55555555-5555-4555-8555-555555555555",
+          autoJoinEnabled: true,
+          workspaceDomain: "iosg.vc",
+        },
+        event: {
+          externalEventId: "google_event_123",
+          title: "IOSG <> Ninemind",
+          startsAt: "2026-07-06T17:00:00.000Z",
+          endsAt: "2026-07-06T17:30:00.000Z",
+          meetingUrl: "https://zoom.us/j/85921730294",
+        },
+      }),
+    ).resolves.toEqual({
+      action: "skipped",
+      calendarEventId: "33333333-3333-4333-8333-333333333333",
+      meetingId: "44444444-4444-4444-8444-444444444444",
+      meetingUrl: "https://zoom.us/j/85921730294",
+      reason: "already_scheduled",
+    });
+
+    expect(scheduleRecallBot).not.toHaveBeenCalled();
+    expect(updateSet).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "failed",
+      }),
+    );
   });
 
   it("does not create a new meeting for a past repair event", async () => {
