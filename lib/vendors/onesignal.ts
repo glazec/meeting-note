@@ -10,6 +10,11 @@ const oneSignalEnvSchema = z.object({
   ONESIGNAL_REST_API_KEY: z.string().trim().min(1),
 });
 
+type OneSignalNotificationResponse = {
+  id?: unknown;
+  errors?: unknown;
+};
+
 export async function sendOneSignalLocationReminder(input: {
   externalUserId: string;
   meetingId: string;
@@ -22,7 +27,7 @@ export async function sendOneSignalLocationReminder(input: {
     target_channel: "push",
     isIos: true,
     isAndroid: true,
-    isAnyWeb: false,
+    isAnyWeb: true,
     include_aliases: {
       external_id: [input.externalUserId],
     },
@@ -39,11 +44,39 @@ export async function sendOneSignalLocationReminder(input: {
     body: JSON.stringify(body),
   });
 
+  const data = (await response.json().catch(() => null)) as
+    | OneSignalNotificationResponse
+    | null;
+
   if (!response.ok) {
     throw new Error(
       `OneSignal notification failed with ${response.status} ${response.statusText}`,
     );
   }
 
-  return response.json();
+  if (data?.errors) {
+    throw new Error(
+      `OneSignal notification failed: ${formatOneSignalErrors(data.errors)}`,
+    );
+  }
+
+  if (typeof data?.id !== "string" || data.id.trim() === "") {
+    throw new Error("OneSignal notification failed: missing notification id");
+  }
+
+  return data;
+}
+
+function formatOneSignalErrors(errors: unknown) {
+  if (!errors || typeof errors !== "object") {
+    return String(errors);
+  }
+
+  return Object.entries(errors)
+    .flatMap(([key, value]) =>
+      value && typeof value === "object"
+        ? Object.keys(value).map((nestedKey) => `${key}.${nestedKey}`)
+        : [key],
+    )
+    .join(", ");
 }
