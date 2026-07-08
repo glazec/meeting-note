@@ -631,7 +631,7 @@ describe("TranscriptViewer", () => {
     expect(html).toContain('id="segment_123"');
   });
 
-  it("renders the transcript waveform immediately with speaker, emotion, and wpm labels", () => {
+  it("renders the transcript waveform immediately with subtle loading motion", () => {
     const html = renderToStaticMarkup(
       <TranscriptViewer
         audioUrl="/api/meetings/11111111-1111-4111-8111-111111111111/audio"
@@ -650,6 +650,7 @@ describe("TranscriptViewer", () => {
     expect(html).toContain("120 wpm");
     expect(html).toContain('preload="metadata"');
     expect(html).toContain('aria-busy="false"');
+    expect(html).toContain("animate-pulse");
     expect(html).not.toContain("Loading waveform");
     expect(html).not.toContain("Audio waveform loading");
     expect(html).toContain("Current section: Speaker 1 · Hard, 120 wpm");

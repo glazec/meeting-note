@@ -1502,6 +1502,7 @@ function TranscriptAudioPlayer({
     duration: safeDuration,
     timelineDuration,
   });
+  const isResolvingAudioWaveform = shouldLoadAudioWaveform && !hasAudioWaveform;
 
   useEffect(() => {
     if (!shouldLoadAudioWaveform) {
@@ -1769,6 +1770,8 @@ function TranscriptAudioPlayer({
                 <span
                   className={cn(
                     "min-w-0 flex-1 rounded-[2px] transition-colors",
+                    isResolvingAudioWaveform &&
+                      "animate-pulse motion-reduce:animate-none",
                     isPast ? "bg-primary" : "bg-muted-foreground/40",
                   )}
                   key={index}
