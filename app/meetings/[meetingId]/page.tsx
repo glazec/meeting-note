@@ -5,6 +5,7 @@ import { MeetingAccessSummary } from "@/components/meeting-access-summary";
 import { MeetingAutoRefresh } from "@/components/meeting-auto-refresh";
 import { MeetingActions } from "@/components/meeting-actions";
 import { MeetingEntityLinks } from "@/components/meeting-entity-links";
+import { MeetingRecoveryUploadPanel } from "@/components/meeting-recovery-upload-panel";
 import { MeetingTitleEditor } from "@/components/meeting-title-editor";
 import { RelatedMeetingsCard } from "@/components/related-meetings-card";
 import { ShareDialog } from "@/components/share-dialog";
@@ -161,6 +162,11 @@ export default async function MeetingPage({
                   teamMembers={shareRecipients}
                 />
               </div>
+              {displayStatus === "failed" ? (
+                <div className="mt-6">
+                  <MeetingRecoveryUploadPanel meetingId={meetingId} />
+                </div>
+              ) : null}
               <div className="mt-6">
                 <RelatedMeetingsCard meetings={relatedMeetings} />
               </div>
