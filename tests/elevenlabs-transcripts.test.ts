@@ -188,6 +188,142 @@ describe("buildElevenLabsTranscriptPersistence", () => {
     });
   });
 
+  it("prelabels the other speaker as PC sound in two speaker local recorder transcripts", () => {
+    expect(
+      buildElevenLabsTranscriptPersistence(
+        {
+          eventType: "speech_to_text_transcription",
+          type: "speech_to_text_transcription",
+          requestId: "req_123",
+          transcriptId: null,
+          status: "completed",
+          transcriptionText: "My update. Their update.",
+          transcriptionWords: [
+            {
+              text: "My update.",
+              type: "word",
+              start: 1,
+              end: 2,
+              speakerId: "speaker_0",
+            },
+            {
+              text: "Their update.",
+              type: "word",
+              start: 3,
+              end: 4,
+              speakerId: "speaker_1",
+            },
+          ],
+          metadata: {
+            meetingId: "11111111-1111-4111-8111-111111111111",
+            transcriptJobId: "22222222-2222-4222-8222-222222222222",
+          },
+        },
+        {
+          localRecorderAttribution: {
+            localUserSpeaker: "Glaze",
+            activityWindows: [
+              {
+                startsAt: 1,
+                endsAt: 2,
+                microphoneActive: true,
+                computerAudioActive: false,
+              },
+              {
+                startsAt: 3,
+                endsAt: 4,
+                microphoneActive: false,
+                computerAudioActive: true,
+              },
+            ],
+          },
+        },
+      ),
+    ).toMatchObject({
+      action: "complete",
+      segments: [
+        {
+          speaker: "Glaze",
+          startMs: 1000,
+          endMs: 2000,
+        },
+        {
+          speaker: "PC sound",
+          startMs: 3000,
+          endMs: 4000,
+        },
+      ],
+    });
+  });
+
+  it("splits a single ElevenLabs speaker by local recorder track activity", () => {
+    expect(
+      buildElevenLabsTranscriptPersistence(
+        {
+          eventType: "speech_to_text_transcription",
+          type: "speech_to_text_transcription",
+          requestId: "req_123",
+          transcriptId: null,
+          status: "completed",
+          transcriptionText: "My question. Their answer.",
+          transcriptionWords: [
+            {
+              text: "My question.",
+              type: "word",
+              start: 1,
+              end: 2,
+              speakerId: "speaker_0",
+            },
+            {
+              text: "Their answer.",
+              type: "word",
+              start: 3,
+              end: 4,
+              speakerId: "speaker_0",
+            },
+          ],
+          metadata: {
+            meetingId: "11111111-1111-4111-8111-111111111111",
+            transcriptJobId: "22222222-2222-4222-8222-222222222222",
+          },
+        },
+        {
+          localRecorderAttribution: {
+            localUserSpeaker: "Glaze",
+            activityWindows: [
+              {
+                startsAt: 1,
+                endsAt: 2,
+                microphoneActive: true,
+                computerAudioActive: false,
+              },
+              {
+                startsAt: 3,
+                endsAt: 4,
+                microphoneActive: false,
+                computerAudioActive: true,
+              },
+            ],
+          },
+        },
+      ),
+    ).toMatchObject({
+      action: "complete",
+      segments: [
+        {
+          speaker: "Glaze",
+          startMs: 1000,
+          endMs: 2000,
+        },
+        {
+          speaker: "PC sound",
+          startMs: 3000,
+          endMs: 4000,
+        },
+      ],
+    });
+  });
+
   it("maps ElevenLabs speakers to Recall participants by timestamp", () => {
     expect(
       buildElevenLabsTranscriptPersistence(

@@ -89,6 +89,18 @@ type LocalRecorderAttributionContext = {
   activityWindows: LocalRecorderActivityWindow[];
 };
 
+type LocalRecorderSpeakerAttribution =
+  | "local_user"
+  | "remote_speaker"
+  | "overlap"
+  | "silence"
+  | "unknown";
+
+type LocalRecorderSpeakerLabelContext = {
+  labelRemoteSpeakerByActivity: boolean;
+  labelsBySpeakerId: Map<string, string>;
+};
+
 export function buildElevenLabsTranscriptPersistence(
   event: ElevenLabsTranscriptEvent,
   options: {
@@ -490,6 +502,10 @@ function buildTranscriptSegments(
   }
 
   const segments: TranscriptSegmentInput[] = [];
+  const localRecorderSpeakerLabels = buildLocalRecorderSpeakerLabelContext(
+    words,
+    localRecorderAttribution,
+  );
   let current: TranscriptSegmentInput | null = null;
   let currentSpeakerId: string | null = null;
   let currentSpeakerLabel: string | null = null;
@@ -506,6 +522,7 @@ function buildTranscriptSegments(
       secondsToMs(word.end),
       participantTimeline,
       localRecorderAttribution,
+      localRecorderSpeakerLabels,
     );
     const shouldStartSegment =
       !current ||
@@ -617,32 +634,26 @@ function formatLocalRecorderSpeaker(input: {
   startMs: number | null;
   endMs: number | null;
   localRecorderAttribution: LocalRecorderAttributionContext | null;
+  labelRemoteSpeakerByActivity: boolean;
 }) {
-  if (!input.localRecorderAttribution || input.startMs === null) {
+  const attribution = classifyLocalRecorderSegmentTime(input);
+
+  if (attribution === "remote_speaker" && input.labelRemoteSpeakerByActivity) {
+    return "PC sound";
+  }
+
+  if (attribution !== "local_user" || !input.localRecorderAttribution) {
     return null;
   }
 
-  const startSeconds = input.startMs / 1000;
-  const endSeconds =
-    input.endMs !== null && input.endMs > input.startMs
-      ? input.endMs / 1000
-      : startSeconds + 0.001;
-  const attribution = classifyLocalRecorderSegment({
-    activityWindows: input.localRecorderAttribution.activityWindows,
-    endSeconds,
-    startSeconds,
-  });
-
-  return attribution === "local_user"
-    ? input.localRecorderAttribution.localUserSpeaker
-    : null;
+  return input.localRecorderAttribution.localUserSpeaker;
 }
 
 function classifyLocalRecorderSegment(input: {
   activityWindows: LocalRecorderActivityWindow[];
   startSeconds: number;
   endSeconds: number;
-}) {
+}): LocalRecorderSpeakerAttribution {
   const segmentDuration = input.endSeconds - input.startSeconds;
 
   if (segmentDuration <= 0) {
@@ -694,15 +705,116 @@ function classifyLocalRecorderSegment(input: {
   return winner.duration > 0 ? winner.attribution : "unknown";
 }
 
+function classifyLocalRecorderSegmentTime(input: {
+  startMs: number | null;
+  endMs: number | null;
+  localRecorderAttribution: LocalRecorderAttributionContext | null;
+}): LocalRecorderSpeakerAttribution {
+  if (!input.localRecorderAttribution || input.startMs === null) {
+    return "unknown";
+  }
+
+  const startSeconds = input.startMs / 1000;
+  const endSeconds =
+    input.endMs !== null && input.endMs > input.startMs
+      ? input.endMs / 1000
+      : startSeconds + 0.001;
+
+  return classifyLocalRecorderSegment({
+    activityWindows: input.localRecorderAttribution.activityWindows,
+    endSeconds,
+    startSeconds,
+  });
+}
+
+function buildLocalRecorderSpeakerLabelContext(
+  words: TranscriptWord[],
+  localRecorderAttribution: LocalRecorderAttributionContext | null,
+): LocalRecorderSpeakerLabelContext {
+  const context: LocalRecorderSpeakerLabelContext = {
+    labelRemoteSpeakerByActivity: false,
+    labelsBySpeakerId: new Map(),
+  };
+
+  if (!localRecorderAttribution) {
+    return context;
+  }
+
+  const speakerIds = new Set<string>();
+  const localSpeakerIds = new Set<string>();
+
+  for (const word of words) {
+    if (!word.speakerId) {
+      continue;
+    }
+
+    speakerIds.add(word.speakerId);
+
+    const attribution = classifyLocalRecorderSegmentTime({
+      endMs: secondsToMs(word.end),
+      localRecorderAttribution,
+      startMs: secondsToMs(word.start),
+    });
+
+    if (attribution === "local_user") {
+      localSpeakerIds.add(word.speakerId);
+    }
+  }
+
+  if (localSpeakerIds.size !== 1) {
+    return context;
+  }
+
+  if (speakerIds.size === 1) {
+    context.labelRemoteSpeakerByActivity = true;
+    return context;
+  }
+
+  if (speakerIds.size !== 2) {
+    return context;
+  }
+
+  const localSpeakerId = Array.from(localSpeakerIds)[0];
+
+  if (!localSpeakerId) {
+    return context;
+  }
+
+  context.labelsBySpeakerId.set(
+    localSpeakerId,
+    localRecorderAttribution.localUserSpeaker,
+  );
+  const remoteSpeakerId = Array.from(speakerIds).find(
+    (speakerId) => speakerId !== localSpeakerId,
+  );
+
+  if (remoteSpeakerId) {
+    context.labelsBySpeakerId.set(remoteSpeakerId, "PC sound");
+  }
+
+  return context;
+}
+
 function formatSpeaker(
   speakerId: string | null,
   startMs: number | null,
   endMs: number | null,
   participantTimeline: ParticipantTimelineEntry[],
   localRecorderAttribution: LocalRecorderAttributionContext | null,
+  localRecorderSpeakerLabels: LocalRecorderSpeakerLabelContext,
 ) {
+  const localRecorderSpeakerLabel = speakerId
+    ? localRecorderSpeakerLabels.labelsBySpeakerId.get(speakerId)
+    : null;
+
+  if (localRecorderSpeakerLabel) {
+    return localRecorderSpeakerLabel;
+  }
+
   const localRecorderSpeaker = formatLocalRecorderSpeaker({
     endMs,
+    labelRemoteSpeakerByActivity:
+      localRecorderSpeakerLabels.labelRemoteSpeakerByActivity,
     localRecorderAttribution,
     startMs,
   });

@@ -427,7 +427,7 @@ function getLatestRecallStatusChange(value: unknown) {
 
 function getRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value
+    ? (value as Record<string, unknown>)
     : null;
 }
 
