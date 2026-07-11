@@ -188,6 +188,21 @@ export async function assertCanCreateMeetings(workspace: WorkspaceContext) {
   }
 }
 
+export async function canManageTeamSettings(workspace: WorkspaceContext) {
+  const [membership] = await db
+    .select({ role: teamMemberships.role })
+    .from(teamMemberships)
+    .where(
+      and(
+        eq(teamMemberships.teamId, workspace.teamId),
+        eq(teamMemberships.userId, workspace.userId),
+      ),
+    )
+    .limit(1);
+
+  return membership?.role === "admin" || membership?.role === "owner";
+}
+
 async function getOrCreateUserId(sessionUser: SessionUser, email: string) {
   const existing = await db
     .select({ id: users.id })

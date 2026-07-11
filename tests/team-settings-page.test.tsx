@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
 const {
+  canManageTeamSettings,
   getWorkspace,
   getWorkspaceAccessSummary,
   getDefaultMeetingBotAvatarJpegBase64,
@@ -12,6 +13,7 @@ const {
   redirect,
   requireCurrentUser,
 } = vi.hoisted(() => ({
+  canManageTeamSettings: vi.fn(),
   getWorkspace: vi.fn(),
   getWorkspaceAccessSummary: vi.fn(),
   getDefaultMeetingBotAvatarJpegBase64: vi.fn(),
@@ -37,6 +39,7 @@ vi.mock("@/lib/auth-guards", () => ({
 }));
 
 vi.mock("@/lib/workspace", () => ({
+  canManageTeamSettings,
   getOrCreateWorkspaceForSessionUser: getWorkspace,
   getWorkspaceAccessSummary,
   listWorkspaceMembers,
@@ -54,6 +57,7 @@ vi.mock("@/lib/meeting-bot-profile", () => ({
 describe("TeamSettingsPage", () => {
   afterEach(() => {
     getWorkspace.mockReset();
+    canManageTeamSettings.mockReset();
     getWorkspaceAccessSummary.mockReset();
     getDefaultMeetingBotAvatarJpegBase64.mockReset();
     getMeetingBotProfile.mockReset();
@@ -82,6 +86,7 @@ describe("TeamSettingsPage", () => {
       hasWorkspaceMeetings: false,
       isSharedOnly: true,
     });
+    canManageTeamSettings.mockResolvedValue(false);
 
     const { default: TeamSettingsPage } = await import(
       "@/app/settings/team/page"
@@ -158,6 +163,9 @@ describe("TeamSettingsPage", () => {
     expect(html).toContain("Alice");
     expect(html).toContain("alice@iosg.vc");
     expect(html).toContain("You");
+    expect(html).toContain("Only team administrators can edit these settings");
+    expect(html).not.toContain('action="/api/team/bot-profile"');
+    expect(html).not.toContain('action="/api/team/vocabulary"');
     expect(listWorkspaceMembers).toHaveBeenCalledWith({
       canCreateMeetings: true,
       domain: "iosg.vc",
@@ -184,6 +192,7 @@ describe("TeamSettingsPage", () => {
       hasWorkspaceMeetings: true,
       isSharedOnly: false,
     });
+    canManageTeamSettings.mockResolvedValue(false);
     listTeamVocabularyTerms.mockResolvedValue([]);
     listWorkspaceMembers.mockResolvedValue([]);
     getMeetingBotProfile.mockResolvedValue({

@@ -17,6 +17,7 @@ import {
 } from "@/lib/meeting-bot-profile";
 import { listTeamVocabularyTerms } from "@/lib/team-vocabulary";
 import {
+  canManageTeamSettings,
   getOrCreateWorkspaceForSessionUser,
   getWorkspaceAccessSummary,
   listWorkspaceMembers,
@@ -28,6 +29,9 @@ export default async function TeamSettingsPage() {
   const user = await requireCurrentUser();
   const workspace = await getOrCreateWorkspaceForSessionUser(user);
   const accessSummary = await getWorkspaceAccessSummary(workspace);
+  const canEditTeamSettings = accessSummary.canCreateMeetings
+    ? await canManageTeamSettings(workspace)
+    : false;
   const vocabularyTerms = accessSummary.canCreateMeetings
     ? await listTeamVocabularyTerms(workspace.teamId)
     : [];
@@ -125,12 +129,13 @@ export default async function TeamSettingsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <form
-                action="/api/team/bot-profile"
-                className="flex flex-col gap-4"
-                encType="multipart/form-data"
-                method="post"
-              >
+              {canEditTeamSettings ? (
+                <form
+                  action="/api/team/bot-profile"
+                  className="flex flex-col gap-4"
+                  encType="multipart/form-data"
+                  method="post"
+                >
                 <div className="grid gap-2">
                   <label
                     className="text-sm leading-none font-medium"
@@ -195,7 +200,35 @@ export default async function TeamSettingsPage() {
                 <Button className="self-start" type="submit">
                   Save team bot profile
                 </Button>
-              </form>
+                </form>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  <p className="text-sm text-muted-foreground">
+                    Only team administrators can edit these settings.
+                  </p>
+                  <p className="text-sm font-medium">{botProfile.botName}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Team meeting bot avatar
+                  </p>
+                  <div
+                    aria-label="Current team meeting bot avatar"
+                    className="size-16 rounded-lg border bg-muted bg-cover bg-center"
+                    role="img"
+                    style={
+                      botAvatarJpegBase64
+                        ? {
+                            backgroundImage: `url(data:image/jpeg;base64,${botAvatarJpegBase64})`,
+                          }
+                        : undefined
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {botProfile.avatarJpegBase64
+                      ? "Custom avatar saved"
+                      : "Default avatar"}
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
         ) : null}
@@ -208,19 +241,21 @@ export default async function TeamSettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            <form
-              action="/api/team/vocabulary"
-              className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
-              method="post"
-            >
-              <Input aria-label="Vocabulary term" name="term" placeholder="Term" />
-              <Input
-                aria-label="Vocabulary hint"
-                name="hint"
-                placeholder="Optional hint"
-              />
-              <Button type="submit">Add</Button>
-            </form>
+            {canEditTeamSettings ? (
+              <form
+                action="/api/team/vocabulary"
+                className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
+                method="post"
+              >
+                <Input aria-label="Vocabulary term" name="term" placeholder="Term" />
+                <Input
+                  aria-label="Vocabulary hint"
+                  name="hint"
+                  placeholder="Optional hint"
+                />
+                <Button type="submit">Add</Button>
+              </form>
+            ) : null}
             {vocabularyTerms.length > 0 ? (
               <ul className="divide-y rounded-lg border">
                 {vocabularyTerms.map((term) => (

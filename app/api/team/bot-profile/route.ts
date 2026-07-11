@@ -4,8 +4,8 @@ import {
   upsertMeetingBotProfile,
 } from "@/lib/meeting-bot-profile";
 import {
+  canManageTeamSettings,
   getOrCreateWorkspaceForSessionUser,
-  getWorkspaceAccessSummary,
 } from "@/lib/workspace";
 
 export const runtime = "nodejs";
@@ -18,9 +18,8 @@ export async function POST(request: Request) {
   }
 
   const workspace = await getOrCreateWorkspaceForSessionUser(user);
-  const accessSummary = await getWorkspaceAccessSummary(workspace);
 
-  if (!accessSummary.canCreateMeetings) {
+  if (!(await canManageTeamSettings(workspace))) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
