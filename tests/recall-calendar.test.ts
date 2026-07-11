@@ -241,6 +241,7 @@ describe("Recall Calendar V2 adapter", () => {
           },
         },
         recording_config: {
+          video_mixed_participant_video_when_screenshare: "hide",
           realtime_endpoints: [
             {
               type: "webhook",

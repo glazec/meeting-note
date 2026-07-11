@@ -11,6 +11,7 @@ import {
   extractRecallBotScreenshots,
   findRecallRecordingMediaUrl,
   findRecallSpeakerTimelineUrl,
+  findRecallVideoFrameArtifacts,
   listRecallBotScreenshots,
   sendRecallChatMessage,
   normalizeRecallWebhook,
@@ -1034,6 +1035,7 @@ describe("vendor job creation", () => {
       body.automatic_video_output.in_call_not_recording.b64_data,
     );
     expect(body.recording_config).toEqual({
+      video_mixed_participant_video_when_screenshare: "hide",
       realtime_endpoints: [
         {
           type: "webhook",
@@ -1155,6 +1157,7 @@ describe("vendor job creation", () => {
         },
       },
       recording_config: {
+        video_mixed_participant_video_when_screenshare: "hide",
         realtime_endpoints: [
           {
             type: "webhook",
@@ -1407,6 +1410,129 @@ describe("vendor job creation", () => {
         "rec_123",
       ),
     ).toBe("https://recall.example.com/recording.mp4");
+  });
+
+  it("extracts video frame artifacts for the exact Recall recording", () => {
+    expect(
+      findRecallVideoFrameArtifacts(
+        {
+          recordings: [
+            {
+              id: "recording_old",
+              started_at: "2026-07-09T10:00:00.000Z",
+              media_shortcuts: {
+                video_mixed: {
+                  data: { download_url: "https://recall.example.com/old.mp4" },
+                },
+                participant_events: {
+                  data: {
+                    participant_events_download_url:
+                      "https://recall.example.com/old-events.json",
+                  },
+                },
+              },
+            },
+            {
+              id: "recording_123",
+              started_at: "2026-07-10T10:00:00.000Z",
+              media_shortcuts: {
+                video_mixed: {
+                  data: { download_url: "https://recall.example.com/video.mp4" },
+                },
+                participant_events: {
+                  data: {
+                    participant_events_download_url:
+                      "https://recall.example.com/events.json",
+                  },
+                },
+              },
+            },
+          ],
+        },
+        "recording_123",
+      ),
+    ).toEqual({
+      participantEventsUrl: "https://recall.example.com/events.json",
+      recordingStartedAt: "2026-07-10T10:00:00.000Z",
+      videoUrl: "https://recall.example.com/video.mp4",
+    });
+  });
+
+  it.each([
+    null,
+    {},
+    { recordings: {} },
+    { recordings: [null] },
+    {
+      recordings: [
+        {
+          id: "recording_other",
+          started_at: "2026-07-10T10:00:00.000Z",
+          media_shortcuts: {
+            video_mixed: {
+              data: { download_url: "https://recall.example.com/video.mp4" },
+            },
+            participant_events: {
+              data: {
+                participant_events_download_url:
+                  "https://recall.example.com/events.json",
+              },
+            },
+          },
+        },
+      ],
+    },
+    {
+      recordings: [
+        {
+          id: "recording_123",
+          media_shortcuts: {
+            video_mixed: {
+              data: { download_url: "https://recall.example.com/video.mp4" },
+            },
+            participant_events: {
+              data: {
+                participant_events_download_url:
+                  "https://recall.example.com/events.json",
+              },
+            },
+          },
+        },
+      ],
+    },
+    {
+      recordings: [
+        {
+          id: "recording_123",
+          started_at: "2026-07-10T10:00:00.000Z",
+          media_shortcuts: {
+            video_mixed: { data: {} },
+            participant_events: {
+              data: {
+                participant_events_download_url:
+                  "https://recall.example.com/events.json",
+              },
+            },
+          },
+        },
+      ],
+    },
+    {
+      recordings: [
+        {
+          id: "recording_123",
+          started_at: "2026-07-10T10:00:00.000Z",
+          media_shortcuts: {
+            video_mixed: {
+              data: { download_url: "https://recall.example.com/video.mp4" },
+            },
+            participant_events: { data: {} },
+          },
+        },
+      ],
+    },
+  ])("returns null for incomplete Recall video frame artifacts", (bot) => {
+    expect(findRecallVideoFrameArtifacts(bot, "recording_123")).toBeNull();
   });
 
   it("extracts Recall speaker timeline URLs", () => {

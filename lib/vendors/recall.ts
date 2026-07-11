@@ -167,6 +167,7 @@ const RECALL_SPEECH_OFF_EVENT = "participant_events.speech_off";
 
 function buildRecallRealtimeRecordingConfig(webhookUrl: string) {
   return {
+    video_mixed_participant_video_when_screenshare: "hide",
     realtime_endpoints: [
       {
         type: "webhook",
@@ -797,6 +798,43 @@ export function findRecallRecordingMediaUrl(
   }
 
   return null;
+}
+
+export function findRecallVideoFrameArtifacts(
+  bot: unknown,
+  recordingId: string,
+): {
+  participantEventsUrl: string;
+  recordingStartedAt: string;
+  videoUrl: string;
+} | null {
+  const recordings = getArray(getRecord(bot)?.recordings);
+
+  if (!recordings) {
+    return null;
+  }
+
+  const recording = getRecord(
+    recordings.find((candidate) => getRecord(candidate)?.id === recordingId),
+  );
+  const mediaShortcuts = getRecord(recording?.media_shortcuts);
+  const participantEvents = getRecord(mediaShortcuts?.participant_events);
+  const participantEventsData = getRecord(participantEvents?.data);
+  const participantEventsUrl = getString(
+    participantEventsData?.participant_events_download_url,
+  );
+  const recordingStartedAt = getString(recording?.started_at);
+  const videoUrl = getDownloadUrl(mediaShortcuts?.video_mixed);
+
+  if (!participantEventsUrl || !recordingStartedAt || !videoUrl) {
+    return null;
+  }
+
+  return {
+    participantEventsUrl,
+    recordingStartedAt,
+    videoUrl,
+  };
 }
 
 export function findRecallSpeakerTimelineUrl(
