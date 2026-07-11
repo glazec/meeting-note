@@ -96,6 +96,10 @@ describe("Inngest functions", () => {
         id: "sync-recall-calendars-hourly",
         triggers: [{ cron: "0 * * * *" }],
       },
+      {
+        id: "reconcile-stale-meeting-jobs",
+        triggers: [{ cron: "*/15 * * * *" }],
+      },
     ]);
   });
 

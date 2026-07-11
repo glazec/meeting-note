@@ -23,6 +23,7 @@ import {
 } from "@/lib/vendors/openrouter";
 import { scheduleRecallBot } from "@/lib/vendors/recall";
 import { syncRecallCalendarEventsForAllConnectedUsers } from "@/lib/recall-calendar-bulk-sync";
+import { reconcileStaleMeetingJobs } from "@/lib/stale-meeting-jobs";
 
 const appUrlSchema = z.string().trim().url();
 
@@ -327,6 +328,14 @@ export const syncRecallCalendarsHourly = inngest.createFunction(
   async () => syncRecallCalendarEventsForAllConnectedUsers(),
 );
 
+export const reconcileStaleJobs = inngest.createFunction(
+  {
+    id: "reconcile-stale-meeting-jobs",
+    triggers: [{ cron: "*/15 * * * *" }],
+  },
+  async () => reconcileStaleMeetingJobs(),
+);
+
 export const functions = [
   scheduleMeetingBot,
   transcribeAudio,
@@ -334,6 +343,7 @@ export const functions = [
   enrichTranscript,
   sendLocationReminders,
   syncRecallCalendarsHourly,
+  reconcileStaleJobs,
 ];
 
 function buildTranscriptMetadata(data: z.infer<typeof transcribeAudioDataSchema>) {
