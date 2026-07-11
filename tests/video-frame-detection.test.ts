@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   analyzeStableVisualFrames,
   compareGrayscaleFrames,
+  isInformativeSharedScreenFrame,
   selectStableVisualFrames,
   type GrayscaleFrame,
 } from "@/lib/video-frame-detection";
@@ -61,6 +62,31 @@ describe("compareGrayscaleFrames", () => {
     expect(() =>
       compareGrayscaleFrames(new Uint8Array(1), new Uint8Array(2)),
     ).toThrow();
+  });
+});
+
+describe("isInformativeSharedScreenFrame", () => {
+  it("rejects a blank screen with only a presenter tile", () => {
+    const presenterOnly = pixels(0);
+
+    for (let y = 0; y < 18; y += 1) {
+      for (let x = 120; x < WIDTH; x += 1) {
+        presenterOnly[y * WIDTH + x] = (x + y) % 2 === 0 ? 40 : 180;
+      }
+    }
+
+    expect(isInformativeSharedScreenFrame(presenterOnly)).toBe(false);
+  });
+
+  it("keeps a dark slide with text distributed across the screen", () => {
+    const darkSlide = pixels(0);
+
+    for (let tile = 0; tile < 6; tile += 1) {
+      const startX = tile * 20 + 2;
+      darkSlide.fill(220, 36 * WIDTH + startX, 36 * WIDTH + startX + 14);
+    }
+
+    expect(isInformativeSharedScreenFrame(darkSlide)).toBe(true);
   });
 });
 

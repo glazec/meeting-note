@@ -233,7 +233,9 @@ describe("persistRecallMeetingVideoFrames", () => {
       intervals: [{ startMs: 1_000, endMs: 10_000 }],
       videoUrl: VIDEO_URL,
     });
-    expect(analyzeStableVisualFrames).toHaveBeenCalledWith(sampledFrames);
+    expect(analyzeStableVisualFrames).toHaveBeenCalledWith(sampledFrames, {
+      requireInformativeSharedScreen: true,
+    });
     expect(extractJpegFrame.mock.calls).toEqual([
       [{ timestampMs: 3_000, videoUrl: VIDEO_URL }],
       [{ timestampMs: 7_000, videoUrl: VIDEO_URL }],

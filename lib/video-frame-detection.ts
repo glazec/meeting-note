@@ -10,6 +10,13 @@ const STABLE_MEAN_THRESHOLD = 1.5;
 const STABLE_PIXEL_RATIO_THRESHOLD = 0.005;
 const STABLE_DURATION_MS = 2_000;
 const MAX_SAMPLE_GAP_MS = 1_500;
+const THUMBNAIL_WIDTH = 160;
+const THUMBNAIL_HEIGHT = 90;
+const INFORMATION_TILE_COLUMNS = 8;
+const INFORMATION_TILE_ROWS = 5;
+const MINIMUM_INFORMATIVE_TILES = 4;
+const VISIBLE_LUMA_THRESHOLD = 24;
+const VISIBLE_CONTRAST_THRESHOLD = 24;
 
 type FrameComparison = {
   changedPixelRatio: number;
@@ -62,7 +69,63 @@ export function selectStableVisualFrames(frames: GrayscaleFrame[]): number[] {
   return analyzeStableVisualFrames(frames).timestamps;
 }
 
-export function analyzeStableVisualFrames(frames: GrayscaleFrame[]): {
+export function isInformativeSharedScreenFrame(pixels: Uint8Array): boolean {
+  if (pixels.length !== THUMBNAIL_WIDTH * THUMBNAIL_HEIGHT) {
+    return true;
+  }
+
+  let informativeTileCount = 0;
+
+  for (let tileY = 0; tileY < INFORMATION_TILE_ROWS; tileY += 1) {
+    const startY = Math.floor(
+      (tileY * THUMBNAIL_HEIGHT) / INFORMATION_TILE_ROWS,
+    );
+    const endY = Math.floor(
+      ((tileY + 1) * THUMBNAIL_HEIGHT) / INFORMATION_TILE_ROWS,
+    );
+
+    for (let tileX = 0; tileX < INFORMATION_TILE_COLUMNS; tileX += 1) {
+      const startX = Math.floor(
+        (tileX * THUMBNAIL_WIDTH) / INFORMATION_TILE_COLUMNS,
+      );
+      const endX = Math.floor(
+        ((tileX + 1) * THUMBNAIL_WIDTH) / INFORMATION_TILE_COLUMNS,
+      );
+      let minimum = 255;
+      let maximum = 0;
+      let sum = 0;
+      let count = 0;
+
+      for (let y = startY; y < endY; y += 1) {
+        for (let x = startX; x < endX; x += 1) {
+          const value = pixels[y * THUMBNAIL_WIDTH + x];
+          minimum = Math.min(minimum, value);
+          maximum = Math.max(maximum, value);
+          sum += value;
+          count += 1;
+        }
+      }
+
+      if (
+        sum / count >= VISIBLE_LUMA_THRESHOLD ||
+        maximum - minimum >= VISIBLE_CONTRAST_THRESHOLD
+      ) {
+        informativeTileCount += 1;
+
+        if (informativeTileCount >= MINIMUM_INFORMATIVE_TILES) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+export function analyzeStableVisualFrames(
+  frames: GrayscaleFrame[],
+  options: { requireInformativeSharedScreen?: boolean } = {},
+): {
   duplicateCount: number;
   timestamps: number[];
 } {
@@ -139,6 +202,15 @@ export function analyzeStableVisualFrames(frames: GrayscaleFrame[]): {
 
     const acceptedCandidate = candidate;
     currentStableState = acceptedCandidate.pixels;
+
+    if (
+      options.requireInformativeSharedScreen &&
+      !isInformativeSharedScreenFrame(acceptedCandidate.pixels)
+    ) {
+      candidate = undefined;
+      continue;
+    }
+
     const repeatsAcceptedState = acceptedStates.some((acceptedState) =>
       isStable(
         compareGrayscaleFrames(acceptedCandidate.pixels, acceptedState),
