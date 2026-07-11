@@ -79,8 +79,8 @@ describe("getOrCreateWorkspaceForSessionUser", () => {
     set.mockReturnValueOnce({ where });
     where.mockResolvedValueOnce(undefined);
     insert.mockReturnValueOnce({ values });
-    values.mockReturnValueOnce({ onConflictDoUpdate });
-    onConflictDoUpdate.mockResolvedValueOnce(undefined);
+    values.mockReturnValueOnce({ onConflictDoNothing });
+    onConflictDoNothing.mockResolvedValueOnce(undefined);
 
     const { getOrCreateWorkspaceForSessionUser } = await import(
       "@/lib/workspace"
@@ -103,12 +103,8 @@ describe("getOrCreateWorkspaceForSessionUser", () => {
       role: "shared",
       userId: "user_123",
     });
-    expect(onConflictDoUpdate).toHaveBeenCalledWith({
+    expect(onConflictDoNothing).toHaveBeenCalledWith({
       target: expect.any(Array),
-      set: {
-        role: "member",
-        updatedAt: expect.any(Date),
-      },
     });
   });
 
