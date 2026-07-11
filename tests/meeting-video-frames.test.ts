@@ -1,4 +1,8 @@
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { mediaAssets } from "@/db/schema";
 
 const {
   analyzeStableVisualFrames,
@@ -54,6 +58,7 @@ const RECORDING_STARTED_AT = "2026-07-10T10:00:00.000Z";
 const VIDEO_URL = "https://cdn.recall.ai/video.mp4?token=video-secret";
 const EVENTS_URL =
   "https://us-east-1.recall.ai/events.json?token=event-secret";
+const SIGNED_EVENTS_URL = `${EVENTS_URL}&signature=signed-secret`;
 const MAX_EVENT_BYTES = 10 * 1024 * 1024;
 
 function mockMeeting(teamId = TEAM_ID) {
@@ -77,11 +82,32 @@ function mockMissingMeeting() {
 }
 
 function mockExistingObjectKeys(objectKeys: string[] = []) {
+  mockExistingAssets(
+    objectKeys.map((objectKey) => ({
+      bucket: "recordings",
+      objectKey,
+    })),
+  );
+}
+
+function mockExistingAssets(
+  assets: Array<{ bucket: string; objectKey: string }>,
+) {
   select.mockReturnValueOnce({
     from: () => ({
-      where: vi.fn().mockResolvedValue(
-        objectKeys.map((objectKey) => ({ objectKey })),
-      ),
+      where: vi.fn((condition: SQL) => {
+        const query = new PgDialect().sqlToQuery(condition);
+        const scopesCurrentBucket =
+          query.sql.includes('"media_assets"."bucket" =') &&
+          query.params.includes("recordings");
+        const matchingAssets = scopesCurrentBucket
+          ? assets.filter((asset) => asset.bucket === "recordings")
+          : assets;
+
+        return Promise.resolve(
+          matchingAssets.map((asset) => ({ objectKey: asset.objectKey })),
+        );
+      }),
     }),
   });
 }
@@ -263,7 +289,9 @@ describe("persistRecallMeetingVideoFrames", () => {
     ]);
     expect(onConflictDoNothing).toHaveBeenCalledTimes(2);
     for (const [conflict] of onConflictDoNothing.mock.calls) {
-      expect(conflict.target).toHaveLength(2);
+      expect(conflict).toEqual({
+        target: [mediaAssets.bucket, mediaAssets.objectKey],
+      });
     }
   });
 
@@ -317,6 +345,62 @@ describe("persistRecallMeetingVideoFrames", () => {
       "Unable to read Recall participant events",
     );
     expect((error as Error).message).not.toContain("event-secret");
+  });
+
+  it("throws a sanitized error for a non-ok participant event response", async () => {
+    mockMeeting();
+    mockArtifacts(SIGNED_EVENTS_URL);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("unavailable", { status: 503 })),
+    );
+
+    const error = await persist().catch((value: unknown) => value);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "Recall participant events request failed",
+    );
+    expect((error as Error).message).not.toContain("https://");
+    expect((error as Error).message).not.toContain("?");
+    expect((error as Error).message).not.toContain("signature");
+  });
+
+  it("rejects an HTTP participant events URL before fetching it", async () => {
+    mockMeeting();
+    mockArtifacts("http://us-east-1.recall.ai/events.json?signature=secret");
+    vi.stubGlobal("fetch", vi.fn());
+
+    const error = await persist().catch((value: unknown) => value);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "Recall participant events URL is unsafe",
+    );
+    expect((error as Error).message).not.toContain("signature");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("sanitizes a rejected fetch error containing the signed URL", async () => {
+    mockMeeting();
+    mockArtifacts(SIGNED_EVENTS_URL);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(
+        new Error(`request failed for ${SIGNED_EVENTS_URL}`),
+      ),
+    );
+
+    const error = await persist().catch((value: unknown) => value);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "Unable to fetch Recall participant events",
+    );
+    expect((error as Error).message).not.toContain("https://");
+    expect((error as Error).message).not.toContain("?");
+    expect((error as Error).message).not.toContain("signature");
+    expect((error as Error).message).not.toContain("signed-secret");
   });
 
   it("rejects an unsafe participant events URL without fetching it", async () => {
@@ -427,6 +511,55 @@ describe("persistRecallMeetingVideoFrames", () => {
       videoUrl: VIDEO_URL,
     });
     expect(putObject).toHaveBeenCalledTimes(1);
+    expect(values).toHaveBeenCalledTimes(1);
+  });
+
+  it("extracts and uploads when the exact object key exists only in another bucket", async () => {
+    mockMeeting();
+    mockArtifacts();
+    const objectKey =
+      "teams/team_123/meetings/meeting_123/assets/recall-recording_123-screen-share-v1-3000.jpg";
+    mockExistingAssets([{ bucket: "old-bucket", objectKey }]);
+    stubEventResponse(
+      JSON.stringify([
+        {
+          action: "screenshare_on",
+          participant: { id: 1 },
+          timestamp: { relative: 0 },
+        },
+        {
+          action: "screenshare_off",
+          participant: { id: 1 },
+          timestamp: { relative: 10 },
+        },
+      ]),
+    );
+    sampleScreenShareFrames.mockResolvedValue([]);
+    analyzeStableVisualFrames.mockReturnValue({
+      duplicateCount: 0,
+      timestamps: [3_000],
+    });
+    const jpeg = new Uint8Array([1, 2, 3]);
+    extractJpegFrame.mockResolvedValue(jpeg);
+    const onConflictDoNothing = vi.fn().mockResolvedValue(undefined);
+    const values = vi.fn().mockReturnValue({ onConflictDoNothing });
+    insert.mockReturnValue({ values });
+
+    await expect(persist()).resolves.toEqual({
+      duplicateCount: 0,
+      frameCount: 1,
+      intervalCount: 1,
+    });
+
+    expect(extractJpegFrame).toHaveBeenCalledWith({
+      timestampMs: 3_000,
+      videoUrl: VIDEO_URL,
+    });
+    expect(putObject).toHaveBeenCalledWith({
+      body: jpeg,
+      contentType: "image/jpeg",
+      key: objectKey,
+    });
     expect(values).toHaveBeenCalledTimes(1);
   });
 

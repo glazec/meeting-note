@@ -103,6 +103,7 @@ export async function persistRecallMeetingVideoFrames(input: {
         eq(mediaAssets.meetingId, input.meetingId),
         eq(mediaAssets.source, "recall"),
         eq(mediaAssets.type, "video_frame"),
+        eq(mediaAssets.bucket, env.R2_BUCKET),
       ),
     );
   const existingObjectKeys = new Set(
