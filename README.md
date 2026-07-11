@@ -163,7 +163,7 @@ curl --fail http://127.0.0.1:3001/health
 IMAGE_WORKER_URL=https://your-worker-domain npm run inngest:sync:image-worker
 ```
 
-The extraction function has concurrency one and two retries. In the Railway dashboard, enable Serverless, set the service memory limit to 1 GB, and set a 10 dollar monthly workspace hard limit before production use. Do not move the Next.js web service from Vercel to Railway.
+The extraction function has concurrency one and two retries. In the Railway dashboard, enable Serverless and set the service memory limit to 1 GB. A 10 dollar monthly workspace hard limit is appropriate only when this worker has a dedicated Railway workspace. On a shared workspace, use project usage alerts instead because a workspace hard limit can suspend unrelated services. Do not move the Next.js web service from Vercel to Railway.
 
 ## Local Tunnel
 

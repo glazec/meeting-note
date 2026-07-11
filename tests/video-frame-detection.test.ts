@@ -88,6 +88,35 @@ describe("isInformativeSharedScreenFrame", () => {
 
     expect(isInformativeSharedScreenFrame(darkSlide)).toBe(true);
   });
+
+  it("excludes a stable presenter-only state from shared screen analysis", () => {
+    const presenterOnly = pixels(0);
+    const darkSlide = pixels(0);
+
+    for (let y = 0; y < 18; y += 1) {
+      for (let x = 120; x < WIDTH; x += 1) {
+        presenterOnly[y * WIDTH + x] = (x + y) % 2 === 0 ? 40 : 180;
+      }
+    }
+    for (let tile = 0; tile < 6; tile += 1) {
+      const startX = tile * 20 + 2;
+      darkSlide.fill(220, 36 * WIDTH + startX, 36 * WIDTH + startX + 14);
+    }
+
+    expect(
+      analyzeStableVisualFrames(
+        [
+          { pixels: presenterOnly, timestampMs: 0 },
+          { pixels: presenterOnly, timestampMs: 1_000 },
+          { pixels: presenterOnly, timestampMs: 2_000 },
+          { pixels: darkSlide, timestampMs: 3_000 },
+          { pixels: darkSlide, timestampMs: 4_000 },
+          { pixels: darkSlide, timestampMs: 5_000 },
+        ],
+        { requireInformativeSharedScreen: true },
+      ),
+    ).toEqual({ duplicateCount: 0, timestamps: [5_000] });
+  });
 });
 
 describe("selectStableVisualFrames", () => {

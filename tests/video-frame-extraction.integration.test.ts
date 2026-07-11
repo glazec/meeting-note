@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { buildScreenShareIntervals } from "@/lib/recall-screen-share";
-import { selectStableVisualFrames } from "@/lib/video-frame-detection";
+import { analyzeStableVisualFrames } from "@/lib/video-frame-detection";
 import {
   createVideoFrameFfmpegAdapter,
   type ProcessRunOptions,
@@ -64,7 +64,9 @@ describeMedia(
         intervals,
         videoUrl: trustedVideoUrl,
       });
-      const timestamps = selectStableVisualFrames(samples);
+      const timestamps = analyzeStableVisualFrames(samples, {
+        requireInformativeSharedScreen: true,
+      }).timestamps;
 
       expect(durationMs).toBe(13_000);
       expect(intervals).toEqual([{ startMs: 3_000, endMs: 13_000 }]);
