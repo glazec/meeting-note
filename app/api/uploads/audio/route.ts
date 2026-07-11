@@ -18,7 +18,10 @@ import {
 } from "@/lib/transcription-records";
 import { SharedOnlyAccessError } from "@/lib/access-errors";
 import { titleFromUploadFileName } from "@/lib/upload-titles";
-import { getUploadMediaFromFile } from "@/lib/upload-media";
+import {
+  getUploadMediaFromFile,
+  isUploadMediaSizeAllowed,
+} from "@/lib/upload-media";
 
 export const runtime = "nodejs";
 
@@ -45,6 +48,13 @@ export async function POST(request: Request) {
     return Response.json(
       { error: "Invalid audio upload request" },
       { status: 400 },
+    );
+  }
+
+  if (!isUploadMediaSizeAllowed(file.size)) {
+    return Response.json(
+      { error: "Recording file must be 1 GB or smaller" },
+      { status: 413 },
     );
   }
 

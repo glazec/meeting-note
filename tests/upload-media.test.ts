@@ -5,8 +5,20 @@ import {
   getUploadMediaFromFile,
   uploadMediaAccept,
 } from "@/lib/upload-media";
+import * as uploadMedia from "@/lib/upload-media";
 
 describe("upload media support", () => {
+  it("enforces the shared recording upload size limit", () => {
+    const candidate = uploadMedia as typeof uploadMedia & {
+      isUploadMediaSizeAllowed: (size: number | undefined) => boolean;
+    };
+
+    expect(candidate.isUploadMediaSizeAllowed).toBeTypeOf("function");
+    expect(candidate.isUploadMediaSizeAllowed(1_000_000_000)).toBe(true);
+    expect(candidate.isUploadMediaSizeAllowed(1_000_000_001)).toBe(false);
+    expect(candidate.isUploadMediaSizeAllowed(undefined)).toBe(false);
+  });
+
   it("recognizes M4A audio uploads from file metadata", () => {
     expect(
       getUploadMediaFromFile(

@@ -151,6 +151,32 @@ describe("POST /api/uploads/audio", () => {
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
   });
 
+  it("rejects oversized fallback uploads before buffering the file", async () => {
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    const file = new File(["small body"], "oversized.mp3", {
+      type: "audio/mpeg",
+    });
+    Object.defineProperty(file, "size", { value: 1_000_000_001 });
+    const formData = {
+      get: (name: string) => (name === "meeting-audio" ? file : null),
+    };
+    const { POST } = await import("@/app/api/uploads/audio/route");
+
+    const response = await POST({
+      formData: vi.fn().mockResolvedValue(formData),
+    } as unknown as Request);
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: "Recording file must be 1 GB or smaller",
+    });
+    expect(putObject).not.toHaveBeenCalled();
+  });
+
   it("uses the supplied meeting start time for fallback MP3 uploads", async () => {
     vi.spyOn(crypto, "randomUUID").mockReturnValue(
       "11111111-1111-4111-8111-111111111111",

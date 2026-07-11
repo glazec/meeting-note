@@ -1,6 +1,7 @@
 import {
   GetObjectCommand,
   HeadObjectCommand,
+  DeleteObjectCommand,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -30,6 +31,10 @@ type CreateReadUrlInput = {
 };
 
 type GetObjectMetadataInput = {
+  key: string;
+};
+
+type DeleteObjectInput = {
   key: string;
 };
 
@@ -148,6 +153,18 @@ export async function getObjectMetadata(input: GetObjectMetadataInput) {
 
     throw error;
   }
+}
+
+export async function deleteObject(input: DeleteObjectInput) {
+  const client = createR2Client();
+  const env = parseR2Env(process.env);
+
+  await client.send(
+    new DeleteObjectCommand({
+      Bucket: env.R2_BUCKET,
+      Key: input.key,
+    }),
+  );
 }
 
 export async function putObject(input: PutObjectInput) {

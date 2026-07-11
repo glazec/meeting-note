@@ -20,6 +20,7 @@ describe("UploadDropzone", () => {
     expect(html).toContain(".m4a");
     expect(html).toContain("video/mp4");
     expect(html).toContain("video/quicktime");
+    expect(html).toContain("1 GB maximum");
   });
 
   it("allows users to set the uploaded meeting start time", () => {

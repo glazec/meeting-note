@@ -9,6 +9,7 @@ import {
 } from "@/lib/workspace";
 import {
   buildPendingUploadObjectKey,
+  deleteObject,
   getObjectMetadata,
   ObjectNotFoundError,
   UnsafeObjectKeySegmentError,
@@ -19,7 +20,10 @@ import {
 } from "@/lib/transcription-records";
 import { SharedOnlyAccessError } from "@/lib/access-errors";
 import { titleFromUploadFileName } from "@/lib/upload-titles";
-import { getSupportedUploadMedia } from "@/lib/upload-media";
+import {
+  getSupportedUploadMedia,
+  isUploadMediaSizeAllowed,
+} from "@/lib/upload-media";
 
 export const runtime = "nodejs";
 
@@ -65,6 +69,18 @@ export async function POST(request: Request) {
     });
 
     const objectMetadata = await getObjectMetadata({ key });
+    if (!isUploadMediaSizeAllowed(objectMetadata.contentLength)) {
+      try {
+        await deleteObject({ key });
+      } catch {
+        // Reject the upload even when best-effort object cleanup is unavailable.
+      }
+      return Response.json(
+        { error: "Recording file must be 1 GB or smaller" },
+        { status: 413 },
+      );
+    }
+
     if (
       objectMetadata.contentType &&
       objectMetadata.contentType.toLowerCase() !== uploadMedia.contentType

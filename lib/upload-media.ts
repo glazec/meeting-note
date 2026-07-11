@@ -6,6 +6,17 @@ export type UploadMedia = {
   kind: UploadMediaKind;
 };
 
+export const MAX_UPLOAD_MEDIA_BYTES = 1_000_000_000;
+
+export function isUploadMediaSizeAllowed(size: number | undefined) {
+  return (
+    typeof size === "number" &&
+    Number.isSafeInteger(size) &&
+    size > 0 &&
+    size <= MAX_UPLOAD_MEDIA_BYTES
+  );
+}
+
 export const supportedUploadMedia = [
   { extension: "mp3", contentType: "audio/mpeg", kind: "audio" },
   { extension: "m4a", contentType: "audio/mp4", kind: "audio" },

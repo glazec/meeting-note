@@ -7,7 +7,10 @@ import {
   createUploadUrl,
   UnsafeObjectKeySegmentError,
 } from "@/lib/r2";
-import { getSupportedUploadMedia } from "@/lib/upload-media";
+import {
+  getSupportedUploadMedia,
+  isUploadMediaSizeAllowed,
+} from "@/lib/upload-media";
 import {
   assertCanCreateMeetings,
   getOrCreateWorkspaceForSessionUser,
@@ -18,6 +21,7 @@ export const runtime = "nodejs";
 const uploadRequestSchema = z.strictObject({
   extension: z.string().trim().toLowerCase().min(1),
   contentType: z.string().trim().toLowerCase().min(1),
+  fileSize: z.number().int().positive(),
 });
 
 export async function POST(request: Request) {
@@ -35,6 +39,13 @@ export async function POST(request: Request) {
 
   if (!result.success || !uploadMedia) {
     return Response.json({ error: "Invalid upload request" }, { status: 400 });
+  }
+
+  if (!isUploadMediaSizeAllowed(result.data.fileSize)) {
+    return Response.json(
+      { error: "Recording file must be 1 GB or smaller" },
+      { status: 413 },
+    );
   }
 
   try {

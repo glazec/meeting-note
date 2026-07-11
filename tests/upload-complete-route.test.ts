@@ -4,6 +4,7 @@ const getCurrentUser = vi.fn();
 const getWorkspace = vi.fn();
 const assertCanCreateMeetings = vi.fn();
 const getObjectMetadata = vi.fn();
+const deleteObject = vi.fn();
 const createUploadedAudioTranscription = vi.fn();
 const createUploadedVideoTranscription = vi.fn();
 const revalidatePath = vi.fn();
@@ -33,6 +34,7 @@ vi.mock("@/lib/r2", async (importOriginal) => {
 
   return {
     ...actual,
+    deleteObject,
     getObjectMetadata,
   };
 });
@@ -63,6 +65,7 @@ describe("POST /api/uploads/complete", () => {
     getCurrentUser.mockReset();
     getWorkspace.mockReset();
     getObjectMetadata.mockReset();
+    deleteObject.mockReset();
     createUploadedAudioTranscription.mockReset();
     createUploadedVideoTranscription.mockReset();
     revalidatePath.mockReset();
@@ -115,6 +118,7 @@ describe("POST /api/uploads/complete", () => {
       contentLength: 1024,
       contentType: "audio/mpeg",
     });
+    deleteObject.mockResolvedValue(undefined);
     createUploadedAudioTranscription.mockResolvedValue({
       meetingId: "22222222-2222-4222-8222-222222222222",
       mediaAssetId: "33333333-3333-4333-8333-333333333333",
@@ -157,6 +161,38 @@ describe("POST /api/uploads/complete", () => {
       },
     });
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
+  });
+
+  it("rejects an uploaded object larger than the shared media limit", async () => {
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({
+      userId: "user_123",
+      teamId: "team_123",
+      domain: "example.com",
+    });
+    assertCanCreateMeetings.mockResolvedValue(undefined);
+    getObjectMetadata.mockResolvedValue({
+      contentLength: 1_000_000_001,
+      contentType: "audio/mpeg",
+    });
+
+    const response = await postUploadComplete({
+      uploadId: "11111111-1111-4111-8111-111111111111",
+    });
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: "Recording file must be 1 GB or smaller",
+    });
+    expect(createUploadedAudioTranscription).not.toHaveBeenCalled();
+    expect(deleteObject).toHaveBeenCalledWith({
+      key: "users/user_123/uploads/11111111-1111-4111-8111-111111111111.mp3",
+    });
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("uses a cleaned filename as the uploaded meeting title", async () => {

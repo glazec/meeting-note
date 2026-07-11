@@ -15,7 +15,11 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getUploadMediaFromFile, uploadMediaAccept } from "@/lib/upload-media";
+import {
+  getUploadMediaFromFile,
+  isUploadMediaSizeAllowed,
+  uploadMediaAccept,
+} from "@/lib/upload-media";
 
 type UploadState = "idle" | "uploading" | "complete" | "error";
 
@@ -50,6 +54,12 @@ export function UploadDropzone() {
       return;
     }
 
+    if (!isUploadMediaSizeAllowed(selectedFile.size)) {
+      setState("error");
+      setMessage("Recording file must be 1 GB or smaller");
+      return;
+    }
+
     const uploadMedia = getUploadMediaFromFile(selectedFile);
 
     if (!uploadMedia) {
@@ -73,6 +83,7 @@ export function UploadDropzone() {
         body: JSON.stringify({
           extension: uploadMedia.extension,
           contentType: uploadMedia.contentType,
+          fileSize: selectedFile.size,
         }),
       });
 
@@ -170,6 +181,7 @@ export function UploadDropzone() {
               className="bg-background"
               aria-invalid={state === "error" && !startTimeInvalid}
             />
+            <p className="text-xs text-muted-foreground">1 GB maximum.</p>
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor="meeting-start-time">Start time</Label>

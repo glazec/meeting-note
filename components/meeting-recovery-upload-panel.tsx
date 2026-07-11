@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import {
   audioUploadMediaAccept,
   getUploadMediaFromFile,
+  isUploadMediaSizeAllowed,
 } from "@/lib/upload-media";
 
 const transcriptAccept = ".txt,.srt,.vtt,text/plain,text/vtt";
@@ -70,6 +71,11 @@ export function MeetingRecoveryUploadPanel({
 
     if (!audioFile || audioFile.size === 0) {
       showError("Select a recording file first");
+      return;
+    }
+
+    if (!isUploadMediaSizeAllowed(audioFile.size)) {
+      showError("Recording file must be 1 GB or smaller");
       return;
     }
 
@@ -186,6 +192,7 @@ export function MeetingRecoveryUploadPanel({
               onChange={handleAudioChange}
               className="bg-background"
             />
+            <p className="text-xs text-muted-foreground">1 GB maximum.</p>
           </div>
           {audioFile ? (
             <p className="break-all text-xs text-muted-foreground">
@@ -280,6 +287,7 @@ async function uploadRecoveryAudio({
     body: JSON.stringify({
       extension: uploadMedia.extension,
       contentType: uploadMedia.contentType,
+      fileSize: file.size,
     }),
   });
 

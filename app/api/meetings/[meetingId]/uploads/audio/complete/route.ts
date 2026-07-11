@@ -9,11 +9,15 @@ import {
 } from "@/lib/meeting-recovery-uploads";
 import {
   buildPendingUploadObjectKey,
+  deleteObject,
   getObjectMetadata,
   ObjectNotFoundError,
   UnsafeObjectKeySegmentError,
 } from "@/lib/r2";
-import { getSupportedUploadMedia } from "@/lib/upload-media";
+import {
+  getSupportedUploadMedia,
+  isUploadMediaSizeAllowed,
+} from "@/lib/upload-media";
 import { getOrCreateWorkspaceForSessionUser } from "@/lib/workspace";
 
 export const runtime = "nodejs";
@@ -61,6 +65,18 @@ export async function POST(
       extension: uploadMedia.extension,
     });
     const objectMetadata = await getObjectMetadata({ key: objectKey });
+
+    if (!isUploadMediaSizeAllowed(objectMetadata.contentLength)) {
+      try {
+        await deleteObject({ key: objectKey });
+      } catch {
+        // Reject the upload even when best-effort object cleanup is unavailable.
+      }
+      return Response.json(
+        { error: "Recording file must be 1 GB or smaller" },
+        { status: 413 },
+      );
+    }
 
     if (
       objectMetadata.contentType &&

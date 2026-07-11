@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const getCurrentUser = vi.fn();
 const getWorkspace = vi.fn();
 const getObjectMetadata = vi.fn();
+const deleteObject = vi.fn();
 const putObject = vi.fn();
 const completeMeetingAudioUpload = vi.fn();
 const completeManualTranscriptUpload = vi.fn();
@@ -22,6 +23,7 @@ vi.mock("@/lib/r2", async (importOriginal) => {
 
   return {
     ...actual,
+    deleteObject,
     getObjectMetadata,
     putObject,
   };
@@ -102,6 +104,7 @@ describe("meeting recovery upload routes", () => {
     completeMeetingAudioUpload.mockReset();
     getCurrentUser.mockReset();
     getObjectMetadata.mockReset();
+    deleteObject.mockReset();
     getWorkspace.mockReset();
     putObject.mockReset();
     revalidatePath.mockReset();
@@ -124,6 +127,7 @@ describe("meeting recovery upload routes", () => {
       contentLength: 2048,
       contentType: "audio/mpeg",
     });
+    deleteObject.mockResolvedValue(undefined);
     completeMeetingAudioUpload.mockResolvedValue({
       mediaAssetId: "asset_123",
       meetingId: "meeting_123",
@@ -166,6 +170,39 @@ describe("meeting recovery upload routes", () => {
     });
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
     expect(revalidatePath).toHaveBeenCalledWith("/meetings/meeting_123");
+  });
+
+  it("rejects oversized recovery uploads before attaching them", async () => {
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({
+      userId: "user_123",
+      teamId: "team_123",
+      domain: "example.com",
+    });
+    getObjectMetadata.mockResolvedValue({
+      contentLength: 1_000_000_001,
+      contentType: "audio/mpeg",
+    });
+
+    const response = await postAudioComplete({
+      uploadId: "upload_123",
+      extension: "mp3",
+      contentType: "audio/mpeg",
+    });
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: "Recording file must be 1 GB or smaller",
+    });
+    expect(completeMeetingAudioUpload).not.toHaveBeenCalled();
+    expect(deleteObject).toHaveBeenCalledWith({
+      key: "users/user_123/uploads/upload_123.mp3",
+    });
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("attaches an uploaded M4A to the existing meeting and queues transcription", async () => {

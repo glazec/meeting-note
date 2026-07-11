@@ -40,6 +40,7 @@ async function postUpload(body: unknown) {
 const validBody = {
   extension: "mp3",
   contentType: "audio/mpeg",
+  fileSize: 1024,
 };
 
 describe("POST /api/upload", () => {
@@ -105,6 +106,25 @@ describe("POST /api/upload", () => {
     expect(createUploadUrl).not.toHaveBeenCalled();
   });
 
+  it("rejects oversized files before creating an upload URL", async () => {
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+
+    const response = await postUpload({
+      ...validBody,
+      fileSize: 1_000_000_001,
+    });
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: "Recording file must be 1 GB or smaller",
+    });
+    expect(createUploadUrl).not.toHaveBeenCalled();
+  });
+
   it("returns a key scoped to the authenticated user namespace", async () => {
     vi.spyOn(crypto, "randomUUID").mockReturnValue(
       "11111111-1111-4111-8111-111111111111",
@@ -156,6 +176,7 @@ describe("POST /api/upload", () => {
     const response = await postUpload({
       extension: "m4a",
       contentType: "audio/mp4",
+      fileSize: 2048,
     });
 
     expect(response.status).toBe(200);
@@ -190,6 +211,7 @@ describe("POST /api/upload", () => {
     const response = await postUpload({
       extension: "mp4",
       contentType: "video/mp4",
+      fileSize: 4096,
     });
 
     expect(response.status).toBe(200);
@@ -218,6 +240,7 @@ describe("POST /api/upload", () => {
     const response = await postUpload({
       extension: "mp3",
       contentType: "audio/mpeg",
+      fileSize: 1024,
       teamId: "team_other",
     });
 
