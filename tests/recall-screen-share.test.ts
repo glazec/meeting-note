@@ -71,6 +71,20 @@ describe("parseRecallParticipantEvents", () => {
       ]),
     ).toThrow();
   });
+
+  it.each([
+    ["null member", [null]],
+    ["empty object", [{}]],
+    ["nonstring action", [{ action: 123 }]],
+    ["empty participant id", [event("screenshare_on", "", 10)]],
+    ["NaN participant id", [event("screenshare_on", Number.NaN, 10)]],
+    [
+      "infinite participant id",
+      [event("screenshare_on", Number.POSITIVE_INFINITY, 10)],
+    ],
+  ])("throws for a malformed artifact containing a %s", (_label, input) => {
+    expect(() => parseRecallParticipantEvents(input)).toThrow();
+  });
 });
 
 describe("buildScreenShareIntervals", () => {
@@ -84,6 +98,41 @@ describe("buildScreenShareIntervals", () => {
 
     expect(buildScreenShareIntervals({ durationMs: 60_000, events })).toEqual([
       { startMs: 10_000, endMs: 25_000 },
+    ]);
+  });
+
+  it("pairs out of order events for the same participant", () => {
+    const events = parseRecallParticipantEvents([
+      event("screenshare_off", "alice", 20),
+      event("screenshare_on", "alice", 10),
+    ]);
+
+    expect(buildScreenShareIntervals({ durationMs: 60_000, events })).toEqual([
+      { startMs: 10_000, endMs: 20_000 },
+    ]);
+  });
+
+  it("pairs and merges out of order events across participants", () => {
+    const events = parseRecallParticipantEvents([
+      event("screenshare_off", "alice", 20),
+      event("screenshare_off", "bob", 25),
+      event("screenshare_on", "bob", 12),
+      event("screenshare_on", "alice", 10),
+    ]);
+
+    expect(buildScreenShareIntervals({ durationMs: 60_000, events })).toEqual([
+      { startMs: 10_000, endMs: 25_000 },
+    ]);
+  });
+
+  it("preserves source order for events at the same timestamp", () => {
+    const events = parseRecallParticipantEvents([
+      event("screenshare_off", "alice", 10),
+      event("screenshare_on", "alice", 10),
+    ]);
+
+    expect(buildScreenShareIntervals({ durationMs: 60_000, events })).toEqual([
+      { startMs: 10_000, endMs: 60_000 },
     ]);
   });
 

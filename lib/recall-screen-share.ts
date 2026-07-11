@@ -24,7 +24,12 @@ export function parseRecallParticipantEvents(
 
   for (const value of input) {
     const record = getRecord(value);
-    const action = record?.action;
+
+    if (!record || typeof record.action !== "string") {
+      throw new Error("Malformed Recall participant event");
+    }
+
+    const action = record.action;
 
     if (action !== "screenshare_on" && action !== "screenshare_off") {
       continue;
@@ -34,9 +39,12 @@ export function parseRecallParticipantEvents(
     const timestamp = getRecord(record?.timestamp);
     const participantId = participant?.id;
     const relative = timestamp?.relative;
+    const hasValidParticipantId =
+      (typeof participantId === "string" && participantId.trim().length > 0) ||
+      (typeof participantId === "number" && Number.isFinite(participantId));
 
     if (
-      (typeof participantId !== "string" && typeof participantId !== "number") ||
+      !hasValidParticipantId ||
       typeof relative !== "number" ||
       !Number.isFinite(relative) ||
       relative < 0
@@ -66,8 +74,15 @@ export function buildScreenShareIntervals(input: {
 
   const activeShares = new Map<string | number, number>();
   const intervals: ScreenShareInterval[] = [];
+  const orderedEvents = events
+    .map((event, sourceIndex) => ({ event, sourceIndex }))
+    .sort(
+      (left, right) =>
+        left.event.timestamp.relative - right.event.timestamp.relative ||
+        left.sourceIndex - right.sourceIndex,
+    );
 
-  for (const event of events) {
+  for (const { event } of orderedEvents) {
     const participantId = event.participant.id;
     const timestampMs = clamp(event.timestamp.relative * 1000, durationMs);
 
