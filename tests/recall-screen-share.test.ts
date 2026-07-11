@@ -107,6 +107,17 @@ describe("buildScreenShareIntervals", () => {
     );
   });
 
+  it("keeps numeric and string participant ids distinct", () => {
+    const events = parseRecallParticipantEvents([
+      event("screenshare_on", 7, 10),
+      event("screenshare_off", "7", 20),
+    ]);
+
+    expect(buildScreenShareIntervals({ durationMs: 60_000, events })).toEqual([
+      { startMs: 10_000, endMs: 60_000 },
+    ]);
+  });
+
   it("keeps the earliest start for duplicate on events", () => {
     const events = parseRecallParticipantEvents([
       event("screenshare_on", "alice", 10),

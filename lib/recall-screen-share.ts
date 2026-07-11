@@ -64,11 +64,11 @@ export function buildScreenShareIntervals(input: {
     throw new Error("Recording duration must be finite and nonnegative");
   }
 
-  const activeShares = new Map<string, number>();
+  const activeShares = new Map<string | number, number>();
   const intervals: ScreenShareInterval[] = [];
 
   for (const event of events) {
-    const participantId = String(event.participant.id);
+    const participantId = event.participant.id;
     const timestampMs = clamp(event.timestamp.relative * 1000, durationMs);
 
     if (event.action === "screenshare_on") {
