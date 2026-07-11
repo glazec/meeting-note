@@ -1,74 +1,80 @@
-import { spawn } from "node:child_process";
-
 import { createReadUrl, putObject } from "@/lib/r2";
+import {
+  createProcessRunner,
+  type ProcessRunner,
+} from "@/lib/video-frame-ffmpeg";
 
 type ConvertVideoObjectToAudioInput = {
   sourceObjectKey: string;
   audioObjectKey: string;
 };
 
-export async function convertVideoObjectToAudio(
-  input: ConvertVideoObjectToAudioInput,
+type MediaConversionDependencies = {
+  createReadUrl: (input: { key: string }) => Promise<string>;
+  ffmpegPath: string;
+  putObject: (input: {
+    key: string;
+    body: Uint8Array;
+    contentType: string;
+  }) => Promise<void>;
+  runProcess: ProcessRunner;
+};
+
+const MEDIA_CONVERSION_TIMEOUT_MS = 2 * 60 * 60 * 1_000;
+const MAX_CONVERTED_AUDIO_BYTES = 256 * 1024 * 1024;
+
+export function createMediaConversionAdapter(
+  dependencies: MediaConversionDependencies,
 ) {
-  const sourceUrl = await createReadUrl({ key: input.sourceObjectKey });
-  const body = await runFfmpeg([
-    "-hide_banner",
-    "-loglevel",
-    "error",
-    "-i",
-    sourceUrl,
-    "-vn",
-    "-map",
-    "0:a:0",
-    "-acodec",
-    "libmp3lame",
-    "-ar",
-    "44100",
-    "-ac",
-    "2",
-    "-b:a",
-    "128k",
-    "-f",
-    "mp3",
-    "pipe:1",
-  ]);
+  return async function convertVideoObjectToAudio(
+    input: ConvertVideoObjectToAudioInput,
+  ) {
+    const sourceUrl = await dependencies.createReadUrl({
+      key: input.sourceObjectKey,
+    });
+    const body = await dependencies.runProcess(
+      dependencies.ffmpegPath,
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        sourceUrl,
+        "-vn",
+        "-map",
+        "0:a:0",
+        "-acodec",
+        "libmp3lame",
+        "-ar",
+        "44100",
+        "-ac",
+        "2",
+        "-b:a",
+        "128k",
+        "-f",
+        "mp3",
+        "pipe:1",
+      ],
+      {
+        maxStdoutBytes: MAX_CONVERTED_AUDIO_BYTES,
+        timeoutMs: MEDIA_CONVERSION_TIMEOUT_MS,
+      },
+    );
 
-  await putObject({
-    key: input.audioObjectKey,
-    body,
-    contentType: "audio/mpeg",
-  });
+    await dependencies.putObject({
+      key: input.audioObjectKey,
+      body,
+      contentType: "audio/mpeg",
+    });
+  };
 }
 
-function runFfmpeg(args: string[]) {
-  return new Promise<Uint8Array>((resolve, reject) => {
-    const ffmpeg = getFfmpegPath();
-    const process = spawn(ffmpeg, args, {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const stdoutChunks: Buffer[] = [];
-    let stderr = "";
-
-    process.stdout.on("data", (chunk: Buffer) => {
-      stdoutChunks.push(chunk);
-    });
-
-    process.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf8");
-      stderr = stderr.slice(-2000);
-    });
-
-    process.on("error", reject);
-    process.on("close", (code) => {
-      if (code === 0) {
-        resolve(new Uint8Array(Buffer.concat(stdoutChunks)));
-        return;
-      }
-
-      reject(new Error(stderr.trim() || `ffmpeg exited with code ${code}`));
-    });
-  });
-}
+export const convertVideoObjectToAudio = createMediaConversionAdapter({
+  createReadUrl,
+  ffmpegPath: getFfmpegPath(),
+  putObject,
+  runProcess: createProcessRunner(),
+});
 
 function getFfmpegPath() {
   return (
