@@ -1459,6 +1459,72 @@ describe("vendor job creation", () => {
   });
 
   it.each([
+    [
+      "a malformed nonempty video URL",
+      "not-a-video-url",
+      "https://recall.example.com/events.json",
+      "2026-07-10T10:00:00.000Z",
+    ],
+    [
+      "a malformed nonempty participant events URL",
+      "https://recall.example.com/video.mp4",
+      "not-an-events-url",
+      "2026-07-10T10:00:00.000Z",
+    ],
+    [
+      "a malformed nonempty recording timestamp",
+      "https://recall.example.com/video.mp4",
+      "https://recall.example.com/events.json",
+      "July 10, 2026",
+    ],
+    [
+      "a non-string video URL",
+      123,
+      "https://recall.example.com/events.json",
+      "2026-07-10T10:00:00.000Z",
+    ],
+    [
+      "a non-string participant events URL",
+      "https://recall.example.com/video.mp4",
+      { url: "https://recall.example.com/events.json" },
+      "2026-07-10T10:00:00.000Z",
+    ],
+    [
+      "a non-string recording timestamp",
+      "https://recall.example.com/video.mp4",
+      "https://recall.example.com/events.json",
+      true,
+    ],
+  ])(
+    "returns null for %s",
+    (_case, videoUrl, participantEventsUrl, recordingStartedAt) => {
+      expect(
+        findRecallVideoFrameArtifacts(
+          {
+            recordings: [
+              {
+                id: "recording_123",
+                started_at: recordingStartedAt,
+                media_shortcuts: {
+                  video_mixed: {
+                    data: { download_url: videoUrl },
+                  },
+                  participant_events: {
+                    data: {
+                      participant_events_download_url: participantEventsUrl,
+                    },
+                  },
+                },
+              },
+            ],
+          },
+          "recording_123",
+        ),
+      ).toBeNull();
+    },
+  );
+
+  it.each([
     null,
     {},
     { recordings: {} },

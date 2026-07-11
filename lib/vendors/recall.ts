@@ -148,6 +148,12 @@ const recallCalendarEventBotDeleteInputSchema = z.object({
   calendarEventId: z.string().trim().min(1),
 });
 
+const recallVideoFrameArtifactsSchema = z.object({
+  participantEventsUrl: z.url(),
+  recordingStartedAt: z.iso.datetime(),
+  videoUrl: z.url(),
+});
+
 const optionalRecallApiBaseUrl = z.preprocess(
   (value) =>
     typeof value === "string" && value.trim() === "" ? undefined : value,
@@ -820,21 +826,19 @@ export function findRecallVideoFrameArtifacts(
   const mediaShortcuts = getRecord(recording?.media_shortcuts);
   const participantEvents = getRecord(mediaShortcuts?.participant_events);
   const participantEventsData = getRecord(participantEvents?.data);
-  const participantEventsUrl = getString(
-    participantEventsData?.participant_events_download_url,
-  );
-  const recordingStartedAt = getString(recording?.started_at);
-  const videoUrl = getDownloadUrl(mediaShortcuts?.video_mixed);
+  const parsedArtifacts = recallVideoFrameArtifactsSchema.safeParse({
+    participantEventsUrl: getString(
+      participantEventsData?.participant_events_download_url,
+    ),
+    recordingStartedAt: getString(recording?.started_at),
+    videoUrl: getDownloadUrl(mediaShortcuts?.video_mixed),
+  });
 
-  if (!participantEventsUrl || !recordingStartedAt || !videoUrl) {
+  if (!parsedArtifacts.success) {
     return null;
   }
 
-  return {
-    participantEventsUrl,
-    recordingStartedAt,
-    videoUrl,
-  };
+  return parsedArtifacts.data;
 }
 
 export function findRecallSpeakerTimelineUrl(
