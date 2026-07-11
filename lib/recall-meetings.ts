@@ -4,7 +4,6 @@ import { db } from "@/db/client";
 import { meetings, transcriptJobs } from "@/db/schema";
 import { inngest } from "@/inngest/client";
 import { fetchAndPersistRecallParticipantTimeline } from "@/lib/meeting-participant-timeline";
-import { persistRecallBotScreenshots } from "@/lib/meeting-screenshots";
 import { isRecallDesktopSdkFallbackIntent } from "@/lib/local-recorder-records";
 import { createRecallRecordingTranscription } from "@/lib/transcription-records";
 import type { normalizeRecallWebhook } from "@/lib/vendors/recall";
@@ -99,6 +98,22 @@ export async function applyRecallMeetingEvent(event: RecallWebhookEvent) {
     .where(eq(meetings.id, update.meetingId));
 
   if (
+    update.recallBotId &&
+    update.recallRecordingId &&
+    shouldQueueRecallVideoFrames(event)
+  ) {
+    await inngest.send({
+      id: `video-frames:${update.recallRecordingId}:${getVideoFrameReadiness(event)}`,
+      name: "meeting/extract.video-frames",
+      data: {
+        meetingId: update.meetingId,
+        recallBotId: update.recallBotId,
+        recallRecordingId: update.recallRecordingId,
+      },
+    });
+  }
+
+  if (
     status === "processing" &&
     (update.recallBotId || update.recallRecordingId) &&
     shouldQueueRecallRecordingTranscription(event)
@@ -116,6 +131,24 @@ function shouldQueueRecallRecordingTranscription(event: RecallWebhookEvent) {
   return (
     eventType === "recording.done" ||
     eventType === "sdk_upload.complete" ||
+    subCode === "recording_done"
+  );
+}
+
+function getVideoFrameReadiness(event: RecallWebhookEvent) {
+  return event.eventType.toLowerCase() === "video_mixed.done" ||
+    event.subCode?.toLowerCase() === "video_mixed_done"
+    ? "video-mixed"
+    : "recording";
+}
+
+function shouldQueueRecallVideoFrames(event: RecallWebhookEvent) {
+  const eventType = event.eventType.toLowerCase();
+  const subCode = event.subCode?.toLowerCase() ?? "";
+
+  return (
+    eventType === "recording.done" ||
+    eventType === "video_mixed.done" ||
     subCode === "recording_done"
   );
 }
@@ -165,17 +198,6 @@ async function queueRecallRecordingTranscription(
         meetingId: update.meetingId,
         timelineUrl: speakerTimelineUrl,
       });
-    }
-  }
-
-  if (update.recallBotId) {
-    try {
-      await persistRecallBotScreenshots({
-        botId: update.recallBotId,
-        meetingId: update.meetingId,
-      });
-    } catch {
-      // Keep transcription moving when visual capture is unavailable.
     }
   }
 

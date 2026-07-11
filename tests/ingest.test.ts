@@ -9,10 +9,9 @@ import {
 import {
   createRecallDesktopSdkUpload,
   deleteScheduledRecallBot,
-  extractRecallBotScreenshots,
   findRecallRecordingMediaUrl,
   findRecallSpeakerTimelineUrl,
-  listRecallBotScreenshots,
+  findRecallVideoFrameArtifacts,
   sendRecallChatMessage,
   normalizeRecallWebhook,
   retrieveRecallBot,
@@ -1101,6 +1100,7 @@ describe("vendor job creation", () => {
       body.automatic_video_output.in_call_not_recording.b64_data,
     );
     expect(body.recording_config).toEqual({
+      video_mixed_participant_video_when_screenshare: "hide",
       realtime_endpoints: [
         {
           type: "webhook",
@@ -1301,6 +1301,7 @@ describe("vendor job creation", () => {
         },
       },
       recording_config: {
+        video_mixed_participant_video_when_screenshare: "hide",
         realtime_endpoints: [
           {
             type: "webhook",
@@ -1462,69 +1463,6 @@ describe("vendor job creation", () => {
     );
   });
 
-  it("lists and normalizes Recall bot screenshots", async () => {
-    vi.stubEnv("RECALL_API_KEY", "recall-key\n");
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          results: [
-            {
-              id: "screenshot_123",
-              recorded_at: "2026-06-29T14:01:05.000Z",
-              data: {
-                download_url: "https://recall.example.com/screenshot.jpg",
-              },
-            },
-          ],
-        }),
-        {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        },
-      ),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(listRecallBotScreenshots("bot_123")).resolves.toEqual([
-      {
-        id: "screenshot_123",
-        capturedAt: "2026-06-29T14:01:05.000Z",
-        downloadUrl: "https://recall.example.com/screenshot.jpg",
-      },
-    ]);
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://us-east-1.recall.ai/api/v1/bot/bot_123/screenshots/",
-      {
-        method: "GET",
-        headers: {
-          Authorization: "Token recall-key",
-          Accept: "application/json",
-        },
-      },
-    );
-  });
-
-  it("extracts Recall bot screenshots from alternate payload shapes", () => {
-    expect(
-      extractRecallBotScreenshots({
-        screenshots: [
-          {
-            uuid: "screenshot_456",
-            timestamp: "2026-06-29T14:02:10.000Z",
-            image_url: "https://recall.example.com/alternate.png",
-          },
-        ],
-      }),
-    ).toEqual([
-      {
-        id: "screenshot_456",
-        capturedAt: "2026-06-29T14:02:10.000Z",
-        downloadUrl: "https://recall.example.com/alternate.png",
-      },
-    ]);
-  });
-
   it("extracts Recall recording media URLs", () => {
     expect(
       findRecallRecordingMediaUrl(
@@ -1553,6 +1491,231 @@ describe("vendor job creation", () => {
         "rec_123",
       ),
     ).toBe("https://recall.example.com/recording.mp4");
+  });
+
+  it("extracts video frame artifacts for the exact Recall recording", () => {
+    expect(
+      findRecallVideoFrameArtifacts(
+        {
+          recordings: [
+            {
+              id: "recording_old",
+              started_at: "2026-07-09T10:00:00.000Z",
+              media_shortcuts: {
+                video_mixed: {
+                  data: { download_url: "https://recall.example.com/old.mp4" },
+                },
+                participant_events: {
+                  data: {
+                    participant_events_download_url:
+                      "https://recall.example.com/old-events.json",
+                  },
+                },
+              },
+            },
+            {
+              id: "recording_123",
+              started_at: "2026-07-10T10:00:00.000Z",
+              media_shortcuts: {
+                video_mixed: {
+                  data: { download_url: "https://recall.example.com/video.mp4" },
+                },
+                participant_events: {
+                  data: {
+                    participant_events_download_url:
+                      "https://recall.example.com/events.json",
+                  },
+                },
+              },
+            },
+          ],
+        },
+        "recording_123",
+      ),
+    ).toEqual({
+      participantEventsUrl: "https://recall.example.com/events.json",
+      recordingStartedAt: "2026-07-10T10:00:00.000Z",
+      videoUrl: "https://recall.example.com/video.mp4",
+    });
+  });
+
+  it.each([
+    [
+      "a malformed nonempty video URL",
+      "not-a-video-url",
+      "https://recall.example.com/events.json",
+      "2026-07-10T10:00:00.000Z",
+    ],
+    [
+      "a malformed nonempty participant events URL",
+      "https://recall.example.com/video.mp4",
+      "not-an-events-url",
+      "2026-07-10T10:00:00.000Z",
+    ],
+    [
+      "a file video URL",
+      "file:///etc/passwd",
+      "https://recall.example.com/events.json",
+      "2026-07-10T10:00:00.000Z",
+    ],
+    [
+      "a file participant events URL",
+      "https://recall.example.com/video.mp4",
+      "file:///etc/passwd",
+      "2026-07-10T10:00:00.000Z",
+    ],
+    [
+      "an FTP video URL",
+      "ftp://example.com/video.mp4",
+      "https://recall.example.com/events.json",
+      "2026-07-10T10:00:00.000Z",
+    ],
+    [
+      "an FTP participant events URL",
+      "https://recall.example.com/video.mp4",
+      "ftp://example.com/video.mp4",
+      "2026-07-10T10:00:00.000Z",
+    ],
+    [
+      "a localhost HTTP video URL",
+      "http://localhost/video.mp4",
+      "https://recall.example.com/events.json",
+      "2026-07-10T10:00:00.000Z",
+    ],
+    [
+      "a localhost HTTP participant events URL",
+      "https://recall.example.com/video.mp4",
+      "http://localhost/video.mp4",
+      "2026-07-10T10:00:00.000Z",
+    ],
+    [
+      "a malformed nonempty recording timestamp",
+      "https://recall.example.com/video.mp4",
+      "https://recall.example.com/events.json",
+      "July 10, 2026",
+    ],
+    [
+      "a non-string video URL",
+      123,
+      "https://recall.example.com/events.json",
+      "2026-07-10T10:00:00.000Z",
+    ],
+    [
+      "a non-string participant events URL",
+      "https://recall.example.com/video.mp4",
+      { url: "https://recall.example.com/events.json" },
+      "2026-07-10T10:00:00.000Z",
+    ],
+    [
+      "a non-string recording timestamp",
+      "https://recall.example.com/video.mp4",
+      "https://recall.example.com/events.json",
+      true,
+    ],
+  ])(
+    "returns null for %s",
+    (_case, videoUrl, participantEventsUrl, recordingStartedAt) => {
+      expect(
+        findRecallVideoFrameArtifacts(
+          {
+            recordings: [
+              {
+                id: "recording_123",
+                started_at: recordingStartedAt,
+                media_shortcuts: {
+                  video_mixed: {
+                    data: { download_url: videoUrl },
+                  },
+                  participant_events: {
+                    data: {
+                      participant_events_download_url: participantEventsUrl,
+                    },
+                  },
+                },
+              },
+            ],
+          },
+          "recording_123",
+        ),
+      ).toBeNull();
+    },
+  );
+
+  it.each([
+    null,
+    {},
+    { recordings: {} },
+    { recordings: [null] },
+    {
+      recordings: [
+        {
+          id: "recording_other",
+          started_at: "2026-07-10T10:00:00.000Z",
+          media_shortcuts: {
+            video_mixed: {
+              data: { download_url: "https://recall.example.com/video.mp4" },
+            },
+            participant_events: {
+              data: {
+                participant_events_download_url:
+                  "https://recall.example.com/events.json",
+              },
+            },
+          },
+        },
+      ],
+    },
+    {
+      recordings: [
+        {
+          id: "recording_123",
+          media_shortcuts: {
+            video_mixed: {
+              data: { download_url: "https://recall.example.com/video.mp4" },
+            },
+            participant_events: {
+              data: {
+                participant_events_download_url:
+                  "https://recall.example.com/events.json",
+              },
+            },
+          },
+        },
+      ],
+    },
+    {
+      recordings: [
+        {
+          id: "recording_123",
+          started_at: "2026-07-10T10:00:00.000Z",
+          media_shortcuts: {
+            video_mixed: { data: {} },
+            participant_events: {
+              data: {
+                participant_events_download_url:
+                  "https://recall.example.com/events.json",
+              },
+            },
+          },
+        },
+      ],
+    },
+    {
+      recordings: [
+        {
+          id: "recording_123",
+          started_at: "2026-07-10T10:00:00.000Z",
+          media_shortcuts: {
+            video_mixed: {
+              data: { download_url: "https://recall.example.com/video.mp4" },
+            },
+            participant_events: { data: {} },
+          },
+        },
+      ],
+    },
+  ])("returns null for incomplete Recall video frame artifacts", (bot) => {
+    expect(findRecallVideoFrameArtifacts(bot, "recording_123")).toBeNull();
   });
 
   it("extracts Recall speaker timeline URLs", () => {

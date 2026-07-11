@@ -9,7 +9,6 @@ const {
   createRecallRecordingTranscription,
   fetchAndPersistRecallParticipantTimeline,
   isRecallDesktopSdkFallbackIntent,
-  persistRecallBotScreenshots,
   retrieveRecallBot,
   retrieveRecallRecording,
   send,
@@ -23,7 +22,6 @@ const {
   createRecallRecordingTranscription: vi.fn(),
   fetchAndPersistRecallParticipantTimeline: vi.fn(),
   isRecallDesktopSdkFallbackIntent: vi.fn(),
-  persistRecallBotScreenshots: vi.fn(),
   retrieveRecallBot: vi.fn(),
   retrieveRecallRecording: vi.fn(),
   send: vi.fn(),
@@ -56,10 +54,6 @@ vi.mock("@/lib/meeting-participant-timeline", () => ({
   fetchAndPersistRecallParticipantTimeline,
 }));
 
-vi.mock("@/lib/meeting-screenshots", () => ({
-  persistRecallBotScreenshots,
-}));
-
 vi.mock("@/lib/local-recorder-records", () => ({
   isRecallDesktopSdkFallbackIntent,
 }));
@@ -78,7 +72,6 @@ afterEach(() => {
   createRecallRecordingTranscription.mockReset();
   fetchAndPersistRecallParticipantTimeline.mockReset();
   isRecallDesktopSdkFallbackIntent.mockReset();
-  persistRecallBotScreenshots.mockReset();
   retrieveRecallBot.mockReset();
   retrieveRecallRecording.mockReset();
   send.mockReset();
@@ -275,16 +268,17 @@ describe("applyRecallMeetingEvent", () => {
     retrieveRecallBot.mockResolvedValue({
       recordings: [
         {
-              media_shortcuts: {
-                speaker_timeline: {
-                  data: {
-                    download_url:
-                      "https://recall.example.com/speaker-timeline.json",
-                  },
-                },
-                video_mixed: {
-                  data: {
-                    download_url: "https://recall.example.com/recording.mp4",
+          id: "recording_123",
+          media_shortcuts: {
+            speaker_timeline: {
+              data: {
+                download_url:
+                  "https://recall.example.com/speaker-timeline.json",
+              },
+            },
+            video_mixed: {
+              data: {
+                download_url: "https://recall.example.com/recording.mp4",
               },
             },
           },
@@ -299,7 +293,7 @@ describe("applyRecallMeetingEvent", () => {
     await applyRecallMeetingEvent({
       eventType: "bot.status_change",
       botId: "bot_123",
-      recordingId: null,
+      recordingId: "recording_123",
       meetingUrl: null,
       statusCode: "done",
       code: "done",
@@ -318,21 +312,72 @@ describe("applyRecallMeetingEvent", () => {
       meetingId: "11111111-1111-4111-8111-111111111111",
       timelineUrl: "https://recall.example.com/speaker-timeline.json",
     });
-    expect(persistRecallBotScreenshots).toHaveBeenCalledWith({
-      botId: "bot_123",
-      meetingId: "11111111-1111-4111-8111-111111111111",
+    expect(send.mock.calls).toEqual([
+      [
+        {
+          id: "video-frames:recording_123:recording",
+          name: "meeting/extract.video-frames",
+          data: {
+            meetingId: "11111111-1111-4111-8111-111111111111",
+            recallBotId: "bot_123",
+            recallRecordingId: "recording_123",
+          },
+        },
+      ],
+      [
+        {
+          name: "meeting/transcribe.audio",
+          data: {
+            audioUrl: "https://recall.example.com/recording.mp4",
+            meetingId: "11111111-1111-4111-8111-111111111111",
+            transcriptJobId: "22222222-2222-4222-8222-222222222222",
+          },
+        },
+      ],
+    ]);
+  });
+
+  it("queues extraction when a transcript job already exists", async () => {
+    update.mockReturnValue({
+      set: vi.fn().mockReturnValue({ where }),
     });
-    expect(send).toHaveBeenCalledWith({
-      name: "meeting/transcribe.audio",
-      data: {
-        audioUrl: "https://recall.example.com/recording.mp4",
+    select.mockReturnValue({ from: selectFrom });
+    selectFrom.mockReturnValue({ where: selectWhere });
+    selectWhere.mockReturnValue({ limit: selectLimit });
+    selectLimit.mockResolvedValue([
+      {
+        id: "22222222-2222-4222-8222-222222222222",
+      },
+    ]);
+
+    await applyRecallMeetingEvent({
+      eventType: "recording.done",
+      botId: "bot_123",
+      recordingId: "recording_123",
+      meetingUrl: null,
+      statusCode: "done",
+      code: "done",
+      subCode: null,
+      updatedAt: "2026-06-23T12:00:00Z",
+      metadata: {
         meetingId: "11111111-1111-4111-8111-111111111111",
-        transcriptJobId: "22222222-2222-4222-8222-222222222222",
+      },
+    });
+
+    expect(retrieveRecallBot).not.toHaveBeenCalled();
+    expect(createRecallRecordingTranscription).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledExactlyOnceWith({
+      id: "video-frames:recording_123:recording",
+      name: "meeting/extract.video-frames",
+      data: {
+        meetingId: "11111111-1111-4111-8111-111111111111",
+        recallBotId: "bot_123",
+        recallRecordingId: "recording_123",
       },
     });
   });
 
-  it("does not queue another transcription when a transcript job already exists", async () => {
+  it("does not queue another transcription without an extraction recording ID", async () => {
     update.mockReturnValue({
       set: vi.fn().mockReturnValue({ where }),
     });
@@ -417,7 +462,6 @@ describe("applyRecallMeetingEvent", () => {
       meetingId: "11111111-1111-4111-8111-111111111111",
       timelineUrl: "https://recall.example.com/sdk-speaker-timeline.json",
     });
-    expect(persistRecallBotScreenshots).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledWith({
       name: "meeting/transcribe.audio",
       data: {
@@ -475,7 +519,7 @@ describe("applyRecallMeetingEvent", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("does not queue transcription for non recording completion assets", async () => {
+  it("queues extraction but not transcription for video completion assets", async () => {
     update.mockReturnValue({
       set: vi.fn().mockReturnValue({ where }),
     });
@@ -500,7 +544,15 @@ describe("applyRecallMeetingEvent", () => {
 
     expect(retrieveRecallBot).not.toHaveBeenCalled();
     expect(createRecallRecordingTranscription).not.toHaveBeenCalled();
-    expect(send).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledExactlyOnceWith({
+      id: "video-frames:recording_123:video-mixed",
+      name: "meeting/extract.video-frames",
+      data: {
+        meetingId: "11111111-1111-4111-8111-111111111111",
+        recallBotId: "bot_123",
+        recallRecordingId: "recording_123",
+      },
+    });
   });
 
   it("does not downgrade a recorded meeting to missed from a late call ended event", async () => {

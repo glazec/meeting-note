@@ -73,12 +73,6 @@ type RecallAutomaticVideoOutput = {
   in_call_recording: RecallVideoOutput;
 };
 
-export type RecallBotScreenshot = {
-  id: string;
-  capturedAt: string | null;
-  downloadUrl: string;
-};
-
 let recallBotLogoJpegBase64: string | null = null;
 
 export function getDefaultRecallBotVideoOutput(): RecallAutomaticVideoOutput {
@@ -177,6 +171,14 @@ const recallCalendarEventBotDeleteInputSchema = z.object({
   calendarEventId: z.string().trim().min(1),
 });
 
+const recallArtifactHttpsUrlSchema = z.url({ protocol: /^https$/ });
+
+const recallVideoFrameArtifactsSchema = z.object({
+  participantEventsUrl: recallArtifactHttpsUrlSchema,
+  recordingStartedAt: z.iso.datetime(),
+  videoUrl: recallArtifactHttpsUrlSchema,
+});
+
 const optionalRecallApiBaseUrl = z.preprocess(
   (value) =>
     typeof value === "string" && value.trim() === "" ? undefined : value,
@@ -202,6 +204,7 @@ const RECALL_SPEECH_OFF_EVENT = "participant_events.speech_off";
 
 function buildRecallRealtimeRecordingConfig(webhookUrl: string) {
   return {
+    video_mixed_participant_video_when_screenshare: "hide",
     realtime_endpoints: [
       {
         type: "webhook",
@@ -820,77 +823,6 @@ export async function retrieveRecallBot(botId: string) {
   return response.json();
 }
 
-export async function listRecallBotScreenshots(botId: string) {
-  const env = recallApiEnvSchema.parse(process.env);
-  const response = await fetch(
-    buildRecallApiUrl(
-      env,
-      `/api/v1/bot/${encodeURIComponent(botId)}/screenshots/`,
-    ),
-    {
-      method: "GET",
-      headers: buildRecallReadHeaders(env),
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(
-      `Recall bot screenshot retrieval failed with ${response.status} ${response.statusText}`,
-    );
-  }
-
-  return extractRecallBotScreenshots(await response.json());
-}
-
-export function extractRecallBotScreenshots(
-  payload: unknown,
-): RecallBotScreenshot[] {
-  const screenshots = getRecallScreenshotRecords(payload);
-  const seen = new Set<string>();
-  const normalized: RecallBotScreenshot[] = [];
-
-  for (const screenshot of screenshots) {
-    if (!screenshot || typeof screenshot !== "object") {
-      continue;
-    }
-
-    const record = screenshot as Record<string, unknown>;
-    const data = getRecord(record.data);
-    const downloadUrl =
-      getString(data?.download_url) ??
-      getString(data?.url) ??
-      getString(record.download_url) ??
-      getString(record.downloadUrl) ??
-      getString(record.image_url) ??
-      getString(record.imageUrl) ??
-      getString(record.url);
-
-    if (!downloadUrl || seen.has(downloadUrl)) {
-      continue;
-    }
-
-    seen.add(downloadUrl);
-    normalized.push({
-      id:
-        getString(record.id) ??
-        getString(record.uuid) ??
-        getString(record.screenshot_id) ??
-        getString(record.screenshotId) ??
-        downloadUrl,
-      capturedAt:
-        getString(record.recorded_at) ??
-        getString(record.recordedAt) ??
-        getString(record.captured_at) ??
-        getString(record.capturedAt) ??
-        getString(record.timestamp) ??
-        null,
-      downloadUrl,
-    });
-  }
-
-  return normalized;
-}
-
 function buildRecallApiUrl(
   env: z.infer<typeof recallApiEnvSchema>,
   pathname: string,
@@ -945,6 +877,41 @@ export function findRecallRecordingMediaUrl(
   }
 
   return null;
+}
+
+export function findRecallVideoFrameArtifacts(
+  bot: unknown,
+  recordingId: string,
+): {
+  participantEventsUrl: string;
+  recordingStartedAt: string;
+  videoUrl: string;
+} | null {
+  const recordings = getArray(getRecord(bot)?.recordings);
+
+  if (!recordings) {
+    return null;
+  }
+
+  const recording = getRecord(
+    recordings.find((candidate) => getRecord(candidate)?.id === recordingId),
+  );
+  const mediaShortcuts = getRecord(recording?.media_shortcuts);
+  const participantEvents = getRecord(mediaShortcuts?.participant_events);
+  const participantEventsData = getRecord(participantEvents?.data);
+  const parsedArtifacts = recallVideoFrameArtifactsSchema.safeParse({
+    participantEventsUrl: getString(
+      participantEventsData?.participant_events_download_url,
+    ),
+    recordingStartedAt: getString(recording?.started_at),
+    videoUrl: getDownloadUrl(mediaShortcuts?.video_mixed),
+  });
+
+  if (!parsedArtifacts.success) {
+    return null;
+  }
+
+  return parsedArtifacts.data;
 }
 
 export function findRecallSpeakerTimelineUrl(
@@ -1076,21 +1043,6 @@ function getDownloadUrl(mediaShortcut: unknown) {
   return typeof downloadUrl === "string" && downloadUrl.trim()
     ? downloadUrl.trim()
     : null;
-}
-
-function getRecallScreenshotRecords(payload: unknown) {
-  if (Array.isArray(payload)) {
-    return payload;
-  }
-
-  const record = getRecord(payload);
-
-  return (
-    getArray(record?.results) ??
-    getArray(record?.screenshots) ??
-    getArray(record?.data) ??
-    []
-  );
 }
 
 function getArray(value: unknown) {
