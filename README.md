@@ -129,6 +129,42 @@ DATABASE_URL=... npm run db:migrate
 
 For production, run the migration command with the production `DATABASE_URL`, then deploy the app. If code reaches a new table, column, index, or enum before the migration runs, server rendered pages can fail for signed in users.
 
+## Image Worker
+
+The web application remains on [Vercel](https://vercel.com). A separate [Railway](https://railway.com) service runs ffmpeg after Recall recording completion and stores stable shared screen frames in Cloudflare R2. The worker accepts only Inngest requests at `/api/inngest`; `/health` is its public health check.
+
+Railway requires these variables:
+
+```text
+DATABASE_URL
+FFMPEG_PATH=/usr/bin/ffmpeg
+FFPROBE_PATH=/usr/bin/ffprobe
+INNGEST_EVENT_KEY
+INNGEST_SIGNING_KEY
+R2_ACCESS_KEY_ID
+R2_ACCOUNT_ID
+R2_BUCKET
+R2_SECRET_ACCESS_KEY
+RECALL_API_BASE_URL
+RECALL_API_KEY
+```
+
+Build and run the worker locally:
+
+```bash
+npm run build:image-worker
+PORT=3001 npm run start:image-worker
+curl --fail http://127.0.0.1:3001/health
+```
+
+`Dockerfile.image-worker` installs ffmpeg and builds the Node worker. `railway.json` configures the Dockerfile, `/health`, and restart policy. After Railway assigns a public domain, register only this worker app with Inngest:
+
+```bash
+IMAGE_WORKER_URL=https://your-worker-domain npm run inngest:sync:image-worker
+```
+
+The extraction function has concurrency one and two retries. In the Railway dashboard, enable Serverless, set the service memory limit to 1 GB, and set a 10 dollar monthly workspace hard limit before production use. Do not move the Next.js web service from Vercel to Railway.
+
 ## Local Tunnel
 
 Production uses `https://meeting-note-swart.vercel.app` as `NEXT_PUBLIC_APP_URL`. Do not use a local tunnel URL for production callbacks.
@@ -194,7 +230,7 @@ Recall Calendar V2 sends `calendar.sync_events` webhooks when calendar events ar
 `/api/calendar/sync` remains as a repair action. It no longer reads Google Calendar events directly. It finds the connected Recall calendar in Neon, lists upcoming Recall Calendar V2 events, stores Neon event and meeting rows, then schedules Recall Calendar V2 bots for eligible Google Meet or Zoom events. The `sync-recall-calendars-hourly` Inngest cron runs the same repair sync once per hour for every local user with a connected Recall calendar.
 
 When Recall reports a completed recording, the webhook handler retrieves the bot, reads the recording media download URL, creates a local ElevenLabs transcript job, and queues `meeting/transcribe.audio` with that URL. Meeting pages can play Recall recording audio through the authenticated meeting audio route once Recall exposes the recording media.
-The same completion flow also imports available Recall screenshots into R2 as meeting image assets. Meeting pages show captured images above the transcript, with image preview and jump to transcript controls for timestamped review.
+The same completion flow independently queues the Railway image worker. It scans only confirmed screen share intervals, keeps every unique visual state that remains stable for two seconds, and writes source resolution JPEG assets to R2 without a meeting level frame limit. Meeting pages show captured images above the transcript, with image preview and jump to transcript controls for timestamped review.
 
 ## MP3 Uploads
 
