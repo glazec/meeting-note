@@ -85,6 +85,41 @@ describe("POST /api/meetings/link", () => {
     expect(scheduleRecallBot).not.toHaveBeenCalled();
   });
 
+  it("logs meeting creation failures without exposing the submitted URL", async () => {
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    createScheduledMeetingBot.mockRejectedValue(
+      new Error('column "title_source" does not exist'),
+    );
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    const response = await postMeetingLink({
+      meetingUrl:
+        "https://zoom.us/j/86586781346?pwd=sensitive-meeting-password",
+    });
+
+    expect(response.status).toBe(500);
+    expect(consoleError).toHaveBeenCalledWith(
+      "meeting_link_scheduling_failure",
+      {
+        errorMessage: 'column "title_source" does not exist',
+        phase: "create_meeting",
+        platform: "zoom",
+        userId: "user_123",
+      },
+    );
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain(
+      "sensitive-meeting-password",
+    );
+
+    consoleError.mockRestore();
+  });
+
   it("schedules a Recall bot for Google Meet links", async () => {
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com\n");
     getCurrentUser.mockResolvedValue({

@@ -67,6 +67,12 @@ export async function POST(request: Request) {
       platform,
     });
   } catch (error) {
+    console.error("meeting_link_scheduling_failure", {
+      errorMessage: getErrorMessage(error),
+      phase: "create_meeting",
+      platform,
+      userId: user.id,
+    });
     const response = handleMeetingLinkError(error);
 
     if (response) {
@@ -131,4 +137,8 @@ function handleMeetingLinkError(error: unknown) {
   }
 
   return null;
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown meeting link error";
 }
