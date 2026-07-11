@@ -81,6 +81,12 @@ describe("selectStableVisualFrames", () => {
     expect(selectStableVisualFrames(frames)).toEqual([2_000, 6_000]);
   });
 
+  it("resets stability when a frame is unstable but not a visual change", () => {
+    const frames = [frame(0, 0), frame(2, 1_000), frame(0, 2_000)];
+
+    expect(selectStableVisualFrames(frames)).toEqual([]);
+  });
+
   it("ignores cursor sized changes", () => {
     const frames = [
       frame(0, 0),

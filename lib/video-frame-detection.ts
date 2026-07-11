@@ -80,36 +80,58 @@ export function selectStableVisualFrames(frames: GrayscaleFrame[]): number[] {
 
   const acceptedTimestamps: number[] = [];
   const acceptedStates: Uint8Array[] = [];
-  let candidate = frames[0];
-  let candidateEvaluated = false;
+  let candidate: GrayscaleFrame | undefined = frames[0];
 
   for (let index = 1; index < frames.length; index += 1) {
     const frame = frames[index];
+    const lastAcceptedState = acceptedStates[acceptedStates.length - 1];
+
+    if (!candidate) {
+      if (
+        !lastAcceptedState ||
+        isVisualChange(
+          compareGrayscaleFrames(lastAcceptedState, frame.pixels),
+        )
+      ) {
+        candidate = frame;
+      }
+      continue;
+    }
+
     const comparison = compareGrayscaleFrames(candidate.pixels, frame.pixels);
 
-    if (isVisualChange(comparison)) {
-      candidate = frame;
-      candidateEvaluated = false;
+    if (!isStable(comparison)) {
+      if (
+        !lastAcceptedState ||
+        isVisualChange(
+          compareGrayscaleFrames(lastAcceptedState, frame.pixels),
+        )
+      ) {
+        candidate = frame;
+      } else {
+        candidate = undefined;
+      }
       continue;
     }
 
     if (
-      candidateEvaluated ||
-      !isStable(comparison) ||
       frame.timestampMs - candidate.timestampMs < STABLE_DURATION_MS
     ) {
       continue;
     }
 
-    candidateEvaluated = true;
+    const acceptedCandidate = candidate;
     const repeatsAcceptedState = acceptedStates.some((acceptedState) =>
-      isStable(compareGrayscaleFrames(candidate.pixels, acceptedState)),
+      isStable(
+        compareGrayscaleFrames(acceptedCandidate.pixels, acceptedState),
+      ),
     );
 
     if (!repeatsAcceptedState) {
-      acceptedStates.push(candidate.pixels);
+      acceptedStates.push(acceptedCandidate.pixels);
       acceptedTimestamps.push(frame.timestampMs);
     }
+    candidate = undefined;
   }
 
   return acceptedTimestamps;
