@@ -14,9 +14,9 @@ const THUMBNAIL_WIDTH = 160;
 const THUMBNAIL_HEIGHT = 90;
 const INFORMATION_TILE_COLUMNS = 8;
 const INFORMATION_TILE_ROWS = 5;
-const MINIMUM_INFORMATIVE_TILES = 4;
 const VISIBLE_LUMA_THRESHOLD = 24;
 const VISIBLE_CONTRAST_THRESHOLD = 24;
+const MINIMUM_VISIBLE_PIXEL_RATIO = 0.1;
 
 type FrameComparison = {
   changedPixelRatio: number;
@@ -74,7 +74,19 @@ export function isInformativeSharedScreenFrame(pixels: Uint8Array): boolean {
     return true;
   }
 
-  let informativeTileCount = 0;
+  let visiblePixelCount = 0;
+
+  for (const value of pixels) {
+    if (value >= VISIBLE_LUMA_THRESHOLD) {
+      visiblePixelCount += 1;
+    }
+  }
+
+  if (visiblePixelCount / pixels.length >= MINIMUM_VISIBLE_PIXEL_RATIO) {
+    return true;
+  }
+
+  const informativeTiles: Array<{ x: number; y: number }> = [];
 
   for (let tileY = 0; tileY < INFORMATION_TILE_ROWS; tileY += 1) {
     const startY = Math.floor(
@@ -110,16 +122,20 @@ export function isInformativeSharedScreenFrame(pixels: Uint8Array): boolean {
         sum / count >= VISIBLE_LUMA_THRESHOLD ||
         maximum - minimum >= VISIBLE_CONTRAST_THRESHOLD
       ) {
-        informativeTileCount += 1;
-
-        if (informativeTileCount >= MINIMUM_INFORMATIVE_TILES) {
-          return true;
-        }
+        informativeTiles.push({ x: tileX, y: tileY });
       }
     }
   }
 
-  return false;
+  if (informativeTiles.length === 0) {
+    return false;
+  }
+
+  const confinedToTopRightPresenterCorner = informativeTiles.every(
+    (tile) => tile.x >= INFORMATION_TILE_COLUMNS - 2 && tile.y <= 1,
+  );
+
+  return !confinedToTopRightPresenterCorner;
 }
 
 export function analyzeStableVisualFrames(

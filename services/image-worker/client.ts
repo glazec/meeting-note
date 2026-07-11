@@ -10,12 +10,21 @@ const optionalSecret = z.preprocess(
 const environmentSchema = z.object({
   INNGEST_EVENT_KEY: optionalSecret,
   INNGEST_SIGNING_KEY: optionalSecret,
+  NODE_ENV: z.string().optional(),
 });
 
 export function buildImageWorkerClientOptions(
   source: Record<string, string | undefined>,
 ): ClientOptions {
   const environment = environmentSchema.parse(source);
+
+  if (
+    environment.NODE_ENV === "production" &&
+    !environment.INNGEST_SIGNING_KEY
+  ) {
+    throw new Error("INNGEST_SIGNING_KEY is required in production");
+  }
+
   const options: ClientOptions = { id: "meeting-image-worker" };
 
   if (environment.INNGEST_EVENT_KEY) {

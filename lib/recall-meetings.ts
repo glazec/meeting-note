@@ -83,7 +83,7 @@ export async function applyRecallMeetingEvent(event: RecallWebhookEvent) {
     shouldQueueRecallVideoFrames(event)
   ) {
     await inngest.send({
-      id: `video-frames:${update.recallRecordingId}`,
+      id: `video-frames:${update.recallRecordingId}:${getVideoFrameReadiness(event)}`,
       name: "meeting/extract.video-frames",
       data: {
         meetingId: update.meetingId,
@@ -112,6 +112,13 @@ function shouldQueueRecallRecordingTranscription(event: RecallWebhookEvent) {
   const subCode = event.subCode?.toLowerCase() ?? "";
 
   return eventType === "recording.done" || subCode === "recording_done";
+}
+
+function getVideoFrameReadiness(event: RecallWebhookEvent) {
+  return event.eventType.toLowerCase() === "video_mixed.done" ||
+    event.subCode?.toLowerCase() === "video_mixed_done"
+    ? "video-mixed"
+    : "recording";
 }
 
 function shouldQueueRecallVideoFrames(event: RecallWebhookEvent) {

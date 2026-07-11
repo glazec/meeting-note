@@ -248,7 +248,7 @@ describe("applyRecallMeetingEvent", () => {
     expect(send.mock.calls).toEqual([
       [
         {
-          id: "video-frames:recording_123",
+          id: "video-frames:recording_123:recording",
           name: "meeting/extract.video-frames",
           data: {
             meetingId: "11111111-1111-4111-8111-111111111111",
@@ -300,7 +300,7 @@ describe("applyRecallMeetingEvent", () => {
     expect(retrieveRecallBot).not.toHaveBeenCalled();
     expect(createRecallRecordingTranscription).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledExactlyOnceWith({
-      id: "video-frames:recording_123",
+      id: "video-frames:recording_123:recording",
       name: "meeting/extract.video-frames",
       data: {
         meetingId: "11111111-1111-4111-8111-111111111111",
@@ -368,7 +368,7 @@ describe("applyRecallMeetingEvent", () => {
     expect(retrieveRecallBot).not.toHaveBeenCalled();
     expect(createRecallRecordingTranscription).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledExactlyOnceWith({
-      id: "video-frames:recording_123",
+      id: "video-frames:recording_123:video-mixed",
       name: "meeting/extract.video-frames",
       data: {
         meetingId: "11111111-1111-4111-8111-111111111111",

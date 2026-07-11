@@ -89,6 +89,13 @@ describe("isInformativeSharedScreenFrame", () => {
     expect(isInformativeSharedScreenFrame(darkSlide)).toBe(true);
   });
 
+  it("keeps a sparse dark title slide outside the presenter corner", () => {
+    const sparseTitleSlide = pixels(0);
+    sparseTitleSlide.fill(220, 45 * WIDTH + 62, 45 * WIDTH + 98);
+
+    expect(isInformativeSharedScreenFrame(sparseTitleSlide)).toBe(true);
+  });
+
   it("excludes a stable presenter-only state from shared screen analysis", () => {
     const presenterOnly = pixels(0);
     const darkSlide = pixels(0);

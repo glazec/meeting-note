@@ -29,6 +29,25 @@ describe("image worker", () => {
     vi.resetModules();
   });
 
+  it("requires a signing key in production", async () => {
+    const { buildImageWorkerClientOptions } = await import(
+      "@/services/image-worker/client"
+    );
+
+    expect(() =>
+      buildImageWorkerClientOptions({ NODE_ENV: "production" }),
+    ).toThrow("INNGEST_SIGNING_KEY");
+    expect(
+      buildImageWorkerClientOptions({
+        NODE_ENV: "production",
+        INNGEST_SIGNING_KEY: "signkey-prod-worker",
+      }),
+    ).toMatchObject({
+      id: "meeting-image-worker",
+      signingKey: "signkey-prod-worker",
+    });
+  });
+
   it("registers one serialized extraction function with two retries", async () => {
     const { functions } = await import("@/services/image-worker/functions");
 
