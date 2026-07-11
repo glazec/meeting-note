@@ -9,18 +9,10 @@ const FRAME_BYTE_LENGTH = 160 * 90;
 const MAX_SCAN_CHUNK_MS = 15 * 60 * 1_000;
 const MAX_RAW_STDOUT_BYTES = 901 * FRAME_BYTE_LENGTH;
 const STDERR_CHARACTER_LIMIT = 4_000;
-const AWS_REGION_PATTERN = "[a-z]{2}(?:-[a-z0-9]+)+-\\d";
-const TRUSTED_VIDEO_HOST_PATTERN = new RegExp(
-  `^(?:${AWS_REGION_PATTERN}-)?recallai-production-bot-data\\.s3(?:\\.${AWS_REGION_PATTERN})?\\.amazonaws\\.com$`,
-);
-const FFMPEG_HTTP_INPUT_ARGS = [
-  "-rw_timeout",
-  "15000000",
-  "-tls_verify",
-  "1",
-  "-max_redirects",
-  "0",
-];
+const TRUSTED_VIDEO_HOSTS = new Set([
+  "recallai-production-bot-data.s3.amazonaws.com",
+  "ap-northeast-1-recallai-production-bot-data.s3.amazonaws.com",
+]);
 
 export type ProcessRunner = (
   binary: string,
@@ -61,7 +53,7 @@ export function createVideoFrameFfmpegAdapter({
   const binaryEnvironment = env ?? (process.env as BinaryEnvironment);
 
   async function probeVideoDurationMs(videoUrl: string): Promise<number> {
-    assertSafeVideoUrl(videoUrl);
+    const parsedVideoUrl = parseTrustedVideoUrl(videoUrl);
     const stdout = await runProcess(
       getBinaryPath(binaryEnvironment.FFPROBE_PATH, "ffprobe"),
       [
@@ -71,7 +63,8 @@ export function createVideoFrameFfmpegAdapter({
         "format=duration",
         "-of",
         "json",
-        videoUrl,
+        ...getHttpInputArgs(parsedVideoUrl.hostname),
+        parsedVideoUrl.href,
       ],
       { timeoutMs: 30_000 },
     );
@@ -83,7 +76,7 @@ export function createVideoFrameFfmpegAdapter({
     intervals: ScreenShareInterval[];
     videoUrl: string;
   }): Promise<GrayscaleFrame[]> {
-    assertSafeVideoUrl(input.videoUrl);
+    const parsedVideoUrl = parseTrustedVideoUrl(input.videoUrl);
 
     for (const interval of input.intervals) {
       assertValidInterval(interval);
@@ -111,9 +104,9 @@ export function createVideoFrameFfmpegAdapter({
             formatSeconds(chunkStartMs),
             "-t",
             formatSeconds(chunkEndMs - chunkStartMs),
-            ...FFMPEG_HTTP_INPUT_ARGS,
+            ...getHttpInputArgs(parsedVideoUrl.hostname),
             "-i",
-            input.videoUrl,
+            parsedVideoUrl.href,
             "-an",
             "-vf",
             "fps=1,scale=160:90,format=gray",
@@ -158,7 +151,7 @@ export function createVideoFrameFfmpegAdapter({
     timestampMs: number;
     videoUrl: string;
   }): Promise<Uint8Array> {
-    assertSafeVideoUrl(input.videoUrl);
+    const parsedVideoUrl = parseTrustedVideoUrl(input.videoUrl);
 
     if (!Number.isFinite(input.timestampMs) || input.timestampMs < 0) {
       throw new Error("Frame timestamp must be finite and nonnegative");
@@ -172,9 +165,9 @@ export function createVideoFrameFfmpegAdapter({
         "error",
         "-ss",
         formatSeconds(input.timestampMs),
-        ...FFMPEG_HTTP_INPUT_ARGS,
+        ...getHttpInputArgs(parsedVideoUrl.hostname),
         "-i",
-        input.videoUrl,
+        parsedVideoUrl.href,
         "-an",
         "-frames:v",
         "1",
@@ -390,6 +383,19 @@ function formatSeconds(milliseconds: number) {
   return (milliseconds / 1_000).toFixed(3);
 }
 
+function getHttpInputArgs(hostname: string) {
+  return [
+    "-rw_timeout",
+    "15000000",
+    "-tls_verify",
+    "1",
+    "-verifyhost",
+    hostname,
+    "-max_redirects",
+    "0",
+  ];
+}
+
 function parseDurationMs(stdout: Uint8Array) {
   let output: unknown;
 
@@ -415,7 +421,7 @@ function parseDurationMs(stdout: Uint8Array) {
   return Math.round(duration * 1_000);
 }
 
-function assertSafeVideoUrl(videoUrl: string) {
+function parseTrustedVideoUrl(videoUrl: string) {
   let parsed: URL;
 
   try {
@@ -432,14 +438,11 @@ function assertSafeVideoUrl(videoUrl: string) {
     throw new Error("Video URL must be a valid public HTTPS URL");
   }
 
-  const hostname = parsed.hostname
-    .replace(/^\[|\]$/g, "")
-    .replace(/\.+$/, "")
-    .toLowerCase();
-
-  if (!TRUSTED_VIDEO_HOST_PATTERN.test(hostname)) {
+  if (!TRUSTED_VIDEO_HOSTS.has(parsed.hostname)) {
     throw new Error("Video URL must use a trusted Recall S3 hostname");
   }
+
+  return parsed;
 }
 
 function redactUrls(value: string) {

@@ -14,8 +14,10 @@ import {
 } from "@/lib/video-frame-ffmpeg";
 
 const FRAME_BYTE_LENGTH = 160 * 90;
+const VIDEO_HOST =
+  "ap-northeast-1-recallai-production-bot-data.s3.amazonaws.com";
 const VIDEO_URL =
-  "https://ap-northeast-1-recallai-production-bot-data.s3.amazonaws.com/video.mp4?X-Amz-Signature=secret";
+  `https://${VIDEO_HOST}/video.mp4?X-Amz-Signature=secret`;
 
 function rawFrames(values: number[]): Uint8Array {
   const output = new Uint8Array(values.length * FRAME_BYTE_LENGTH);
@@ -84,6 +86,8 @@ describe("sampleScreenShareFrames", () => {
           "15000000",
           "-tls_verify",
           "1",
+          "-verifyhost",
+          VIDEO_HOST,
           "-max_redirects",
           "0",
           "-i",
@@ -99,6 +103,15 @@ describe("sampleScreenShareFrames", () => {
         ],
       },
     ]);
+    const inputIndex = calls[0].args.indexOf("-i");
+    for (const option of [
+      "-rw_timeout",
+      "-tls_verify",
+      "-verifyhost",
+      "-max_redirects",
+    ]) {
+      expect(calls[0].args.indexOf(option)).toBeLessThan(inputIndex);
+    }
   });
 
   it("splits raw frames, timestamps them, and preserves interval order", async () => {
@@ -279,6 +292,8 @@ describe("extractJpegFrame", () => {
           "15000000",
           "-tls_verify",
           "1",
+          "-verifyhost",
+          VIDEO_HOST,
           "-max_redirects",
           "0",
           "-i",
@@ -302,6 +317,15 @@ describe("extractJpegFrame", () => {
     expect(calls[0].args.indexOf("-ss")).toBeLessThan(
       calls[0].args.indexOf("-i"),
     );
+    const inputIndex = calls[0].args.indexOf("-i");
+    for (const option of [
+      "-rw_timeout",
+      "-tls_verify",
+      "-verifyhost",
+      "-max_redirects",
+    ]) {
+      expect(calls[0].args.indexOf(option)).toBeLessThan(inputIndex);
+    }
   });
 
   it.each([Number.NaN, Number.POSITIVE_INFINITY, -1])(
@@ -355,10 +379,27 @@ describe("probeVideoDurationMs", () => {
           "format=duration",
           "-of",
           "json",
+          "-rw_timeout",
+          "15000000",
+          "-tls_verify",
+          "1",
+          "-verifyhost",
+          VIDEO_HOST,
+          "-max_redirects",
+          "0",
           VIDEO_URL,
         ],
       },
     ]);
+    const urlIndex = calls[0].args.indexOf(VIDEO_URL);
+    for (const option of [
+      "-rw_timeout",
+      "-tls_verify",
+      "-verifyhost",
+      "-max_redirects",
+    ]) {
+      expect(calls[0].args.indexOf(option)).toBeLessThan(urlIndex);
+    }
   });
 
   it.each([
@@ -403,6 +444,8 @@ describe("video URL validation", () => {
     "https://[ff02::1]/video.mp4",
     "https://[::ffff:127.0.0.1]/video.mp4",
     "https://example.com/video.mp4",
+    "https://zz-attacker-1-recallai-production-bot-data.s3.amazonaws.com/video.mp4",
+    "https://recallai-production-bot-data.s3.ap-northeast-1.amazonaws.com/video.mp4",
   ])("rejects unsafe URL before spawning: %s", async (videoUrl) => {
     const runProcess = vi.fn<ProcessRunner>();
     const adapter = createVideoFrameFfmpegAdapter({ runProcess });
@@ -416,7 +459,6 @@ describe("video URL validation", () => {
   it.each([
     "https://recallai-production-bot-data.s3.amazonaws.com/video.mp4?X-Amz-Signature=official",
     "https://ap-northeast-1-recallai-production-bot-data.s3.amazonaws.com/video.mp4?X-Amz-Signature=observed",
-    "https://recallai-production-bot-data.s3.ap-northeast-1.amazonaws.com/video.mp4?X-Amz-Signature=regional",
   ])("accepts a trusted Recall S3 URL: %s", async (videoUrl) => {
     const runProcess = vi.fn<ProcessRunner>(async () =>
       new TextEncoder().encode('{"format":{"duration":"1"}}'),
