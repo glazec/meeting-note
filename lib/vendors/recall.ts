@@ -62,6 +62,7 @@ const recallSdkUploadWebhookSchema = z.object({
 });
 
 export const DEFAULT_RECALL_BOT_NAME = "IOSG Old Friend";
+const DEFAULT_RECALL_WAITING_ROOM_TIMEOUT_SECONDS = 60 * 60;
 
 type RecallVideoOutput = {
   kind: "jpeg";
@@ -362,6 +363,9 @@ export async function scheduleRecallBot(input: {
       meeting_url: parsedInput.meetingUrl,
       bot_name: parsedInput.botName,
       join_at: parsedInput.startAt,
+      automatic_leave: {
+        waiting_room_timeout: DEFAULT_RECALL_WAITING_ROOM_TIMEOUT_SECONDS,
+      },
       automatic_video_output: getRecallBotVideoOutput(
         parsedInput.avatarJpegBase64,
       ),
@@ -639,6 +643,9 @@ export async function scheduleRecallCalendarEventBot(input: {
         deduplication_key: parsedInput.deduplicationKey,
         bot_config: {
           bot_name: parsedInput.botName,
+          automatic_leave: {
+            waiting_room_timeout: DEFAULT_RECALL_WAITING_ROOM_TIMEOUT_SECONDS,
+          },
           automatic_video_output: getRecallBotVideoOutput(
             parsedInput.avatarJpegBase64,
           ),
@@ -720,6 +727,9 @@ export async function updateScheduledRecallBot(input: {
         meeting_url: parsedInput.meetingUrl,
         ...(parsedInput.botName ? { bot_name: parsedInput.botName } : {}),
         join_at: parsedInput.startAt,
+        automatic_leave: {
+          waiting_room_timeout: DEFAULT_RECALL_WAITING_ROOM_TIMEOUT_SECONDS,
+        },
         automatic_video_output: getRecallBotVideoOutput(
           parsedInput.avatarJpegBase64,
         ),

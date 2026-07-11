@@ -230,6 +230,9 @@ describe("Recall Calendar V2 adapter", () => {
       deduplication_key: "shared_event_123@example.com",
       bot_config: {
         bot_name: "IOSG Old Friend",
+        automatic_leave: {
+          waiting_room_timeout: 3600,
+        },
         automatic_video_output: {
           in_call_not_recording: {
             kind: "jpeg",

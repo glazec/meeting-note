@@ -1079,6 +1079,9 @@ describe("vendor job creation", () => {
     expect(body).toMatchObject({
       meeting_url: "https://meet.google.com/abc-defg-hij",
       bot_name: "IOSG Old Friend",
+      automatic_leave: {
+        waiting_room_timeout: 3600,
+      },
       metadata: {
         requested_webhook_url: "https://app.example.com/api/recall/webhook",
       },
@@ -1290,6 +1293,9 @@ describe("vendor job creation", () => {
     expect(JSON.parse(String(init.body))).toEqual({
       meeting_url: "https://meet.google.com/new-link",
       join_at: "2026-06-30T13:00:00.000Z",
+      automatic_leave: {
+        waiting_room_timeout: 3600,
+      },
       automatic_video_output: {
         in_call_not_recording: {
           kind: "jpeg",
