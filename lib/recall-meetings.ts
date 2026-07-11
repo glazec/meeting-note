@@ -4,7 +4,6 @@ import { db } from "@/db/client";
 import { meetings, transcriptJobs } from "@/db/schema";
 import { inngest } from "@/inngest/client";
 import { fetchAndPersistRecallParticipantTimeline } from "@/lib/meeting-participant-timeline";
-import { persistRecallBotScreenshots } from "@/lib/meeting-screenshots";
 import { createRecallRecordingTranscription } from "@/lib/transcription-records";
 import type { normalizeRecallWebhook } from "@/lib/vendors/recall";
 import {
@@ -79,6 +78,22 @@ export async function applyRecallMeetingEvent(event: RecallWebhookEvent) {
     .where(eq(meetings.id, update.meetingId));
 
   if (
+    update.recallBotId &&
+    update.recallRecordingId &&
+    shouldQueueRecallVideoFrames(event)
+  ) {
+    await inngest.send({
+      id: `video-frames:${update.recallRecordingId}`,
+      name: "meeting/extract.video-frames",
+      data: {
+        meetingId: update.meetingId,
+        recallBotId: update.recallBotId,
+        recallRecordingId: update.recallRecordingId,
+      },
+    });
+  }
+
+  if (
     status === "processing" &&
     update.recallBotId &&
     shouldQueueRecallRecordingTranscription(event)
@@ -97,6 +112,17 @@ function shouldQueueRecallRecordingTranscription(event: RecallWebhookEvent) {
   const subCode = event.subCode?.toLowerCase() ?? "";
 
   return eventType === "recording.done" || subCode === "recording_done";
+}
+
+function shouldQueueRecallVideoFrames(event: RecallWebhookEvent) {
+  const eventType = event.eventType.toLowerCase();
+  const subCode = event.subCode?.toLowerCase() ?? "";
+
+  return (
+    eventType === "recording.done" ||
+    eventType === "video_mixed.done" ||
+    subCode === "recording_done"
+  );
 }
 
 async function queueRecallRecordingTranscription(
@@ -128,15 +154,6 @@ async function queueRecallRecordingTranscription(
     } catch {
       // Keep transcription moving when Recall has not finished speaker timeline media.
     }
-  }
-
-  try {
-    await persistRecallBotScreenshots({
-      botId: update.recallBotId,
-      meetingId: update.meetingId,
-    });
-  } catch {
-    // Keep transcription moving when visual capture is unavailable.
   }
 
   const transcription = await createRecallRecordingTranscription({
