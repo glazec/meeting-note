@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  analyzeStableVisualFrames,
   compareGrayscaleFrames,
   selectStableVisualFrames,
   type GrayscaleFrame,
@@ -293,5 +294,29 @@ describe("selectStableVisualFrames", () => {
         { pixels: new Uint8Array(PIXEL_COUNT - 1), timestampMs: 1_000 },
       ]),
     ).toThrow();
+  });
+});
+
+describe("analyzeStableVisualFrames", () => {
+  it("counts stable candidates rejected as prior visual states", () => {
+    const frames = [
+      frame(0, 0),
+      frame(0, 1_000),
+      frame(0, 2_000),
+      frame(100, 3_000),
+      frame(100, 4_000),
+      frame(100, 5_000),
+      frame(200, 6_000),
+      frame(200, 7_000),
+      frame(200, 8_000),
+      frame(0, 9_000),
+      frame(0, 10_000),
+      frame(0, 11_000),
+    ];
+
+    expect(analyzeStableVisualFrames(frames)).toEqual({
+      duplicateCount: 1,
+      timestamps: [2_000, 5_000, 8_000],
+    });
   });
 });

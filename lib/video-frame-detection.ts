@@ -59,8 +59,15 @@ function isStable(comparison: FrameComparison): boolean {
 }
 
 export function selectStableVisualFrames(frames: GrayscaleFrame[]): number[] {
+  return analyzeStableVisualFrames(frames).timestamps;
+}
+
+export function analyzeStableVisualFrames(frames: GrayscaleFrame[]): {
+  duplicateCount: number;
+  timestamps: number[];
+} {
   if (frames.length === 0) {
-    return [];
+    return { duplicateCount: 0, timestamps: [] };
   }
 
   const pixelCount = frames[0].pixels.length;
@@ -81,6 +88,7 @@ export function selectStableVisualFrames(frames: GrayscaleFrame[]): number[] {
 
   const acceptedTimestamps: number[] = [];
   const acceptedStates: Uint8Array[] = [];
+  let duplicateCount = 0;
   let currentStableState: Uint8Array | undefined;
   let candidate: GrayscaleFrame | undefined = frames[0];
   let previousSampleTimestampMs = frames[0].timestampMs;
@@ -140,9 +148,11 @@ export function selectStableVisualFrames(frames: GrayscaleFrame[]): number[] {
     if (!repeatsAcceptedState) {
       acceptedStates.push(acceptedCandidate.pixels);
       acceptedTimestamps.push(frame.timestampMs);
+    } else {
+      duplicateCount += 1;
     }
     candidate = undefined;
   }
 
-  return acceptedTimestamps;
+  return { duplicateCount, timestamps: acceptedTimestamps };
 }
