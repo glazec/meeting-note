@@ -312,6 +312,12 @@ export const meetings = pgTable(
       "gin",
       sql`to_tsvector('english', coalesce(${table.title}, '') || ' ' || coalesce(${table.meetingUrl}, ''))`,
     ),
+    // Supports the stale-job reconcile cron, which sweeps meetings still in
+    // flight. Partial so it stays tiny (these are the rare, transient states)
+    // and keeps the 15-minute scan from walking the whole table.
+    index("meetings_active_status_index")
+      .on(table.status)
+      .where(sql`${table.status} in ('recording', 'processing')`),
   ],
 );
 
@@ -594,6 +600,13 @@ export const transcriptJobs = pgTable(
     uniqueIndex("transcript_jobs_provider_job_unique").on(
       table.provider,
       table.providerJobId,
+    ),
+    // Per-meeting job lookups: the stale-job reconcile anti-join and the
+    // active-job checks (hasActiveTranscriptJob, claim eligibility) all filter
+    // by meeting_id, ordered/keyed by recency.
+    index("transcript_jobs_meeting_created_index").on(
+      table.meetingId,
+      table.createdAt,
     ),
   ],
 );

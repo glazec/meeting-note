@@ -10,6 +10,7 @@ export async function reconcileStaleMeetingJobs(
   const now = input.now ?? new Date();
   const cutoff = new Date(now.getTime() - STALE_MEETING_JOB_TIMEOUT_MS);
   const rows = await db.execute<{
+    failed_recording_count: number;
     failed_transcript_job_count: number;
     failed_translation_count: number;
   }>(sql`
@@ -30,13 +31,22 @@ export async function reconcileStaleMeetingJobs(
         updated_at = ${now}
       where meeting.status = 'processing'
         and meeting.id in (select meeting_id from stale_transcript_jobs)
-        and (
-          select latest.status
-          from transcript_jobs as latest
-          where latest.meeting_id = meeting.id
-          order by latest.created_at desc
-          limit 1
-        ) = 'failed'
+        and not exists (
+          -- Keep the meeting processing while any job could still succeed:
+          -- a completed job, or a fresh (non-stale) queued/running retry.
+          -- CTEs read the pre-update snapshot, so the jobs being failed above
+          -- are correctly excluded here by the cutoff on updated_at.
+          select 1
+          from transcript_jobs as alive
+          where alive.meeting_id = meeting.id
+            and (
+              alive.status = 'completed'
+              or (
+                alive.status in ('queued', 'running')
+                and alive.updated_at >= ${cutoff}
+              )
+            )
+        )
       returning meeting.id
     ),
     failed_translations as (
@@ -48,16 +58,43 @@ export async function reconcileStaleMeetingJobs(
       where translation_status in ('queued', 'running')
         and coalesce(translation_started_at, updated_at) < ${cutoff}
       returning id
+    ),
+    stale_recording_meetings as (
+      update meetings as meeting
+      set
+        status = 'failed',
+        updated_at = ${now}
+      where meeting.status = 'recording'
+        -- Only local-recorder recordings whose owning device has gone silent.
+        -- meetings.updated_at is not a liveness signal (nothing bumps it
+        -- mid-capture), so a live long recording would be wrongly failed;
+        -- the device polls monitoring ~every 60s, so a stale last_seen_at is
+        -- the real "app is gone" signal. Bot recordings have no attempt row
+        -- and are governed by Recall webhooks, so they are excluded here.
+        and exists (
+          select 1
+          from local_recording_attempts as attempt
+          join local_recorder_devices as device
+            on device.user_id = attempt.user_id
+            and device.device_id_hash = attempt.device_id_hash
+          where attempt.meeting_id = meeting.id
+            and attempt.attempt_state in ('started', 'uploading')
+            and device.last_seen_at < ${cutoff}
+        )
+      returning meeting.id
     )
     select
       (select count(*)::integer from stale_transcript_jobs)
         as failed_transcript_job_count,
       (select count(*)::integer from failed_translations)
-        as failed_translation_count
+        as failed_translation_count,
+      (select count(*)::integer from stale_recording_meetings)
+        as failed_recording_count
   `);
   const result = rows.rows[0];
 
   return {
+    failedRecordingCount: Number(result?.failed_recording_count ?? 0),
     failedTranscriptJobCount: Number(result?.failed_transcript_job_count ?? 0),
     failedTranslationCount: Number(result?.failed_translation_count ?? 0),
   };

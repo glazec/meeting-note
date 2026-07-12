@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PgDialect } from "drizzle-orm/pg-core";
 
 const { execute } = vi.hoisted(() => ({
   execute: vi.fn(),
@@ -18,6 +19,7 @@ describe("reconcileStaleMeetingJobs", () => {
     execute.mockResolvedValue({
       rows: [
         {
+          failed_recording_count: 3,
           failed_transcript_job_count: 2,
           failed_translation_count: 1,
         },
@@ -33,9 +35,22 @@ describe("reconcileStaleMeetingJobs", () => {
         now: new Date("2026-07-11T18:00:00.000Z"),
       }),
     ).resolves.toEqual({
+      failedRecordingCount: 3,
       failedTranscriptJobCount: 2,
       failedTranslationCount: 1,
     });
     expect(execute).toHaveBeenCalledTimes(1);
+
+    const query = new PgDialect().sqlToQuery(execute.mock.calls[0]![0]).sql;
+    expect(query).not.toContain("select latest.status");
+    expect(query).toContain("from stale_transcript_jobs");
+    // Stale jobs are failed unconditionally (no newer-sibling exemption), so
+    // zombies never block re-transcription; the meeting is only failed when no
+    // live job remains.
+    expect(query).not.toContain("as newer");
+    expect(query).toContain("from transcript_jobs as alive");
+    // The recording sweep keys off device liveness, not meetings.updated_at.
+    expect(query).toContain("meeting.status = 'recording'");
+    expect(query).toContain("local_recorder_devices");
   });
 });
