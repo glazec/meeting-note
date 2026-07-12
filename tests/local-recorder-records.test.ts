@@ -49,6 +49,7 @@ import {
   buildLocalRecorderTranscriptionEvent,
   completeLocalRecorderRecordingUpload,
   createRecallDesktopSdkUploadForLocalRecorder,
+  failLocalRecorderIntent,
   getLocalRecorderMonitoringStatus,
   isRecallDesktopSdkFallbackIntent,
   isLocalRecorderCandidateVisibleInLookup,
@@ -434,8 +435,15 @@ describe("local recorder records", () => {
 
     await expect(
       getLocalRecorderMonitoringStatus({
+        appVersion: "0.2.0+abc123",
         deviceId: "mac_123",
         now: new Date("2026-07-01T12:00:00.000Z"),
+        permissionReadiness: {
+          microphone: "granted",
+          notifications: "granted",
+          screenCapture: "granted",
+          startAtLogin: "granted",
+        },
         workspace: {
           canCreateMeetings: true,
           domain: "",
@@ -457,11 +465,58 @@ describe("local recorder records", () => {
     });
     expect(deviceValues).toHaveBeenCalledWith(
       expect.objectContaining({
+        appVersion: "0.2.0+abc123",
         lastSeenAt: new Date("2026-07-01T12:00:00.000Z"),
+        permissionReadiness: {
+          microphone: "granted",
+          notifications: "granted",
+          screenCapture: "granted",
+          startAtLogin: "granted",
+        },
         teamId: "team_123",
         userId: "user_123",
       }),
     );
     expect(db.select).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails the intent and moves a still-recording meeting to failed", async () => {
+    db.select.mockReturnValueOnce(
+      selectRows([{ id: "attempt_1", meetingId: "meeting_1" }]),
+    );
+    const setCalls: unknown[] = [];
+    db.update.mockImplementation(() => ({
+      set: (values: unknown) => {
+        setCalls.push(values);
+        return { where: vi.fn().mockResolvedValue(undefined) };
+      },
+    }));
+
+    await expect(
+      failLocalRecorderIntent({
+        deviceId: "mac_123",
+        errorMessage: "capture failed",
+        fallbackIntentId: "intent_123",
+        now: new Date("2026-07-11T18:00:00.000Z"),
+        workspace: {
+          canCreateMeetings: true,
+          domain: "",
+          teamId: "team_123",
+          userId: "user_123",
+        },
+      }),
+    ).resolves.toEqual({ failed: true });
+
+    expect(setCalls).toEqual([
+      {
+        attemptState: "failed",
+        errorMessage: "capture failed",
+        updatedAt: new Date("2026-07-11T18:00:00.000Z"),
+      },
+      {
+        status: "failed",
+        updatedAt: new Date("2026-07-11T18:00:00.000Z"),
+      },
+    ]);
   });
 });

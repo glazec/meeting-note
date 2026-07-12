@@ -25,6 +25,7 @@ import { inngest } from "@/inngest/client";
 import {
   canUploadLocalRecorderAttempt,
   getLocalRecorderEligibility,
+  isWithinLocalRecorderAutoClaimWindow,
   type LocalRecorderCandidate,
 } from "@/lib/local-recorder-policy";
 import {
@@ -215,8 +216,10 @@ export function isLocalRecorderMonitoringMeetingCurrent(input: {
 }
 
 export async function listMissedLocalRecorderMeetings(input: {
+  appVersion?: string | null;
   deviceId: string;
   now: Date;
+  permissionReadiness?: Record<string, unknown>;
   workspace: WorkspaceContext;
 }): Promise<LocalRecorderMeetingItem[]> {
   const deviceIdHash = await hashLocalRecorderValue(input.deviceId);
@@ -224,9 +227,10 @@ export async function listMissedLocalRecorderMeetings(input: {
   await db
     .insert(localRecorderDevices)
     .values({
-      appVersion: null,
+      appVersion: input.appVersion ?? null,
       deviceIdHash,
       lastSeenAt: input.now,
+      permissionReadiness: input.permissionReadiness ?? {},
       teamId: input.workspace.teamId,
       userId: input.workspace.userId,
     })
@@ -237,7 +241,9 @@ export async function listMissedLocalRecorderMeetings(input: {
         localRecorderDevices.deviceIdHash,
       ],
       set: {
+        appVersion: input.appVersion ?? null,
         lastSeenAt: input.now,
+        permissionReadiness: input.permissionReadiness ?? {},
         updatedAt: input.now,
       },
     });
@@ -347,8 +353,10 @@ export async function listMissedLocalRecorderMeetings(input: {
 }
 
 export async function getLocalRecorderMonitoringStatus(input: {
+  appVersion?: string | null;
   deviceId: string;
   now: Date;
+  permissionReadiness?: Record<string, unknown>;
   workspace: WorkspaceContext;
 }): Promise<LocalRecorderMonitoringStatus> {
   const missedMeetings = await listMissedLocalRecorderMeetings(input);
@@ -632,6 +640,7 @@ function getLocalRecorderBotStatusDetail(
 
 export async function claimLocalRecorderIntent(input: {
   deviceId: string;
+  explicit?: boolean;
   fallbackIntentId: string;
   now: Date;
   workspace: WorkspaceContext;
@@ -698,6 +707,22 @@ export async function claimLocalRecorderIntent(input: {
     return { claimed: false, reason: "no_longer_eligible" as const };
   }
 
+  // Server-authoritative ad-hoc policy: an auto (non-explicit) claim only
+  // attaches to a meeting that is live now. Explicit claims (the user tapped a
+  // specific meeting or its notification) are always honored within the
+  // eligibility window above. `explicit` defaults to true so older clients,
+  // which send no flag, keep their existing behavior.
+  if (
+    input.explicit === false &&
+    !isWithinLocalRecorderAutoClaimWindow({
+      startedAt: attempt.startedAt,
+      endedAt: attempt.endedAt,
+      now: input.now,
+    })
+  ) {
+    return { claimed: false, reason: "ad_hoc_recommended" as const };
+  }
+
   const activePrimary = await db
     .select({ id: localRecordingAttempts.id })
     .from(localRecordingAttempts)
@@ -758,7 +783,10 @@ export async function failLocalRecorderIntent(input: {
     input.fallbackIntentId,
   );
   const [attempt] = await db
-    .select({ id: localRecordingAttempts.id })
+    .select({
+      id: localRecordingAttempts.id,
+      meetingId: localRecordingAttempts.meetingId,
+    })
     .from(localRecordingAttempts)
     .where(
       and(
@@ -782,6 +810,15 @@ export async function failLocalRecorderIntent(input: {
       updatedAt: input.now,
     })
     .where(eq(localRecordingAttempts.id, attempt.id));
+
+  // Without this, a meeting whose recording failed client-side stays shown
+  // as "Recording" on the dashboard forever.
+  await db
+    .update(meetings)
+    .set({ status: "failed", updatedAt: input.now })
+    .where(
+      and(eq(meetings.id, attempt.meetingId), eq(meetings.status, "recording")),
+    );
 
   return { failed: true };
 }

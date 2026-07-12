@@ -15,8 +15,10 @@ export async function GET(request: Request) {
   }
 
   const status = await getLocalRecorderMonitoringStatus({
+    appVersion: deviceContext.appVersion,
     deviceId: deviceContext.deviceId,
     now: new Date(),
+    permissionReadiness: deviceContext.permissionReadiness,
     workspace: deviceContext.workspace,
   });
 

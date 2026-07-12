@@ -5,6 +5,7 @@ import {
   choosePrimaryRecordingSource,
   getLocalRecorderEligibility,
   isLocalRecorderUploadMatch,
+  isWithinLocalRecorderAutoClaimWindow,
   type LocalRecorderCandidate,
 } from "@/lib/local-recorder-policy";
 
@@ -169,5 +170,65 @@ describe("local recorder policy", () => {
         recallAudioAvailableAt: new Date("2026-06-30T12:01:00.000Z"),
       }),
     ).toBe("recall");
+  });
+
+  describe("isWithinLocalRecorderAutoClaimWindow", () => {
+    const startedAt = new Date("2026-06-30T12:00:00.000Z");
+
+    it("attaches while an open-ended meeting is within 30 minutes of start", () => {
+      expect(
+        isWithinLocalRecorderAutoClaimWindow({
+          startedAt,
+          endedAt: null,
+          now: new Date("2026-06-30T12:29:00.000Z"),
+        }),
+      ).toBe(true);
+    });
+
+    it("becomes ad-hoc once an open-ended meeting passes the 30-minute window", () => {
+      expect(
+        isWithinLocalRecorderAutoClaimWindow({
+          startedAt,
+          endedAt: null,
+          now: new Date("2026-06-30T12:31:00.000Z"),
+        }),
+      ).toBe(false);
+    });
+
+    it("honors a 15-minute grace after a scheduled end", () => {
+      const endedAt = new Date("2026-06-30T12:30:00.000Z");
+
+      expect(
+        isWithinLocalRecorderAutoClaimWindow({
+          startedAt,
+          endedAt,
+          now: new Date("2026-06-30T12:44:00.000Z"),
+        }),
+      ).toBe(true);
+      expect(
+        isWithinLocalRecorderAutoClaimWindow({
+          startedAt,
+          endedAt,
+          now: new Date("2026-06-30T12:46:00.000Z"),
+        }),
+      ).toBe(false);
+    });
+
+    it("never attaches before the meeting starts or without a start time", () => {
+      expect(
+        isWithinLocalRecorderAutoClaimWindow({
+          startedAt,
+          endedAt: null,
+          now: new Date("2026-06-30T11:59:00.000Z"),
+        }),
+      ).toBe(false);
+      expect(
+        isWithinLocalRecorderAutoClaimWindow({
+          startedAt: null,
+          endedAt: null,
+          now: new Date("2026-06-30T12:00:00.000Z"),
+        }),
+      ).toBe(false);
+    });
   });
 });

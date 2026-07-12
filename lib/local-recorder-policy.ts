@@ -44,6 +44,36 @@ export type LocalRecorderEligibility =
 const FALLBACK_GRACE_MS = 70 * 1000;
 const DEFAULT_RECORDING_WINDOW_MS = 2 * 60 * 60 * 1000;
 const ENDED_AT_EXTENSION_MS = 15 * 60 * 1000;
+const AUTO_CLAIM_START_WINDOW_MS = 30 * 60 * 1000;
+
+/**
+ * Whether a NON-explicit (auto) recording should attach to this meeting rather
+ * than become its own ad-hoc recording. The record button auto-attaches only
+ * to a meeting that is live now: started, and not past its end (plus the same
+ * grace the recording window uses) or, for an open-ended meeting, within 30
+ * minutes of start. This is the server-authoritative twin of the Mac client's
+ * LocalRecorderAutoClaimPolicy, so the policy holds even for stale clients.
+ */
+export function isWithinLocalRecorderAutoClaimWindow(input: {
+  startedAt: Date | null;
+  endedAt: Date | null;
+  now: Date;
+}) {
+  if (!input.startedAt || input.now < input.startedAt) {
+    return false;
+  }
+
+  if (input.endedAt) {
+    return (
+      input.now.getTime() <= input.endedAt.getTime() + ENDED_AT_EXTENSION_MS
+    );
+  }
+
+  return (
+    input.now.getTime() - input.startedAt.getTime() <=
+    AUTO_CLAIM_START_WINDOW_MS
+  );
+}
 const recallPositivePattern =
   /\b(in_call|joined|recording|recording_done|complete)\b/;
 

@@ -120,11 +120,18 @@ import Testing
     #expect(request.value(forHTTPHeaderField: "x-local-recorder-device-id") == "device_123")
 }
 
-@Test func monitoringRequestIncludesBearerTokenAndDeviceId() throws {
+@Test func monitoringRequestIncludesDeviceVersionAndPermissionReadiness() throws {
     let client = LocalRecorderAPIClient(
         serverURL: URL(string: "https://app.example.com")!,
         bearerToken: "token_123",
-        deviceId: "device_123"
+        deviceId: "device_123",
+        appVersion: "0.2.0+abc123",
+        permissionReadiness: [
+            "microphone": "granted",
+            "screenCapture": "granted",
+            "notifications": "denied",
+            "startAtLogin": "unknown",
+        ]
     )
     let request = try client.monitoringRequest()
 
@@ -132,6 +139,18 @@ import Testing
     #expect(request.httpMethod == "GET")
     #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer token_123")
     #expect(request.value(forHTTPHeaderField: "x-local-recorder-device-id") == "device_123")
+    #expect(request.value(forHTTPHeaderField: "x-local-recorder-app-version") == "0.2.0+abc123")
+    let readinessHeader = try #require(
+        request.value(forHTTPHeaderField: "x-local-recorder-permission-readiness")
+    )
+    let readiness = try JSONDecoder().decode(
+        [String: String].self,
+        from: Data(readinessHeader.utf8)
+    )
+    #expect(readiness["microphone"] == "granted")
+    #expect(readiness["screenCapture"] == "granted")
+    #expect(readiness["notifications"] == "denied")
+    #expect(readiness["startAtLogin"] == "unknown")
 }
 
 @Test func monitoringPollScheduleChecksAtFallbackGraceWindow() {
@@ -801,5 +820,100 @@ private func makeUploadPayload(
                 firstSampleTime: 0
             )
         )
+    )
+}
+
+private func makeMissedMeeting(
+    startsAt: TimeInterval,
+    endsAt: TimeInterval?
+) -> MissedMeeting {
+    MissedMeeting(
+        fallbackIntentId: "intent_123",
+        title: "Weekly sync",
+        expiresAt: Date(timeIntervalSince1970: 1_000_000),
+        displayTimeWindow: DisplayTimeWindow(
+            startsAt: Date(timeIntervalSince1970: startsAt),
+            endsAt: endsAt.map { Date(timeIntervalSince1970: $0) }
+        )
+    )
+}
+
+@Test func autoClaimAttachesToOngoingMeeting() {
+    let meeting = makeMissedMeeting(startsAt: 0, endsAt: 3_600)
+
+    #expect(
+        LocalRecorderAutoClaimPolicy.autoClaimMeeting(
+            from: [meeting],
+            at: Date(timeIntervalSince1970: 3_000)
+        ) == meeting
+    )
+}
+
+@Test func autoClaimAttachesWithinEndedGrace() {
+    let meeting = makeMissedMeeting(startsAt: 0, endsAt: 3_600)
+
+    // 3_700 is past the scheduled end but within the 15-minute grace window.
+    #expect(
+        LocalRecorderAutoClaimPolicy.autoClaimMeeting(
+            from: [meeting],
+            at: Date(timeIntervalSince1970: 3_700)
+        ) == meeting
+    )
+}
+
+@Test func autoClaimSkipsMeetingPastEndedGrace() {
+    let meeting = makeMissedMeeting(startsAt: 0, endsAt: 3_600)
+
+    // 3_600 end + 15 min grace = 4_500; 4_600 is beyond it.
+    #expect(
+        LocalRecorderAutoClaimPolicy.autoClaimMeeting(
+            from: [meeting],
+            at: Date(timeIntervalSince1970: 4_600)
+        ) == nil
+    )
+}
+
+@Test func autoClaimSkipsMeetingThatHasNotStarted() {
+    let meeting = makeMissedMeeting(startsAt: 1_800, endsAt: 5_400)
+
+    #expect(
+        LocalRecorderAutoClaimPolicy.autoClaimMeeting(
+            from: [meeting],
+            at: Date(timeIntervalSince1970: 0)
+        ) == nil
+    )
+}
+
+@Test func autoClaimWithoutEndAllowsThirtyMinutesAfterStart() {
+    let meeting = makeMissedMeeting(startsAt: 0, endsAt: nil)
+
+    #expect(
+        LocalRecorderAutoClaimPolicy.autoClaimMeeting(
+            from: [meeting],
+            at: Date(timeIntervalSince1970: 1_800)
+        ) == meeting
+    )
+}
+
+@Test func autoClaimWithoutEndSkipsStaleMeeting() {
+    let meeting = makeMissedMeeting(startsAt: 0, endsAt: nil)
+
+    #expect(
+        LocalRecorderAutoClaimPolicy.autoClaimMeeting(
+            from: [meeting],
+            at: Date(timeIntervalSince1970: 1_801)
+        ) == nil
+    )
+}
+
+@Test func autoClaimPicksFirstLiveMeeting() {
+    let stale = makeMissedMeeting(startsAt: 0, endsAt: 600)
+    let live = makeMissedMeeting(startsAt: 3_000, endsAt: 6_000)
+
+    #expect(
+        LocalRecorderAutoClaimPolicy.autoClaimMeeting(
+            from: [stale, live],
+            at: Date(timeIntervalSince1970: 3_100)
+        ) == live
     )
 }

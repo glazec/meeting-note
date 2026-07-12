@@ -31,8 +31,15 @@ vi.mock("@/lib/local-recorder-records", () => ({
 
 function mockSignedInDevice() {
   getLocalRecorderDeviceRequestContext.mockResolvedValue({
+    appVersion: "0.2.0+abc123",
     ok: true,
     deviceId: "mac_123",
+    permissionReadiness: {
+      microphone: "granted",
+      notifications: "granted",
+      screenCapture: "granted",
+      startAtLogin: "granted",
+    },
     workspace: {
       teamId: "team_123",
       userId: "user_123",
@@ -94,8 +101,15 @@ describe("local recorder API routes", () => {
       ],
     });
     expect(listMissedLocalRecorderMeetings).toHaveBeenCalledWith({
+      appVersion: "0.2.0+abc123",
       deviceId: "mac_123",
       now: expect.any(Date),
+      permissionReadiness: {
+        microphone: "granted",
+        notifications: "granted",
+        screenCapture: "granted",
+        startAtLogin: "granted",
+      },
       workspace: {
         teamId: "team_123",
         userId: "user_123",
@@ -139,8 +153,15 @@ describe("local recorder API routes", () => {
       },
     });
     expect(getLocalRecorderMonitoringStatus).toHaveBeenCalledWith({
+      appVersion: "0.2.0+abc123",
       deviceId: "mac_123",
       now: expect.any(Date),
+      permissionReadiness: {
+        microphone: "granted",
+        notifications: "granted",
+        screenCapture: "granted",
+        startAtLogin: "granted",
+      },
       workspace: {
         teamId: "team_123",
         userId: "user_123",
@@ -195,7 +216,11 @@ describe("local recorder API routes", () => {
         "https://app.example.com/api/local-recorder/intents/intent_123/start",
         {
           method: "POST",
-          headers: { "x-local-recorder-device-id": "mac_123" },
+          headers: {
+            "content-type": "application/json",
+            "x-local-recorder-device-id": "mac_123",
+          },
+          body: JSON.stringify({ explicit: false }),
         },
       ),
       { params: Promise.resolve({ fallbackIntentId: "intent_123" }) },
@@ -206,6 +231,9 @@ describe("local recorder API routes", () => {
       claimed: true,
       meetingTitle: "Weekly sync",
     });
+    expect(claimLocalRecorderIntent).toHaveBeenCalledWith(
+      expect.objectContaining({ explicit: false }),
+    );
   });
 
   it("marks a claimed fallback intent failed when local capture cannot start", async () => {

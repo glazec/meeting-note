@@ -18,8 +18,15 @@ export async function POST(
   }
 
   const { fallbackIntentId } = await context.params;
+  const body: unknown = await request.json().catch(() => null);
+  const explicit =
+    body && typeof body === "object" && "explicit" in body &&
+    typeof (body as { explicit?: unknown }).explicit === "boolean"
+      ? (body as { explicit: boolean }).explicit
+      : undefined;
   const result = await claimLocalRecorderIntent({
     deviceId: deviceContext.deviceId,
+    explicit,
     fallbackIntentId,
     now: new Date(),
     workspace: deviceContext.workspace,

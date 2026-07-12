@@ -5,6 +5,8 @@ MODE="${1:-run}"
 APP_NAME="MeetingNoteLocalRecorder"
 BUNDLE_ID="tech.inevitable.meeting-note.local-recorder"
 MIN_SYSTEM_VERSION="15.0"
+APP_VERSION="${APP_VERSION:-0.2.0}"
+BUILD_VERSION="${BUILD_VERSION:-$(date -u +%Y%m%d%H%M%S)}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
@@ -53,6 +55,10 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$BUNDLE_ID</string>
   <key>CFBundleName</key>
   <string>$APP_NAME</string>
+  <key>CFBundleShortVersionString</key>
+  <string>$APP_VERSION</string>
+  <key>CFBundleVersion</key>
+  <string>$BUILD_VERSION</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleIconFile</key>

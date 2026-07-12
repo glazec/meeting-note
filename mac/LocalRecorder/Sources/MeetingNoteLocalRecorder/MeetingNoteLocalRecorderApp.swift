@@ -1,10 +1,28 @@
 import AppKit
+import ApplicationServices
 import AVFoundation
 import Foundation
 import LocalRecorderCore
 import ServiceManagement
 import SwiftUI
 import UserNotifications
+
+private enum LocalRecorderAppVersion {
+    static var current: String {
+        let version = Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleShortVersionString"
+        ) as? String ?? "development"
+        let build = Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleVersion"
+        ) as? String
+
+        guard let build, !build.isEmpty else {
+            return version
+        }
+
+        return "\(version)+\(build)"
+    }
+}
 
 @MainActor
 private let externalURLDispatcher = LocalRecorderExternalURLDispatcher()
@@ -24,6 +42,7 @@ private enum ActiveRecordingBackend: Equatable {
 
 enum RecorderPermissionStep {
     case microphone
+    case accessibility
     case systemAudio
     case alerts
 
@@ -31,6 +50,8 @@ enum RecorderPermissionStep {
         switch self {
         case .microphone:
             return "Grant microphone"
+        case .accessibility:
+            return "Grant accessibility"
         case .systemAudio:
             return "Enable system audio"
         case .alerts:
@@ -42,6 +63,8 @@ enum RecorderPermissionStep {
         switch self {
         case .microphone:
             return "Microphone needed"
+        case .accessibility:
+            return "Accessibility needed"
         case .systemAudio:
             return "System audio needed"
         case .alerts:
@@ -52,11 +75,13 @@ enum RecorderPermissionStep {
     var statusDetail: String {
         switch self {
         case .microphone:
-            return "Step 1 of 3"
+            return "Step 1 of 4"
+        case .accessibility:
+            return "Step 2 of 4"
         case .alerts:
-            return "Step 2 of 3"
+            return "Step 3 of 4"
         case .systemAudio:
-            return "Step 3 of 3"
+            return "Step 4 of 4"
         }
     }
 
@@ -64,6 +89,8 @@ enum RecorderPermissionStep {
         switch self {
         case .microphone:
             return "mic.badge.plus"
+        case .accessibility:
+            return "figure.wave"
         case .systemAudio:
             return "speaker.wave.2"
         case .alerts:
@@ -95,6 +122,7 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
     @Published var permissionChecklist = PermissionChecklist(
         microphone: .unknown,
         screenCapture: .unknown,
+        accessibility: .unknown,
         notifications: .unknown,
         startAtLogin: .unknown
     )
@@ -116,7 +144,7 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
     private static let microphoneDefaultsKey = "meeting-note-local-recorder-microphone-uid"
     private static let builtInMicrophoneUID = "BuiltInMicrophoneDevice"
 
-    private let appVersion = "0.1.0"
+    private let appVersion = LocalRecorderAppVersion.current
     private let captureController = LocalRecordingCaptureController()
     private let recallSDKController = RecallDesktopSDKRecordingController()
     private let credentialStore: LocalRecorderKeychainCredentialStore
@@ -131,6 +159,9 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
     private var appActivationObserver: NSObjectProtocol?
     private var levelTestSession: AudioLevelTestSession?
     private var levelTestTimeoutTask: Task<Void, Never>?
+    private var recallSDKMeterSession: AudioLevelTestSession?
+    private var recallSDKMeterGeneration = 0
+    private var didRequestAccessibility = false
     private var monitoringTimer: Timer?
     private var permissionRefreshTask: Task<Void, Never>?
     private var fallbackNotificationCountsByIntentId: [String: Int] = [:]
@@ -194,6 +225,14 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
     var nextPermissionStep: RecorderPermissionStep? {
         if permissionChecklist.microphone != .granted {
             return .microphone
+        }
+        // Accessibility is prompted once, early, but is NOT required to record
+        // (it only sharpens Recall SDK meeting detection) and cannot be granted
+        // synchronously — it needs a System Settings toggle. So we offer it a
+        // single time and then advance, never letting a decline block the
+        // required screen-capture / alerts steps or recording itself.
+        if !didRequestAccessibility && permissionChecklist.accessibility != .granted {
+            return .accessibility
         }
         if permissionChecklist.notifications != .granted {
             return .alerts
@@ -261,8 +300,20 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
         return LocalRecorderAPIClient(
             serverURL: serverURL,
             bearerToken: bearerToken,
-            deviceId: deviceIdStore.deviceId
+            deviceId: deviceIdStore.deviceId,
+            appVersion: appVersion,
+            permissionReadiness: permissionReadinessReport
         )
+    }
+
+    private var permissionReadinessReport: [String: String] {
+        [
+            "microphone": permissionChecklist.microphone.reportValue,
+            "screenCapture": permissionChecklist.screenCapture.reportValue,
+            "accessibility": permissionChecklist.accessibility.reportValue,
+            "notifications": permissionChecklist.notifications.reportValue,
+            "startAtLogin": permissionChecklist.startAtLogin.reportValue,
+        ]
     }
 
     private func retryQueuedUploadsIfPossible() async {
@@ -327,23 +378,22 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
             switch nextPermissionStep {
             case .microphone:
                 let microphonePermission = await requestMicrophonePermission()
-                permissionChecklist = PermissionChecklist(
-                    microphone: microphonePermission,
-                    screenCapture: permissionChecklist.screenCapture,
-                    notifications: permissionChecklist.notifications,
-                    startAtLogin: permissionChecklist.startAtLogin
-                )
+                permissionChecklist.microphone = microphonePermission
                 statusText = microphonePermission == .granted
                     ? "Microphone ready"
                     : "Microphone access needed"
+            case .accessibility:
+                // One-shot: mark offered so a decline advances the flow to the
+                // required steps instead of parking the primary button here.
+                didRequestAccessibility = true
+                let accessibilityPermission = requestAccessibilityPermission()
+                permissionChecklist.accessibility = accessibilityPermission
+                statusText = accessibilityPermission == .granted
+                    ? "Accessibility ready"
+                    : "Enable accessibility in Settings"
             case .systemAudio:
                 let screenCapturePermission = requestScreenCapturePermission()
-                permissionChecklist = PermissionChecklist(
-                    microphone: permissionChecklist.microphone,
-                    screenCapture: screenCapturePermission,
-                    notifications: permissionChecklist.notifications,
-                    startAtLogin: permissionChecklist.startAtLogin
-                )
+                permissionChecklist.screenCapture = screenCapturePermission
                 statusText = screenCapturePermission == .granted
                     ? "System audio ready"
                     : "System audio access needed"
@@ -353,12 +403,7 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
                     statusText = "Enable alerts in Settings"
                 } else {
                     let notificationPermission = await requestNotificationPermission()
-                    permissionChecklist = PermissionChecklist(
-                        microphone: permissionChecklist.microphone,
-                        screenCapture: permissionChecklist.screenCapture,
-                        notifications: notificationPermission,
-                        startAtLogin: permissionChecklist.startAtLogin
-                    )
+                    permissionChecklist.notifications = notificationPermission
                     statusText = notificationPermission == .granted
                         ? "Alerts ready"
                         : "Alerts access needed"
@@ -384,20 +429,40 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
             return
         }
 
-        let meeting = fallbackIntentId
-            .flatMap { intentId in
-                pendingMeetings.first { $0.fallbackIntentId == intentId }
-            } ?? pendingMeetings.first
+        // An explicit tap on a meeting (e.g. a fallback notification) always
+        // claims it. The generic record button only auto-attaches to a meeting
+        // that is live right now; otherwise the user is starting an ad-hoc
+        // recording. The explicit flag is sent to the server, which enforces
+        // the same policy regardless of client version.
+        if let intentId = fallbackIntentId {
+            let title = pendingMeetings
+                .first { $0.fallbackIntentId == intentId }?.title ?? "meeting"
+            Task {
+                await claimAndStart(
+                    fallbackIntentId: intentId,
+                    title: title,
+                    explicit: true
+                )
+            }
+            return
+        }
 
-        if let intentId = fallbackIntentId ?? meeting?.fallbackIntentId {
-            let title = meeting?.title ?? "meeting"
+        if let meeting = LocalRecorderAutoClaimPolicy.autoClaimMeeting(
+            from: pendingMeetings,
+            at: Date()
+        ) {
             Task {
-                await claimAndStart(fallbackIntentId: intentId, title: title)
+                await claimAndStart(
+                    fallbackIntentId: meeting.fallbackIntentId,
+                    title: meeting.title,
+                    explicit: false
+                )
             }
-        } else {
-            Task {
-                await createManualIntentAndStart()
-            }
+            return
+        }
+
+        Task {
+            await createManualIntentAndStart()
         }
     }
 
@@ -426,7 +491,9 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
                 let client = LocalRecorderAPIClient(
                     serverURL: serverURL,
                     bearerToken: bearerToken,
-                    deviceId: deviceIdStore.deviceId
+                    deviceId: deviceIdStore.deviceId,
+                    appVersion: appVersion,
+                    permissionReadiness: permissionReadinessReport
                 )
                 await uploadQueuedRecordings(client: client)
                 let monitoringStatus = try await client.fetchMonitoringStatus()
@@ -517,7 +584,11 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
         return count
     }
 
-    private func claimAndStart(fallbackIntentId: String, title: String) async {
+    private func claimAndStart(
+        fallbackIntentId: String,
+        title: String,
+        explicit: Bool
+    ) async {
         guard let serverURL = URL(string: serverURLText) else {
             statusText = "Enter a valid server URL"
             return
@@ -527,12 +598,24 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
             let client = LocalRecorderAPIClient(
                 serverURL: serverURL,
                 bearerToken: bearerToken,
-                deviceId: deviceIdStore.deviceId
+                deviceId: deviceIdStore.deviceId,
+                appVersion: appVersion,
+                permissionReadiness: permissionReadinessReport
             )
-            let claim = try await client.claimIntent(fallbackIntentId: fallbackIntentId)
+            let claim = try await client.claimIntent(
+                fallbackIntentId: fallbackIntentId,
+                explicit: explicit
+            )
 
             guard claim.claimed else {
-                statusText = claimFailureStatus(reason: claim.reason)
+                // An auto claim the server declined (e.g. the meeting is no
+                // longer live) becomes an ad-hoc recording rather than a dead
+                // end; explicit claims surface the failure reason as before.
+                if !explicit {
+                    await createManualIntentAndStart()
+                } else {
+                    statusText = claimFailureStatus(reason: claim.reason)
+                }
                 return
             }
 
@@ -556,7 +639,9 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
             let client = LocalRecorderAPIClient(
                 serverURL: serverURL,
                 bearerToken: bearerToken,
-                deviceId: deviceIdStore.deviceId
+                deviceId: deviceIdStore.deviceId,
+                appVersion: appVersion,
+                permissionReadiness: permissionReadinessReport
             )
             let intent = try await client.createManualIntent()
             await startCapture(
@@ -607,6 +692,75 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
         fallbackNotificationCountsByIntentId.removeValue(forKey: fallbackIntentId)
         isRecording = true
         statusText = "Recording \(title)"
+
+        if activeRecordingBackend == .recallDesktopSDK {
+            startRecallSDKLevelMetering()
+        }
+    }
+
+    /// The Recall Desktop SDK records in a separate process and reports no
+    /// audio levels, so run a meter-only capture alongside it to keep the
+    /// level bars, waveform, and silence detection alive.
+    private func startRecallSDKLevelMetering() {
+        silencePromptTracker = SilencePromptTracker()
+        audioLevels = Array(repeating: 0, count: Self.audioLevelSampleCount)
+
+        // The session takes ~1s to spin up (SCStream). A stop or a second
+        // start can land during that window, so tag this attempt with a
+        // generation token and stop any prior session; if the token is stale
+        // (or recording has since ended) once startup finishes, tear the new
+        // session down instead of leaking a live mic tap / SCStream.
+        recallSDKMeterGeneration += 1
+        let generation = recallSDKMeterGeneration
+        let previousSession = recallSDKMeterSession
+        recallSDKMeterSession = nil
+
+        Task {
+            if let previousSession {
+                await previousSession.stop()
+            }
+
+            let session = AudioLevelTestSession(
+                microphoneDeviceUID: selectedMicrophoneUID,
+                onAudioLevel: { [weak self] source, level in
+                    Task { @MainActor in
+                        self?.observeAudioLevel(source: source, level: level)
+                    }
+                }
+            )
+
+            do {
+                try await session.start()
+            } catch {
+                // Metering is best-effort; the SDK keeps recording without it.
+                return
+            }
+
+            guard
+                generation == recallSDKMeterGeneration,
+                isRecording,
+                !isFinishingRecording,
+                activeRecordingBackend == .recallDesktopSDK
+            else {
+                await session.stop()
+                return
+            }
+
+            recallSDKMeterSession = session
+        }
+    }
+
+    private func stopRecallSDKLevelMetering() async {
+        // Invalidate any metering start still spinning up so it tears itself
+        // down when it finishes instead of resurrecting a stopped session.
+        recallSDKMeterGeneration += 1
+
+        guard let session = recallSDKMeterSession else {
+            return
+        }
+
+        recallSDKMeterSession = nil
+        await session.stop()
     }
 
     private func startRecallSDKCapture(
@@ -661,6 +815,7 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
         isFinishingRecording = true
         activeRecordingBackend = nil
         statusText = "Switching to local recording"
+        await stopRecallSDKLevelMetering()
         try? await client.markRecallSDKFallback(fallbackIntentId: fallbackIntentId)
 
         do {
@@ -767,7 +922,7 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
 
         Task {
             do {
-                let session = try AudioLevelTestSession(
+                let session = AudioLevelTestSession(
                     microphoneDeviceUID: selectedMicrophoneUID,
                     onAudioLevel: { [weak self] source, level in
                         Task { @MainActor in
@@ -880,6 +1035,7 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
             do {
                 switch activeRecordingBackend {
                 case .recallDesktopSDK:
+                    await stopRecallSDKLevelMetering()
                     _ = try await recallSDKController.stop()
                     isRecording = false
                     activeClient = nil
@@ -911,6 +1067,7 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
                     statusText = "Recording uploaded"
                 }
             } catch {
+                await stopRecallSDKLevelMetering()
                 let failedBackend = activeRecordingBackend
                 isRecording = false
                 activeClient = nil
@@ -1043,6 +1200,7 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
         permissionChecklist = PermissionChecklist(
             microphone: currentMicrophonePermission(),
             screenCapture: currentScreenCapturePermission(),
+            accessibility: currentAccessibilityPermission(),
             notifications: await currentNotificationPermission(),
             startAtLogin: currentStartAtLoginPermission()
         )
@@ -1091,6 +1249,28 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
         return CGRequestScreenCaptureAccess() ? .granted : currentScreenCapturePermission()
     }
 
+    private func requestAccessibilityPermission() -> PermissionGrant {
+        // Literal key avoids kAXTrustedCheckOptionPrompt, a global var that
+        // Swift 6 strict concurrency rejects on the main actor.
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+
+        if AXIsProcessTrustedWithOptions(options) {
+            return .granted
+        }
+
+        openAccessibilitySettings()
+        return .denied
+    }
+
+    private func openAccessibilitySettings() {
+        let value = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+        guard let url = URL(string: value), NSWorkspace.shared.open(url) else {
+            return
+        }
+
+        pollPermissionsUntil { $0.accessibility == .granted }
+    }
+
     private func openNotificationSettings() {
         let urls = [
             "x-apple.systempreferences:com.apple.Notifications-Settings.extension",
@@ -1103,13 +1283,15 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
             }
 
             if NSWorkspace.shared.open(url) {
-                refreshPermissionsAfterSettingsOpen()
+                pollPermissionsUntil { $0.notifications == .granted }
                 return
             }
         }
     }
 
-    private func refreshPermissionsAfterSettingsOpen() {
+    private func pollPermissionsUntil(
+        _ isSatisfied: @escaping (PermissionChecklist) -> Bool
+    ) {
         permissionRefreshTask?.cancel()
         permissionRefreshTask = Task { @MainActor in
             for _ in 0..<30 {
@@ -1119,7 +1301,7 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
                 }
 
                 await refreshPermissionsAndStartIfReady()
-                if permissionChecklist.notifications == .granted {
+                if isSatisfied(permissionChecklist) {
                     return
                 }
             }
@@ -1128,6 +1310,10 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
 
     private func currentScreenCapturePermission() -> PermissionGrant {
         CGPreflightScreenCaptureAccess() ? .granted : .denied
+    }
+
+    private func currentAccessibilityPermission() -> PermissionGrant {
+        AXIsProcessTrusted() ? .granted : .denied
     }
 
     private func currentMicrophonePermission() -> PermissionGrant {
@@ -1711,6 +1897,7 @@ struct PermissionList: View {
         VStack(alignment: .leading, spacing: 8) {
             PermissionRow(title: "Microphone", detail: "Required", grant: checklist.microphone)
             PermissionRow(title: "System audio", detail: "Required", grant: checklist.screenCapture)
+            PermissionRow(title: "Accessibility", detail: "Meeting detection", grant: checklist.accessibility)
             PermissionRow(title: "Alerts", detail: "Recommended", grant: checklist.notifications)
             PermissionRow(title: "Start at login", detail: "Optional", grant: checklist.startAtLogin)
         }

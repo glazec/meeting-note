@@ -7,6 +7,19 @@ public enum PermissionGrant: Sendable {
     case denied
 }
 
+public extension PermissionGrant {
+    var reportValue: String {
+        switch self {
+        case .unknown:
+            "unknown"
+        case .granted:
+            "granted"
+        case .denied:
+            "denied"
+        }
+    }
+}
+
 public enum PermissionSetupState: Sendable {
     case ready
     case blocked
@@ -16,17 +29,20 @@ public enum PermissionSetupState: Sendable {
 public struct PermissionChecklist: Sendable, Equatable {
     public var microphone: PermissionGrant
     public var screenCapture: PermissionGrant
+    public var accessibility: PermissionGrant
     public var notifications: PermissionGrant
     public var startAtLogin: PermissionGrant
 
     public init(
         microphone: PermissionGrant,
         screenCapture: PermissionGrant,
+        accessibility: PermissionGrant = .unknown,
         notifications: PermissionGrant,
         startAtLogin: PermissionGrant
     ) {
         self.microphone = microphone
         self.screenCapture = screenCapture
+        self.accessibility = accessibility
         self.notifications = notifications
         self.startAtLogin = startAtLogin
     }
@@ -296,11 +312,21 @@ public struct LocalRecorderAPIClient: Sendable {
     public var serverURL: URL
     public var bearerToken: String
     public var deviceId: String
+    public var appVersion: String?
+    public var permissionReadiness: [String: String]
 
-    public init(serverURL: URL, bearerToken: String, deviceId: String) {
+    public init(
+        serverURL: URL,
+        bearerToken: String,
+        deviceId: String,
+        appVersion: String? = nil,
+        permissionReadiness: [String: String] = [:]
+    ) {
         self.serverURL = serverURL
         self.bearerToken = bearerToken
         self.deviceId = deviceId
+        self.appVersion = appVersion
+        self.permissionReadiness = permissionReadiness
     }
 
     public func missedMeetingsRequest() throws -> URLRequest {
@@ -365,7 +391,10 @@ public struct LocalRecorderAPIClient: Sendable {
         )
     }
 
-    public func claimRequest(fallbackIntentId: String) throws -> URLRequest {
+    public func claimRequest(
+        fallbackIntentId: String,
+        explicit: Bool
+    ) throws -> URLRequest {
         var request = URLRequest(
             url: serverURL.appending(
                 path: "/api/local-recorder/intents/\(fallbackIntentId)/start"
@@ -373,12 +402,19 @@ public struct LocalRecorderAPIClient: Sendable {
         )
         request.httpMethod = "POST"
         applyRecorderHeaders(to: &request)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder.localRecorder.encode(
+            ClaimIntentRequest(explicit: explicit)
+        )
         return request
     }
 
-    public func claimIntent(fallbackIntentId: String) async throws -> ClaimIntentResponse {
+    public func claimIntent(
+        fallbackIntentId: String,
+        explicit: Bool
+    ) async throws -> ClaimIntentResponse {
         let (data, response) = try await URLSession.shared.data(
-            for: claimRequest(fallbackIntentId: fallbackIntentId)
+            for: claimRequest(fallbackIntentId: fallbackIntentId, explicit: explicit)
         )
         try validateHTTPResponse(response)
 
@@ -563,6 +599,17 @@ public struct LocalRecorderAPIClient: Sendable {
     private func applyRecorderHeaders(to request: inout URLRequest) {
         request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
         request.setValue(deviceId, forHTTPHeaderField: "x-local-recorder-device-id")
+        if let appVersion, !appVersion.isEmpty {
+            request.setValue(appVersion, forHTTPHeaderField: "x-local-recorder-app-version")
+        }
+        if !permissionReadiness.isEmpty,
+           let readinessData = try? JSONEncoder().encode(permissionReadiness),
+           let readinessValue = String(data: readinessData, encoding: .utf8) {
+            request.setValue(
+                readinessValue,
+                forHTTPHeaderField: "x-local-recorder-permission-readiness"
+            )
+        }
     }
 
     private func validateHTTPResponse(_ response: URLResponse) throws {
@@ -907,6 +954,38 @@ public struct DisplayTimeWindow: Codable, Equatable, Sendable {
     public var endsAt: Date?
 }
 
+public enum LocalRecorderAutoClaimPolicy {
+    /// For a meeting with no scheduled end, a recording started this long
+    /// after its start no longer auto-attaches — the user is most likely
+    /// starting an ad-hoc recording, not a late fallback for that meeting.
+    public static let autoClaimWindow: TimeInterval = 30 * 60
+
+    /// Grace period after a meeting's scheduled end during which the record
+    /// button still attaches to it. Matches the server's recording-window
+    /// extension (ENDED_AT_EXTENSION_MS) so a meeting that runs a little long
+    /// is still claimable rather than spilling into a detached ad-hoc entry.
+    public static let endedGrace: TimeInterval = 15 * 60
+
+    public static func autoClaimMeeting(
+        from meetings: [MissedMeeting],
+        at date: Date
+    ) -> MissedMeeting? {
+        meetings.first { meeting in
+            let window = meeting.displayTimeWindow
+
+            guard window.startsAt <= date else {
+                return false
+            }
+
+            if let endsAt = window.endsAt {
+                return date <= endsAt.addingTimeInterval(endedGrace)
+            }
+
+            return date.timeIntervalSince(window.startsAt) <= autoClaimWindow
+        }
+    }
+}
+
 public struct ClaimIntentResponse: Codable, Equatable, Sendable {
     public var claimed: Bool
     public var meetingTitle: String?
@@ -1154,6 +1233,10 @@ private struct CompleteUploadRequest: Codable {
 
 private struct FailIntentRequest: Codable {
     var errorMessage: String
+}
+
+private struct ClaimIntentRequest: Codable {
+    var explicit: Bool
 }
 
 public struct RecordingManifest: Codable, Equatable, Sendable {

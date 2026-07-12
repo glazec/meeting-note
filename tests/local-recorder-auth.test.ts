@@ -105,6 +105,63 @@ describe("local recorder auth", () => {
     });
   });
 
+  it("parses recorder version and permission readiness from device headers", async () => {
+    select.mockReturnValue({
+      from: () => ({
+        innerJoin,
+      }),
+    });
+    innerJoin.mockReturnValue({ where });
+    where.mockReturnValue({ limit });
+    limit.mockResolvedValue([
+      {
+        role: "member",
+        teamId: "team_123",
+        userId: "user_123",
+      },
+    ]);
+
+    const { getLocalRecorderDeviceRequestContext } = await import(
+      "@/lib/local-recorder-auth"
+    );
+    const context = await getLocalRecorderDeviceRequestContext(
+      new Request("https://app.example.com/api/local-recorder/monitoring", {
+        headers: {
+          authorization: "Bearer token_123",
+          "x-local-recorder-app-version": "0.2.0+abc123",
+          "x-local-recorder-device-id": "mac_123",
+          "x-local-recorder-permission-readiness": JSON.stringify({
+            accessibility: "granted",
+            ignored: "value",
+            microphone: "granted",
+            notifications: "denied",
+            screenCapture: "granted",
+            startAtLogin: "unknown",
+          }),
+        },
+      }),
+    );
+
+    expect(context).toEqual({
+      appVersion: "0.2.0+abc123",
+      deviceId: "mac_123",
+      ok: true,
+      permissionReadiness: {
+        accessibility: "granted",
+        microphone: "granted",
+        notifications: "denied",
+        screenCapture: "granted",
+        startAtLogin: "unknown",
+      },
+      workspace: {
+        canCreateMeetings: true,
+        domain: "",
+        teamId: "team_123",
+        userId: "user_123",
+      },
+    });
+  });
+
   it("rejects bearer device sessions after a user loses creator access", async () => {
     select.mockReturnValue({
       from: () => ({

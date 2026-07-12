@@ -319,32 +319,21 @@ final class LocalRecordingCaptureSession {
 
 @MainActor
 final class AudioLevelTestSession {
-    private let directoryURL: URL
     private let microphoneRecorder: MicrophoneTrackRecorder
     private let systemRecorder: SystemAudioTrackRecorder
 
     init(
         microphoneDeviceUID: String?,
         onAudioLevel: @escaping @Sendable (LocalRecorderAudioSource, Float) -> Void
-    ) throws {
-        let directoryURL = FileManager.default.temporaryDirectory
-            .appending(path: "level-test-\(UUID().uuidString)", directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(
-            at: directoryURL,
-            withIntermediateDirectories: true
-        )
-
-        self.directoryURL = directoryURL
-        self.microphoneRecorder = try MicrophoneTrackRecorder(
-            outputURL: directoryURL.appending(path: "microphone.wav"),
+    ) {
+        self.microphoneRecorder = MicrophoneTrackRecorder(
             deviceUID: microphoneDeviceUID,
             fallsBackToDefaultDevice: false,
             onAudioLevel: { level in
                 onAudioLevel(.microphone, level)
             }
         )
-        self.systemRecorder = try SystemAudioTrackRecorder(
-            outputURL: directoryURL.appending(path: "computer.wav"),
+        self.systemRecorder = SystemAudioTrackRecorder(
             onAudioLevel: { level in
                 onAudioLevel(.computerAudio, level)
             }
@@ -359,7 +348,6 @@ final class AudioLevelTestSession {
         } catch {
             microphoneRecorder.stop()
             await systemRecorder.stop()
-            try? FileManager.default.removeItem(at: directoryURL)
             throw error
         }
     }
@@ -367,7 +355,6 @@ final class AudioLevelTestSession {
     func stop() async {
         await systemRecorder.stop()
         microphoneRecorder.stop()
-        try? FileManager.default.removeItem(at: directoryURL)
     }
 }
 
@@ -565,7 +552,7 @@ final class MicrophoneTrackRecorder {
     private let engine = AVAudioEngine()
     private let fallsBackToDefaultDevice: Bool
     private let onAudioLevel: @Sendable (Float) -> Void
-    private let writer: PCM16WavWriter
+    private let writer: PCM16WavWriter?
 
     init(
         outputURL: URL,
@@ -577,6 +564,18 @@ final class MicrophoneTrackRecorder {
         self.fallsBackToDefaultDevice = fallsBackToDefaultDevice
         self.onAudioLevel = onAudioLevel
         self.writer = try PCM16WavWriter(outputURL: outputURL)
+    }
+
+    /// Meter-only mode: reports levels without writing audio to disk.
+    init(
+        deviceUID: String?,
+        fallsBackToDefaultDevice: Bool = true,
+        onAudioLevel: @escaping @Sendable (Float) -> Void
+    ) {
+        self.deviceUID = deviceUID
+        self.fallsBackToDefaultDevice = fallsBackToDefaultDevice
+        self.onAudioLevel = onAudioLevel
+        self.writer = nil
     }
 
     func start() throws {
@@ -604,7 +603,7 @@ final class MicrophoneTrackRecorder {
             format: inputFormat
         ) { [onAudioLevel, writer] buffer, _ in
             onAudioLevel(LocalAudioLevelMeter.rmsLevel(from: buffer))
-            writer.write(buffer)
+            writer?.write(buffer)
         }
         engine.prepare()
         try engine.start()
@@ -613,7 +612,7 @@ final class MicrophoneTrackRecorder {
     func stop() {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        writer.close()
+        writer?.close()
     }
 
     private func applyInputDevice(uid: String, to input: AVAudioInputNode) -> Bool {
@@ -638,7 +637,7 @@ final class MicrophoneTrackRecorder {
 final class SystemAudioTrackRecorder: NSObject, @unchecked Sendable, SCStreamOutput, SCStreamDelegate {
     private let onAudioLevel: @Sendable (Float) -> Void
     private let queue = DispatchQueue(label: "tech.inevitable.meeting-note.local-recorder.system-audio")
-    private let writer: PCM16WavWriter
+    private let writer: PCM16WavWriter?
     private var stream: SCStream?
 
     init(
@@ -647,6 +646,14 @@ final class SystemAudioTrackRecorder: NSObject, @unchecked Sendable, SCStreamOut
     ) throws {
         self.onAudioLevel = onAudioLevel
         self.writer = try PCM16WavWriter(outputURL: outputURL)
+        super.init()
+    }
+
+    /// Meter-only mode: reports levels without writing audio to disk.
+    init(onAudioLevel: @escaping @Sendable (Float) -> Void) {
+        self.onAudioLevel = onAudioLevel
+        self.writer = nil
+        super.init()
     }
 
     func start() async throws {
@@ -677,13 +684,13 @@ final class SystemAudioTrackRecorder: NSObject, @unchecked Sendable, SCStreamOut
 
     func stop() async {
         guard let stream else {
-            writer.close()
+            writer?.close()
             return
         }
 
         try? await stream.stopCapture()
         self.stream = nil
-        writer.close()
+        writer?.close()
     }
 
     nonisolated func stream(
@@ -698,14 +705,14 @@ final class SystemAudioTrackRecorder: NSObject, @unchecked Sendable, SCStreamOut
         do {
             let buffer = try AVAudioPCMBuffer.localRecorderBuffer(from: sampleBuffer)
             onAudioLevel(LocalAudioLevelMeter.rmsLevel(from: buffer))
-            writer.write(buffer)
+            writer?.write(buffer)
         } catch {
-            writer.record(error)
+            writer?.record(error)
         }
     }
 
     nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
-        writer.record(error)
+        writer?.record(error)
     }
 }
 

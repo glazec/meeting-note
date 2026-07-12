@@ -78,10 +78,50 @@ export async function getLocalRecorderDeviceRequestContext(request: Request) {
   }
 
   return {
+    appVersion:
+      request.headers.get("x-local-recorder-app-version")?.trim() || null,
     ok: true as const,
     deviceId,
+    permissionReadiness: parseLocalRecorderPermissionReadiness(
+      request.headers.get("x-local-recorder-permission-readiness"),
+    ),
     workspace,
   };
+}
+
+function parseLocalRecorderPermissionReadiness(value: string | null) {
+  if (!value) {
+    return {};
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(value);
+
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+
+    const allowedKeys = [
+      "accessibility",
+      "microphone",
+      "notifications",
+      "screenCapture",
+      "startAtLogin",
+    ];
+    const readiness: Record<string, string> = {};
+
+    for (const key of allowedKeys) {
+      const state = (parsed as Record<string, unknown>)[key];
+
+      if (state === "granted" || state === "denied" || state === "unknown") {
+        readiness[key] = state;
+      }
+    }
+
+    return readiness;
+  } catch {
+    return {};
+  }
 }
 
 export async function createLocalRecorderDeviceSession(input: {
