@@ -16,6 +16,7 @@ const eslintConfig = defineConfig([
     "node_modules/**",
     "test-results/**",
     "playwright-report/**",
+    "coverage/**",
     ".vercel/**",
     ".superpowers/**",
     ".worktrees/**",

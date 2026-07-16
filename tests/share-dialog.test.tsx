@@ -24,6 +24,8 @@ describe("ShareDialog", () => {
     expect(html).toContain("Select someone in organization");
     expect(html).toContain("Team Mate (teammate@example.com)");
     expect(html).toContain("Add by email");
+    expect(html).toContain("Share related and future meetings");
+    expect(html).toContain('name="includeRelated"');
     expect(html).not.toContain("Meeting ID");
   });
 });

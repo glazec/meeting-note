@@ -164,6 +164,35 @@ describe("TranscriptViewer", () => {
     expect(html).toContain('aria-label="Rename Speaker 1 everywhere"');
   });
 
+  it("uses different label colors for different speakers", () => {
+    const html = renderToStaticMarkup(
+      <TranscriptViewer
+        segments={[
+          {
+            id: "segment_yiping",
+            speaker: "YiPing Lu",
+            startMs: 0,
+            endMs: 1000,
+            text: "Hello",
+          },
+          {
+            id: "segment_gregory",
+            speaker: "Gregory Rocco",
+            startMs: 1000,
+            endMs: 2000,
+            text: "Hi",
+          },
+        ]}
+      />,
+    );
+    const labelColors = Array.from(
+      html.matchAll(/background-color:(#[0-9a-f]{6})/g),
+      (match) => match[1],
+    );
+
+    expect(new Set(labelColors)).toHaveLength(2);
+  });
+
   it("merges obvious speaker aliases in the speaker list and transcript rows", () => {
     const html = renderToStaticMarkup(
       <TranscriptViewer

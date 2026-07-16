@@ -59,4 +59,17 @@ describe("upload media support", () => {
     expect(uploadMediaAccept).toContain("audio/x-m4a");
     expect(uploadMediaAccept).toContain(".m4a");
   });
+
+  it("accepts WebM audio recorded by mobile browsers", () => {
+    expect(
+      getSupportedUploadMedia({
+        extension: "webm",
+        contentType: "audio/webm",
+      }),
+    ).toEqual({
+      extension: "webm",
+      contentType: "audio/webm",
+      kind: "audio",
+    });
+  });
 });

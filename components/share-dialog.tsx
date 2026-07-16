@@ -36,6 +36,7 @@ export function ShareDialog({
   );
   const [state, setState] = useState<ShareState>("idle");
   const [message, setMessage] = useState<string | null>(null);
+  const [includeRelated, setIncludeRelated] = useState(false);
   const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
   const encodedMeetingId = encodeURIComponent(meetingId);
   const meetingPath = `/meetings/${encodedMeetingId}`;
@@ -57,7 +58,7 @@ export function ShareDialog({
       headers: {
         "content-type": "application/json",
       },
-      body: JSON.stringify({ email: emailToShare }),
+      body: JSON.stringify({ email: emailToShare, includeRelated }),
     });
 
     if (!response.ok) {
@@ -72,16 +73,22 @@ export function ShareDialog({
 
     const body = (await response.json()) as {
       pending?: boolean;
+      futureMeetings?: boolean;
+      meetingCount?: number;
       user?: { email: string; name: string | null };
       email?: string;
     };
 
     setState("success");
-    setMessage(
-      body.pending
-        ? "Invite saved. They can sign in to read this transcript."
-        : `Access granted to ${body.user?.email ?? emailToShare}.`,
-    );
+    const accessMessage = body.pending
+      ? "Invite saved. They can sign in to read this transcript."
+      : `Access granted to ${body.user?.email ?? emailToShare}.`;
+    const meetingCount = body.meetingCount ?? 1;
+    const relatedMessage = body.futureMeetings
+      ? ` Access now covers ${meetingCount} matching meeting${meetingCount === 1 ? "" : "s"}. Future matches will be shared automatically.`
+      : "";
+
+    setMessage(`${accessMessage}${relatedMessage}`);
   }
 
   async function shareSelectedMember(event: FormEvent<HTMLFormElement>) {
@@ -127,6 +134,25 @@ export function ShareDialog({
             Anyone signed in with @{organizationDomain} can open this link.
           </p>
         </div>
+
+        <label className="flex items-start gap-3 rounded-lg border p-3">
+          <input
+            checked={includeRelated}
+            className="mt-1 size-4"
+            name="includeRelated"
+            onChange={(event) => setIncludeRelated(event.currentTarget.checked)}
+            type="checkbox"
+          />
+          <span>
+            <span className="block text-sm font-medium">
+              Share related and future meetings
+            </span>
+            <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+              Apply access to meetings with the same title or external people,
+              including future matches.
+            </span>
+          </span>
+        </label>
 
         <form className="flex flex-col gap-3" onSubmit={shareSelectedMember}>
           <div className="flex flex-col gap-2">

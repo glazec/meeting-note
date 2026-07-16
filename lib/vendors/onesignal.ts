@@ -33,7 +33,7 @@ export async function sendOneSignalLocationReminder(input: {
     },
     headings: { en: "Meeting starts soon" },
     contents: { en: `${input.meetingTitle} at ${input.location}` },
-    url: `${env.NEXT_PUBLIC_APP_URL}/meetings/${input.meetingId}`,
+    url: `${env.NEXT_PUBLIC_APP_URL}/meetings/${input.meetingId}/record`,
   };
   const response = await fetch("https://api.onesignal.com/notifications", {
     method: "POST",

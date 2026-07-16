@@ -15,6 +15,7 @@ import {
   type SupportedMeetingPlatform,
 } from "@/lib/meeting-links";
 import { buildSmartMeetingTitle } from "@/lib/meeting-intelligence";
+import { applyMeetingShareRules } from "@/lib/meeting-share-rules";
 import {
   getMeetingBotMetadata,
   getMeetingBotProfile,
@@ -87,6 +88,7 @@ type RecallBotResponse = {
 
 type ExistingMeeting = {
   id: string;
+  ownerUserId: string;
   calendarEventId?: string | null;
   teamMeetingKey?: string | null;
   title: string;
@@ -221,6 +223,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
       return syncLocationCalendarMeeting({
         connection: input.connection,
         calendarEvent,
+        attendeeEmails,
         existingMeeting,
         title,
         startsAt,
@@ -405,7 +408,8 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
     });
   }
 
-  let meeting: ExistingMeeting | { id: string } | null = existingMeeting;
+  let meeting: ExistingMeeting | { id: string; ownerUserId: string } | null =
+    existingMeeting;
   let createdMeeting = false;
 
   if (!meeting) {
@@ -426,7 +430,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
             startedAt: startsAt,
             endedAt: endsAt,
           })
-          .returning({ id: meetings.id })
+          .returning({ id: meetings.id, ownerUserId: meetings.ownerUserId })
       )[0];
       createdMeeting = true;
     } catch (error) {
@@ -480,6 +484,20 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
       .onConflictDoNothing({
         target: [meetingAttendees.meetingId, meetingAttendees.email],
       });
+  }
+
+  if (input.connection.workspaceDomain) {
+    await applyMeetingShareRules({
+      attendeeEmails,
+      meetingId: meeting.id,
+      ownerUserId: meeting.ownerUserId,
+      teamId: input.connection.teamId,
+      title: getCalendarMeetingTitle(
+        "titleSource" in meeting ? meeting : null,
+        title,
+      ),
+      workspaceDomain: input.connection.workspaceDomain,
+    });
   }
 
   try {
@@ -556,6 +574,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
 async function syncLocationCalendarMeeting(input: {
   connection: CalendarConnection;
   calendarEvent: CalendarEventRow;
+  attendeeEmails: string[];
   existingMeeting: ExistingMeeting | null;
   title: string;
   startsAt: Date;
@@ -585,6 +604,7 @@ async function syncLocationCalendarMeeting(input: {
         })
         .returning({
           id: meetings.id,
+          ownerUserId: meetings.ownerUserId,
           calendarEventId: meetings.calendarEventId,
           teamMeetingKey: meetings.teamMeetingKey,
           title: meetings.title,
@@ -611,6 +631,17 @@ async function syncLocationCalendarMeeting(input: {
         updatedAt: new Date(),
       })
       .where(eq(meetings.id, meeting.id));
+  }
+
+  if (input.connection.workspaceDomain) {
+    await applyMeetingShareRules({
+      attendeeEmails: input.attendeeEmails,
+      meetingId: meeting.id,
+      ownerUserId: meeting.ownerUserId,
+      teamId: input.connection.teamId,
+      title,
+      workspaceDomain: input.connection.workspaceDomain,
+    });
   }
 
   const reminderScheduledFor = new Date(input.startsAt.getTime() - 2 * 60 * 1000);
@@ -856,6 +887,7 @@ async function findExistingMeeting(input: {
   const existing = await db
     .select({
       id: meetings.id,
+      ownerUserId: meetings.ownerUserId,
       calendarEventId: meetings.calendarEventId,
       teamMeetingKey: meetings.teamMeetingKey,
       title: meetings.title,

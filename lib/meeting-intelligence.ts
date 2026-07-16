@@ -1,6 +1,7 @@
 import {
   getEmailDomain,
   getExternalOrganizationDomain,
+  isCommonPersonalEmailDomain,
   normalizeEmailAddress,
 } from "@/lib/email-domains";
 import { formatNameFromEmail } from "@/lib/speaker-labels";
@@ -321,7 +322,7 @@ export function groupRelatedMeetings(
   const roots: MeetingForGrouping[] = [];
 
   for (const meeting of sorted) {
-    const keys = getMeetingGroupingKeys(meeting, options);
+    const keys = getMeetingSimilarityKeys(meeting, options);
 
     if (keys.length === 0) {
       roots.push(meeting);
@@ -546,8 +547,11 @@ function buildMeetingLinkEntity(meetingUrl?: string | null) {
   }
 }
 
-function getMeetingGroupingKeys(
-  meeting: MeetingForGrouping,
+export function getMeetingSimilarityKeys(
+  meeting: Pick<
+    MeetingForGrouping,
+    "title" | "primaryEntity" | "externalParticipantKeys"
+  >,
   options: GroupRelatedMeetingsOptions,
 ) {
   const keys: string[] = [];
@@ -569,6 +573,39 @@ function getMeetingGroupingKeys(
   }
 
   return keys;
+}
+
+export function getExternalParticipantKeys(
+  attendeeEmails: unknown,
+  workspaceDomain: string,
+) {
+  if (!Array.isArray(attendeeEmails)) {
+    return [];
+  }
+
+  const normalizedWorkspaceDomain = workspaceDomain.trim().toLowerCase();
+  const keys = new Set<string>();
+
+  for (const rawEmail of attendeeEmails) {
+    if (typeof rawEmail !== "string") {
+      continue;
+    }
+
+    const email = normalizeEmailAddress(rawEmail);
+    const domain = getEmailDomain(email);
+
+    if (!email || !domain || domain === normalizedWorkspaceDomain) {
+      continue;
+    }
+
+    keys.add(`email:${email}`);
+
+    if (!isCommonPersonalEmailDomain(domain)) {
+      keys.add(`domain:${domain}`);
+    }
+  }
+
+  return Array.from(keys);
 }
 
 function getMeetingTitleGroupingKey(title: string) {

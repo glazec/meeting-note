@@ -3,6 +3,8 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
 describe("API route configuration", () => {
+  // framework adapter: app/api/auth/[...path]/route.ts
+  // framework adapter: app/api/inngest/route.ts
   it("pins API route handlers to the Node runtime", () => {
     const missingNodeRuntime = listRouteFiles("app/api")
       .map((filePath) => ({

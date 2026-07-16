@@ -30,11 +30,7 @@ import {
   type DashboardWorkflowSummaryModel,
 } from "@/lib/dashboard-workflow-summary";
 import { currentTranscriptJobIdSubquery } from "@/lib/current-transcript-job";
-import {
-  getEmailDomain,
-  isCommonPersonalEmailDomain,
-  normalizeEmailAddress,
-} from "@/lib/email-domains";
+import { normalizeEmailAddress } from "@/lib/email-domains";
 import {
   getMeetingDisplayStatus,
   type TranscriptJobStatus,
@@ -69,6 +65,7 @@ import {
 } from "@/lib/workspace";
 import {
   buildSmartMeetingTitle,
+  getExternalParticipantKeys,
   groupRelatedMeetings,
 } from "@/lib/meeting-intelligence";
 import {
@@ -849,39 +846,6 @@ function normalizeRelatedHistoryMonths(months: number | undefined) {
     DEFAULT_RELATED_MEETING_HISTORY_MONTHS,
     Math.min(MAX_MEETING_LIBRARY_HISTORY_MONTHS, Math.floor(months)),
   );
-}
-
-function getExternalParticipantKeys(
-  attendeeEmails: unknown,
-  workspaceDomain: string,
-) {
-  if (!Array.isArray(attendeeEmails)) {
-    return [];
-  }
-
-  const normalizedWorkspaceDomain = workspaceDomain.trim().toLowerCase();
-  const keys = new Set<string>();
-
-  for (const rawEmail of attendeeEmails) {
-    if (typeof rawEmail !== "string") {
-      continue;
-    }
-
-    const email = normalizeEmailAddress(rawEmail);
-    const domain = getEmailDomain(email);
-
-    if (!email || !domain || domain === normalizedWorkspaceDomain) {
-      continue;
-    }
-
-    keys.add(`email:${email}`);
-
-    if (!isCommonPersonalEmailDomain(domain)) {
-      keys.add(`domain:${domain}`);
-    }
-  }
-
-  return Array.from(keys);
 }
 
 function getMeetingParticipantCount(input: {

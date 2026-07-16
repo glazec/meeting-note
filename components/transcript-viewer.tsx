@@ -329,6 +329,10 @@ export function TranscriptViewer({
     () => buildSpeakerStats(rawDisplaySegments),
     [rawDisplaySegments],
   );
+  const speakerColorByKey = useMemo(
+    () => buildSpeakerColorMap(speakerStats),
+    [speakerStats],
+  );
   const speakerStatByRawKey = useMemo(() => {
     const statsByRawKey = new Map<string, SpeakerStat>();
 
@@ -864,6 +868,7 @@ export function TranscriptViewer({
                           style={{
                             backgroundColor: getWaveformSpeakerColor(
                               speaker.speaker,
+                              speakerColorByKey,
                             ),
                           }}
                         />
@@ -978,6 +983,7 @@ export function TranscriptViewer({
                       style={{
                         backgroundColor: getWaveformSpeakerColor(
                           displaySpeaker,
+                          speakerColorByKey,
                         ),
                       }}
                     >
@@ -1104,6 +1110,7 @@ export function TranscriptViewer({
           isPlaying={isPlaying}
           playbackRate={playbackRate}
           segments={displaySegments}
+          speakerColorByKey={speakerColorByKey}
           onAudioTimeUpdate={handleAudioTimeUpdate}
           onPreviewCancel={clearSpeakerPreview}
           onTimelineSeek={scrollTranscriptToTime}
@@ -1397,6 +1404,7 @@ function TranscriptAudioPlayer({
   isPlaying,
   playbackRate,
   segments,
+  speakerColorByKey,
   onAudioTimeUpdate,
   onPreviewCancel,
   onTimelineSeek,
@@ -1413,6 +1421,7 @@ function TranscriptAudioPlayer({
   isPlaying: boolean;
   playbackRate: number;
   segments: TranscriptSegment[];
+  speakerColorByKey: ReadonlyMap<string, string>;
   onAudioTimeUpdate: (audio: HTMLAudioElement) => void;
   onPreviewCancel: () => void;
   onTimelineSeek: (timeSecond: number) => void;
@@ -1741,7 +1750,10 @@ function TranscriptAudioPlayer({
                   <span
                     className="absolute inset-x-0 top-1 h-1 rounded-full"
                     style={{
-                      backgroundColor: getWaveformSpeakerColor(section.speaker),
+                      backgroundColor: getWaveformSpeakerColor(
+                        section.speaker,
+                        speakerColorByKey,
+                      ),
                       opacity: section.id === activeSegmentId ? 0.96 : 0.78,
                     }}
                   />
@@ -2485,15 +2497,62 @@ export function getSpeakerPreviewTransition(
   return { clip: nextClip, index: nextIndex, type: "jump" };
 }
 
-function getWaveformSpeakerColor(speaker: string | null) {
-  const speakerKey = getSpeakerKey(speaker);
+function buildSpeakerColorMap(speakers: SpeakerStat[]) {
+  const colorByKey = new Map<string, string>();
+  const usedColors = new Set<string>();
+
+  for (const [speakerIndex, speaker] of speakers.entries()) {
+    const speakerKey = getSpeakerKey(speaker.speaker);
+    const preferredIndex = getSpeakerColorHash(speakerKey) %
+      WAVEFORM_SECTION_COLORS.length;
+    let color = WAVEFORM_SECTION_COLORS[preferredIndex];
+
+    if (usedColors.size < WAVEFORM_SECTION_COLORS.length) {
+      for (let offset = 0; usedColors.has(color); offset += 1) {
+        color = WAVEFORM_SECTION_COLORS[
+          (preferredIndex + offset + 1) % WAVEFORM_SECTION_COLORS.length
+        ];
+      }
+    } else {
+      const hue = ((speakerIndex - WAVEFORM_SECTION_COLORS.length) * 137.508 + 20) %
+        360;
+
+      color = `hsl(${hue.toFixed(3)} 65% 38%)`;
+    }
+
+    usedColors.add(color);
+    colorByKey.set(speakerKey, color);
+
+    for (const alias of speaker.aliases) {
+      colorByKey.set(getSpeakerKey(alias), color);
+    }
+  }
+
+  return colorByKey;
+}
+
+function getSpeakerColorHash(speakerKey: string) {
   let hash = 0;
 
   for (let index = 0; index < speakerKey.length; index += 1) {
     hash = (hash * 31 + speakerKey.charCodeAt(index)) >>> 0;
   }
 
-  return WAVEFORM_SECTION_COLORS[hash % WAVEFORM_SECTION_COLORS.length];
+  return hash;
+}
+
+function getWaveformSpeakerColor(
+  speaker: string | null,
+  speakerColorByKey: ReadonlyMap<string, string>,
+) {
+  const speakerKey = getSpeakerKey(speaker);
+
+  return (
+    speakerColorByKey.get(speakerKey) ??
+    WAVEFORM_SECTION_COLORS[
+      getSpeakerColorHash(speakerKey) % WAVEFORM_SECTION_COLORS.length
+    ]
+  );
 }
 
 function getWaveformEmotionColor(

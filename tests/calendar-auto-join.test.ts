@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
+  applyMeetingShareRules,
   deleteRecallCalendarEventBot,
   deleteScheduledRecallBot,
   getMeetingBotProfile,
@@ -11,6 +12,7 @@ const {
   update,
   updateScheduledRecallBot,
 } = vi.hoisted(() => ({
+  applyMeetingShareRules: vi.fn(),
   deleteRecallCalendarEventBot: vi.fn(),
   deleteScheduledRecallBot: vi.fn(),
   getMeetingBotProfile: vi.fn(),
@@ -20,6 +22,10 @@ const {
   select: vi.fn(),
   update: vi.fn(),
   updateScheduledRecallBot: vi.fn(),
+}));
+
+vi.mock("@/lib/meeting-share-rules", () => ({
+  applyMeetingShareRules,
 }));
 
 vi.mock("@/db/client", () => ({
@@ -69,6 +75,7 @@ vi.mock("@/lib/meeting-bot-profile", () => ({
 
 describe("calendar auto join", () => {
   beforeEach(() => {
+    applyMeetingShareRules.mockResolvedValue({ sharedCount: 0 });
     getMeetingBotProfile.mockResolvedValue({
       botName: "IOSG Old Friend",
       avatarJpegBase64: null,
@@ -76,6 +83,7 @@ describe("calendar auto join", () => {
   });
 
   afterEach(() => {
+    applyMeetingShareRules.mockReset();
     deleteRecallCalendarEventBot.mockReset();
     deleteScheduledRecallBot.mockReset();
     getMeetingBotProfile.mockReset();
@@ -153,7 +161,12 @@ describe("calendar auto join", () => {
 
     const meetingReturning = vi
       .fn()
-      .mockResolvedValue([{ id: "44444444-4444-4444-8444-444444444444" }]);
+      .mockResolvedValue([
+        {
+          id: "44444444-4444-4444-8444-444444444444",
+          ownerUserId: "55555555-5555-4555-8555-555555555555",
+        },
+      ]);
     const meetingValues = vi.fn().mockReturnValue({ returning: meetingReturning });
 
     const attendeeOnConflictDoNothing = vi.fn().mockResolvedValue(undefined);
@@ -243,6 +256,14 @@ describe("calendar auto join", () => {
         title: "IOSG <> Nascent",
       }),
     );
+    expect(applyMeetingShareRules).toHaveBeenCalledWith({
+      attendeeEmails: ["founder@nascent.xyz", "alice@iosg.vc"],
+      meetingId: "44444444-4444-4444-8444-444444444444",
+      ownerUserId: "55555555-5555-4555-8555-555555555555",
+      teamId: "22222222-2222-4222-8222-222222222222",
+      title: "IOSG <> Nascent",
+      workspaceDomain: "iosg.vc",
+    });
     expect(attendeeValues).toHaveBeenCalledWith([
       {
         email: "founder@nascent.xyz",

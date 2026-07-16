@@ -19,8 +19,14 @@
     "inngest:sync:image-worker": "node scripts/sync-image-worker-inngest.mjs",
     "lint": "eslint",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:mcp": "cd mcp/meeting-note && DISABLE_AUTH=true MCP_ALLOW_DEV_AUTH=true MCP_HOST=127.0.0.1 MCP_DEV_USER_EMAIL=tester@example.com uv run python -m unittest",
+    "test:sidecar": "npm --prefix mac/LocalRecorder/Sidecar test",
+    "test:swift": "swift test --package-path mac/LocalRecorder",
+    "verify": "npm run lint && npm run test:coverage && npm run build && npm run test:sidecar && npm run test:mcp",
+    "verify:all": "npm run verify && npm run test:swift && npm run test:e2e"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1075.0",
@@ -50,6 +56,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitest/coverage-v8": "^4.1.9",
     "@vitest/ui": "^4.1.9",
     "drizzle-kit": "^0.31.10",
     "esbuild": "0.28.1",

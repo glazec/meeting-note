@@ -50,11 +50,30 @@ async function shareMeetingRequest(body: unknown = { email: "teammate@example.co
   );
 }
 
-function mockMeetingRows(rows: Array<{ id: string }>) {
+function mockMeetingRows(
+  rows: Array<{
+    attendeeEmails?: string[];
+    id: string;
+    ownerUserId?: string;
+    title?: string;
+  }>,
+) {
   select.mockReturnValueOnce({
     from: () => ({
-      where: () => ({
-        limit: vi.fn().mockResolvedValue(rows),
+      leftJoin: () => ({
+        where: () => ({
+          limit: vi.fn().mockResolvedValue(rows),
+        }),
+      }),
+    }),
+  });
+}
+
+function mockRelatedMeetingRows(rows: unknown[]) {
+  select.mockReturnValueOnce({
+    from: () => ({
+      leftJoin: () => ({
+        where: vi.fn().mockResolvedValue(rows),
       }),
     }),
   });
@@ -129,6 +148,8 @@ describe("POST /api/meetings/[meetingId]/share", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
+      futureMeetings: false,
+      meetingCount: 1,
       shared: true,
       user: {
         email: "teammate@example.com",
@@ -174,6 +195,8 @@ describe("POST /api/meetings/[meetingId]/share", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       audience: "external",
+      futureMeetings: false,
+      meetingCount: 1,
       shared: true,
       user: {
         email: "partner@vendor.com",
@@ -210,6 +233,8 @@ describe("POST /api/meetings/[meetingId]/share", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       email: "outside@example.com",
+      futureMeetings: false,
+      meetingCount: 1,
       pending: true,
       shared: true,
     });
@@ -220,5 +245,79 @@ describe("POST /api/meetings/[meetingId]/share", () => {
       role: "shared",
     });
     expect(onConflictDoNothing).toHaveBeenCalled();
+  });
+
+  it("shares related meetings and saves rules for future matches", async () => {
+    getCurrentUser.mockResolvedValue({
+      email: "owner@example.com",
+      id: "auth_owner",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({
+      domain: "example.com",
+      teamId: "team_123",
+      userId: "owner_user_id",
+    });
+    mockMeetingRows([
+      {
+        attendeeEmails: ["partner@vendor.com", "owner@example.com"],
+        id: "11111111-1111-4111-8111-111111111111",
+        ownerUserId: "owner_user_id",
+        title: "Weekly partner sync",
+      },
+    ]);
+    mockRelatedMeetingRows([
+      {
+        attendeeEmails: ["partner@vendor.com"],
+        id: "11111111-1111-4111-8111-111111111111",
+        title: "Weekly partner sync",
+      },
+      {
+        attendeeEmails: ["partner@vendor.com"],
+        id: "22222222-2222-4222-8222-222222222222",
+        title: "Next partner update",
+      },
+      {
+        attendeeEmails: ["other@another.com"],
+        id: "33333333-3333-4333-8333-333333333333",
+        title: "Unrelated meeting",
+      },
+    ]);
+    mockTargetRows([
+      {
+        email: "teammate@example.com",
+        id: "teammate_user_id",
+        membershipId: "membership_123",
+        name: "Team Mate",
+      },
+    ]);
+    insert.mockReturnValue({ values });
+    values.mockReturnValue({ onConflictDoNothing });
+    onConflictDoNothing.mockResolvedValue(undefined);
+
+    const response = await shareMeetingRequest({
+      email: "teammate@example.com",
+      includeRelated: true,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      futureMeetings: true,
+      meetingCount: 2,
+      shared: true,
+    });
+    expect(values).toHaveBeenCalledWith({
+      meetingId: "22222222-2222-4222-8222-222222222222",
+      role: "shared",
+      userId: "teammate_user_id",
+    });
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        matchKey: "title:weekly partner sync",
+        ownerUserId: "owner_user_id",
+        recipientEmail: "teammate@example.com",
+        teamId: "team_123",
+      }),
+    );
   });
 });

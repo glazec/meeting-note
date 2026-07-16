@@ -13,9 +13,9 @@ Follow the [setup guide](docs/setup.md) before making changes.
 
 ```bash
 npm install
-npm run lint
-npm run test
-npm run build
+npm run verify
 ```
+
+Run `npm run verify:all` on macOS before a release. See [testing architecture](docs/testing.md) for the coverage boundaries and individual commands.
 
 Pull requests should explain the problem, the chosen approach, and how the result was verified.

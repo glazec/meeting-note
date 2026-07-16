@@ -403,6 +403,39 @@ export const meetingShareInvites = pgTable(
   ],
 );
 
+export const meetingShareRules = pgTable(
+  "meeting_share_rules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    ownerUserId: uuid("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    recipientEmail: text("recipient_email").notNull(),
+    matchKey: text("match_key").notNull(),
+    role: accessRole("role").notNull().default("shared"),
+    createdByUserId: uuid("created_by_user_id")
+      .notNull()
+      .references(() => users.id),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("meeting_share_rules_scope_recipient_key_unique").on(
+      table.teamId,
+      table.ownerUserId,
+      table.recipientEmail,
+      table.matchKey,
+    ),
+    index("meeting_share_rules_future_lookup_index").on(
+      table.teamId,
+      table.ownerUserId,
+      table.matchKey,
+    ),
+  ],
+);
+
 export const recordings = pgTable("recordings", {
   id: uuid("id").primaryKey().defaultRandom(),
   meetingId: uuid("meeting_id")

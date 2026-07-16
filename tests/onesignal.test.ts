@@ -51,7 +51,7 @@ describe("OneSignal vendor", () => {
         },
         headings: { en: "Meeting starts soon" },
         contents: { en: "Founder office visit at IOSG 12F" },
-        url: "https://meeting-note-swart.vercel.app/meetings/22222222-2222-4222-8222-222222222222",
+        url: "https://meeting-note-swart.vercel.app/meetings/22222222-2222-4222-8222-222222222222/record",
       }),
     });
   });

@@ -21,6 +21,7 @@ export const supportedUploadMedia = [
   { extension: "mp3", contentType: "audio/mpeg", kind: "audio" },
   { extension: "m4a", contentType: "audio/mp4", kind: "audio" },
   { extension: "m4a", contentType: "audio/x-m4a", kind: "audio" },
+  { extension: "webm", contentType: "audio/webm", kind: "audio" },
   { extension: "mp4", contentType: "video/mp4", kind: "video" },
   { extension: "mov", contentType: "video/quicktime", kind: "video" },
   { extension: "webm", contentType: "video/webm", kind: "video" },
