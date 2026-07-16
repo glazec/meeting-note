@@ -97,7 +97,15 @@ export async function POST(request: Request) {
         platform,
         status: "joining",
       });
-    } catch {
+    } catch (error) {
+      console.error("meeting_link_scheduling_failure", {
+        errorMessage: getErrorMessage(error),
+        meetingId: scheduledMeeting.meetingId,
+        phase: "join_existing_bot",
+        platform,
+        userId: user.id,
+      });
+
       return Response.json(
         { error: "Meeting bot could not join" },
         { status: 502 },

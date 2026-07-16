@@ -21,6 +21,8 @@ import {
   getOrCreateWorkspaceForSessionUser,
 } from "@/lib/workspace";
 
+const IMMEDIATE_CALENDAR_JOIN_LEAD_MS = 10 * 1_000;
+
 export class MeetingBotJoinUnavailableError extends Error {
   constructor() {
     super("Meeting bot is no longer scheduled");
@@ -89,7 +91,9 @@ export async function joinScheduledMeetingBotNow(input: {
       calendarEventId: recallCalendarEventId,
       deduplicationKey,
       ...getMeetingBotRecallCreateInput(botProfile),
-      joinAt: (input.now ?? new Date()).toISOString(),
+      joinAt: new Date(
+        (input.now ?? new Date()).getTime() + IMMEDIATE_CALENDAR_JOIN_LEAD_MS,
+      ).toISOString(),
       metadata,
     });
     const botId = getRecallCalendarBotId(response, deduplicationKey);

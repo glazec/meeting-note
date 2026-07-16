@@ -201,7 +201,7 @@ describe("meeting bot early join", () => {
       botName: "Deal Scribe",
       calendarEventId: "recall_event_123",
       deduplicationKey: "shared_event_key",
-      joinAt: "2026-07-16T15:30:00.000Z",
+      joinAt: "2026-07-16T15:30:10.000Z",
       metadata: {
         botName: "Deal Scribe",
         calendarEventId: "33333333-3333-4333-8333-333333333333",
