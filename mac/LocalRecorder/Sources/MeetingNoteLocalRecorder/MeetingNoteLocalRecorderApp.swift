@@ -4,6 +4,7 @@ import AVFoundation
 import Foundation
 import LocalRecorderCore
 import ServiceManagement
+import Sparkle
 import SwiftUI
 import UserNotifications
 
@@ -26,6 +27,21 @@ private enum LocalRecorderAppVersion {
 
 @MainActor
 private let externalURLDispatcher = LocalRecorderExternalURLDispatcher()
+
+@MainActor
+private final class LocalRecorderUpdater {
+    static let shared = LocalRecorderUpdater()
+
+    private let controller = SPUStandardUpdaterController(
+        startingUpdater: true,
+        updaterDelegate: nil,
+        userDriverDelegate: nil
+    )
+
+    func checkForUpdates() {
+        controller.checkForUpdates(nil)
+    }
+}
 
 private final class LocalRecorderAppDelegate: NSObject, NSApplicationDelegate {
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -103,6 +119,7 @@ enum RecorderPermissionStep {
 struct MeetingNoteLocalRecorderApp: App {
     @NSApplicationDelegateAdaptor(LocalRecorderAppDelegate.self) private var appDelegate
     @StateObject private var model = RecorderAppModel()
+    private let updater = LocalRecorderUpdater.shared
 
     var body: some Scene {
         MenuBarExtra("Meeting Note Recorder", systemImage: model.menuBarImage) {
@@ -1118,12 +1135,7 @@ final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCent
     }
 
     func checkForUpdates() {
-        let alert = NSAlert()
-        alert.alertStyle = .informational
-        alert.messageText = "No updater configured"
-        alert.informativeText = "This local recorder build is version \(appVersion)."
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
+        LocalRecorderUpdater.shared.checkForUpdates()
     }
 
     func signOut() {

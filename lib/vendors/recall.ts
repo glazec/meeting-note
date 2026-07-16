@@ -169,6 +169,7 @@ const recallCalendarEventBotInputSchema = z.object({
   deduplicationKey: z.string().trim().min(1).max(2000),
   botName: z.string().trim().min(1).max(100).default(DEFAULT_RECALL_BOT_NAME),
   avatarJpegBase64: z.string().trim().min(1).optional(),
+  joinAt: z.iso.datetime().optional(),
   metadata: z.record(z.string(), z.string()).optional(),
 });
 
@@ -656,6 +657,7 @@ export async function scheduleRecallCalendarEventBot(input: {
   deduplicationKey: string;
   botName?: string;
   avatarJpegBase64?: string;
+  joinAt?: string;
   metadata?: Record<string, string>;
 }) {
   const parsedInput = recallCalendarEventBotInputSchema.parse(input);
@@ -675,6 +677,7 @@ export async function scheduleRecallCalendarEventBot(input: {
         deduplication_key: parsedInput.deduplicationKey,
         bot_config: {
           bot_name: parsedInput.botName,
+          ...(parsedInput.joinAt ? { join_at: parsedInput.joinAt } : {}),
           automatic_leave: {
             waiting_room_timeout: DEFAULT_RECALL_WAITING_ROOM_TIMEOUT_SECONDS,
           },

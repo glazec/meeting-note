@@ -6,6 +6,7 @@ import {
   markMeetingBotFailed,
   markMeetingBotScheduled,
 } from "@/lib/meeting-bot-records";
+import { joinScheduledMeetingBotNow } from "@/lib/meeting-bot-join";
 import {
   buildAppUrl,
   detectMeetingPlatform,
@@ -83,13 +84,25 @@ export async function POST(request: Request) {
   }
 
   if (scheduledMeeting.recallBotId) {
-    return Response.json({
-      botId: scheduledMeeting.recallBotId,
-      meetingId: scheduledMeeting.meetingId,
-      meetingUrl,
-      platform,
-      status: "scheduled",
-    });
+    try {
+      const joinedMeeting = await joinScheduledMeetingBotNow({
+        meetingId: scheduledMeeting.meetingId,
+        sessionUser: user,
+      });
+
+      return Response.json({
+        botId: joinedMeeting.botId,
+        meetingId: scheduledMeeting.meetingId,
+        meetingUrl,
+        platform,
+        status: "joining",
+      });
+    } catch {
+      return Response.json(
+        { error: "Meeting bot could not join" },
+        { status: 502 },
+      );
+    }
   }
 
   try {

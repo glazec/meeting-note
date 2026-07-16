@@ -186,6 +186,29 @@ describe("MeetingList", () => {
     expect(html).not.toContain("has-aria-expanded:bg-muted/50");
   });
 
+  it("turns an upcoming scheduled status into a join now action", () => {
+    const html = renderToStaticMarkup(
+      <MeetingList
+        meetings={[
+          {
+            id: "22222222-2222-4222-8222-222222222222",
+            title: "Partner call",
+            platform: "zoom",
+            startedAt: "2999-06-29T15:00:00.000Z",
+            status: "scheduled",
+            hasRecallBot: true,
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain("Join now");
+    expect(html).toContain("Join Partner call now");
+    expect(html).toContain(
+      "/api/meetings/22222222-2222-4222-8222-222222222222/join",
+    );
+  });
+
   it("shows uploaded queued audio as in progress", () => {
     const html = renderToStaticMarkup(
       <MeetingList

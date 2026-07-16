@@ -15,7 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-type FormState = "idle" | "saving" | "scheduled" | "error";
+type FormState = "idle" | "saving" | "scheduled" | "joining" | "error";
 
 export function MeetingLinkForm() {
   const [state, setState] = useState<FormState>("idle");
@@ -51,12 +51,31 @@ export function MeetingLinkForm() {
         return;
       }
 
+      const responseBody = (await response.json().catch(() => null)) as {
+        error?: unknown;
+        status?: unknown;
+      } | null;
+
       if (!response.ok) {
+        if (
+          typeof responseBody?.error === "string" &&
+          responseBody.error.toLowerCase().includes("join")
+        ) {
+          setState("error");
+          setMessage("Bot could not join. Try again.");
+          return;
+        }
+
         throw new Error("Meeting bot request failed");
       }
 
-      setState("scheduled");
-      setMessage("Meeting bot scheduled");
+      if (responseBody?.status === "joining") {
+        setState("joining");
+        setMessage("The bot should appear within about 30 seconds.");
+      } else {
+        setState("scheduled");
+        setMessage("Meeting bot scheduled");
+      }
     } catch {
       setState("error");
       setMessage("Meeting bot could not be scheduled");
@@ -70,7 +89,7 @@ export function MeetingLinkForm() {
           <div>
             <CardTitle>Meeting link</CardTitle>
             <CardDescription>
-              Schedule a bot for a Google Meet or Zoom call.
+              Schedule a bot, or send it now if the meeting started early.
             </CardDescription>
           </div>
           <span
@@ -96,13 +115,22 @@ export function MeetingLinkForm() {
           </div>
           <Button type="submit" disabled={state === "saving"} className="w-fit">
             <CalendarPlus data-icon="inline-start" />
-            {state === "saving" ? "Scheduling..." : "Save meeting link"}
+            {state === "saving" ? "Checking..." : "Schedule or join bot"}
           </Button>
           {message ? (
-            <Alert variant={state === "error" ? "destructive" : "default"}>
+            <Alert
+              role={state === "error" ? "alert" : "status"}
+              variant={state === "error" ? "destructive" : "default"}
+            >
               {state === "error" ? <AlertCircle /> : <CheckCircle2 />}
               <AlertTitle>
-                {state === "error" ? "Meeting not scheduled" : "Bot scheduled"}
+                {state === "error"
+                  ? message?.startsWith("Bot could not join")
+                    ? "Bot could not join"
+                    : "Meeting not scheduled"
+                  : state === "joining"
+                    ? "Bot joining"
+                    : "Bot scheduled"}
               </AlertTitle>
               <AlertDescription>
                 {message}

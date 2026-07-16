@@ -1,0 +1,182 @@
+name: Release macOS recorder
+
+on:
+  push:
+    tags:
+      - "mac-v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-macos
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Validate release tag and secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          APP_VERSION="${TAG#mac-v}"
+          if [[ ! "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag must use mac-vMAJOR.MINOR.PATCH, for example mac-v0.3.0." >&2
+            exit 1
+          fi
+
+          if [[ -z "$SPARKLE_PRIVATE_KEY" ]]; then
+            echo "Missing GitHub Actions secret: SPARKLE_PRIVATE_KEY" >&2
+            exit 1
+          fi
+
+          git fetch origin main
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "The release tag must point to a commit on main." >&2
+            exit 1
+          fi
+
+          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_VERSION=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
+
+      - name: Test and build ad hoc app
+        working-directory: mac/LocalRecorder
+        shell: bash
+        env:
+          BUILD_CONFIGURATION: release
+          CODESIGN_IDENTITY: "-"
+        run: |
+          set -euo pipefail
+          npm ci --prefix Sidecar
+          npm test --prefix Sidecar
+          swift test
+          script/build_and_run.sh --package
+
+          APP_PATH="$PWD/dist/MeetingNoteLocalRecorder.app"
+          test "$(plutil -extract CFBundleShortVersionString raw "$APP_PATH/Contents/Info.plist")" = "$APP_VERSION"
+          test "$(plutil -extract CFBundleVersion raw "$APP_PATH/Contents/Info.plist")" = "$BUILD_VERSION"
+          test "$(plutil -extract SUEnableAutomaticChecks raw "$APP_PATH/Contents/Info.plist")" = "true"
+          test "$(plutil -extract SUAutomaticallyUpdate raw "$APP_PATH/Contents/Info.plist")" = "true"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          test "$(lipo -archs "$APP_PATH/Contents/MacOS/MeetingNoteLocalRecorder")" = "arm64"
+
+          APP_SIGNATURE="$(codesign -dvv "$APP_PATH" 2>&1)"
+          if ! grep -q "Signature=adhoc" <<<"$APP_SIGNATURE"; then
+            echo "The release app must use an ad hoc signature." >&2
+            exit 1
+          fi
+          while IFS= read -r -d '' target; do
+            if /usr/bin/file "$target" | /usr/bin/grep -q "Mach-O"; then
+              details="$(codesign -dvv "$target" 2>&1)"
+              if ! grep -q "flags=.*runtime" <<<"$details"; then
+                echo "Missing hardened runtime: $target" >&2
+                exit 1
+              fi
+              if ! grep -q "TeamIdentifier=not set" <<<"$details"; then
+                echo "Unexpected non ad hoc signature: $target" >&2
+                exit 1
+              fi
+              codesign --verify --strict "$target"
+            fi
+          done < <(find "$APP_PATH" -type f -print0)
+
+          NODE_ENTITLEMENTS="$(
+            codesign -d --entitlements - "$APP_PATH/Contents/Resources/node/bin/node" 2>&1
+          )"
+          if grep -q "com.apple.security.get-task-allow" <<<"$NODE_ENTITLEMENTS"; then
+            echo "The bundled Node runtime must not include get-task-allow." >&2
+            exit 1
+          fi
+
+      - name: Build Sparkle feed and release assets
+        working-directory: mac/LocalRecorder
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_PATH="$PWD/dist/MeetingNoteLocalRecorder.app"
+          UPDATES_DIR="$PWD/dist/updates"
+          ARCHIVE_NAME="MeetingNoteLocalRecorder-${APP_VERSION}.zip"
+          ARCHIVE_PATH="$UPDATES_DIR/$ARCHIVE_NAME"
+          SPARKLE_TOOLS="$PWD/.build/artifacts/sparkle/Sparkle/bin"
+
+          mkdir -p "$UPDATES_DIR"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ARCHIVE_PATH"
+          shasum -a 256 "$ARCHIVE_PATH" > "$ARCHIVE_PATH.sha256"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | \
+            "$SPARKLE_TOOLS/generate_appcast" \
+              --ed-key-file - \
+              --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/" \
+              --link "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}" \
+              --maximum-deltas 0 \
+              "$UPDATES_DIR"
+
+          test -s "$UPDATES_DIR/appcast.xml"
+          grep -q "sparkle:edSignature=" "$UPDATES_DIR/appcast.xml"
+          grep -q "$ARCHIVE_NAME" "$UPDATES_DIR/appcast.xml"
+          echo "ARCHIVE_PATH=$ARCHIVE_PATH" >> "$GITHUB_ENV"
+          echo "CHECKSUM_PATH=$ARCHIVE_PATH.sha256" >> "$GITHUB_ENV"
+          echo "APPCAST_PATH=$UPDATES_DIR/appcast.xml" >> "$GITHUB_ENV"
+
+      - name: Publish GitHub Release and update feed
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          INSTALL_NOTES="$(cat <<'EOF'
+          ## Install on macOS
+
+          This build is ad hoc signed and is not notarized by Apple.
+
+          1. Download and unzip the `MeetingNoteLocalRecorder` ZIP.
+          2. Drag `MeetingNoteLocalRecorder.app` into `/Applications`.
+          3. Open Terminal and run:
+
+             `xattr -dr com.apple.quarantine /Applications/MeetingNoteLocalRecorder.app`
+
+          4. Open the app:
+
+             `open /Applications/MeetingNoteLocalRecorder.app`
+
+          5. Grant Microphone, Screen Recording, Accessibility, and Notifications when prompted.
+          EOF
+          )"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$ARCHIVE_PATH" "$CHECKSUM_PATH" --clobber
+          else
+            gh release create "$RELEASE_TAG" \
+              "$ARCHIVE_PATH" \
+              "$CHECKSUM_PATH" \
+              --generate-notes \
+              --notes "$INSTALL_NOTES" \
+              --latest \
+              --title "Meeting Note Recorder ${APP_VERSION}" \
+              --verify-tag
+          fi
+
+          if gh release view macos-appcast >/dev/null 2>&1; then
+            gh release upload macos-appcast "$APPCAST_PATH" --clobber
+          else
+            gh release create macos-appcast \
+              "$APPCAST_PATH" \
+              --prerelease \
+              --title "macOS automatic update feed" \
+              --notes "Machine managed Sparkle update feed."
+          fi
+
+          gh release view "$RELEASE_TAG" --json url,tagName,isDraft,isPrerelease
+          gh release view macos-appcast --json url,tagName,isDraft,isPrerelease

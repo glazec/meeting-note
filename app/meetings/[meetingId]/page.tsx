@@ -16,7 +16,6 @@ import { getMeetingDisplayStatus } from "@/lib/meeting-display-status";
 import {
   getMeetingTranscriptForWorkspace,
   listMeetingDetailRelatedMeetingsForWorkspace,
-  listWorkspaceShareRecipients,
 } from "@/lib/meeting-queries";
 import { getOrCreateWorkspaceForSessionUser } from "@/lib/workspace";
 
@@ -42,9 +41,6 @@ export default async function MeetingPage({
   }
 
   const canManage = meeting.canManage;
-  const shareRecipients = canManage
-    ? await listWorkspaceShareRecipients(workspace)
-    : [];
   const displayStatus = getMeetingDisplayStatus({
     meetingStatus: meeting.status,
     transcriptJobStatus: meeting.transcriptJobStatus,
@@ -116,6 +112,15 @@ export default async function MeetingPage({
               </dd>
             </div>
           </dl>
+          {canManage ? (
+            <div className="mt-2 lg:hidden">
+              <ShareDialog
+                instanceId="mobile"
+                meetingId={meetingId}
+                organizationDomain={workspace.domain}
+              />
+            </div>
+          ) : null}
           <div className="mt-6 border-t pt-6">
             <MeetingEntityLinks entities={meeting.entities} />
             <div className={meeting.entities.length > 0 ? "mt-8" : undefined}>
@@ -157,11 +162,11 @@ export default async function MeetingPage({
                   meetingId={meetingId}
                 />
               </div>
-              <div className="lg:mt-8">
+              <div className="hidden lg:mt-8 lg:block">
                 <ShareDialog
+                  instanceId="desktop"
                   meetingId={meetingId}
                   organizationDomain={workspace.domain}
-                  teamMembers={shareRecipients}
                 />
               </div>
               {displayStatus === "failed" ? (

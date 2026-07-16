@@ -7,6 +7,9 @@ BUNDLE_ID="tech.inevitable.meeting-note.local-recorder"
 MIN_SYSTEM_VERSION="15.0"
 APP_VERSION="${APP_VERSION:-0.2.0}"
 BUILD_VERSION="${BUILD_VERSION:-$(date -u +%Y%m%d%H%M%S)}"
+BUILD_CONFIGURATION="${BUILD_CONFIGURATION:-debug}"
+SPARKLE_FEED_URL="https://github.com/glazec/meeting-note/releases/download/macos-appcast/appcast.xml"
+SPARKLE_PUBLIC_KEY="C+6MwGr+m9w8H9o0A6dX6epFkSNcf5OOdT70ir8SVFA="
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
@@ -14,22 +17,35 @@ APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_RESOURCES="$APP_CONTENTS/Resources"
+APP_FRAMEWORKS="$APP_CONTENTS/Frameworks"
 APP_BINARY="$APP_MACOS/$APP_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 APP_ICON_SOURCE="$ROOT_DIR/Resources/AppIcon.icns"
+NODE_ENTITLEMENTS="$ROOT_DIR/Resources/Node.entitlements"
+ADHOC_APP_ENTITLEMENTS="$ROOT_DIR/Resources/AdHocApp.entitlements"
 SIDECAR_SOURCE="$ROOT_DIR/Sidecar"
 SIDECAR_DEST="$APP_RESOURCES/RecallDesktopSDKSidecar"
 
 cd "$ROOT_DIR"
-pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+if [[ "$MODE" != "--package" && "$MODE" != "package" ]]; then
+  pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+fi
 
-swift build
-BUILD_BINARY="$(swift build --show-bin-path)/$APP_NAME"
+swift build -c "$BUILD_CONFIGURATION"
+BUILD_DIR="$(swift build -c "$BUILD_CONFIGURATION" --show-bin-path)"
+BUILD_BINARY="$BUILD_DIR/$APP_NAME"
+SPARKLE_FRAMEWORK="$BUILD_DIR/Sparkle.framework"
 
 rm -rf "$APP_BUNDLE"
-mkdir -p "$APP_MACOS" "$APP_RESOURCES"
+mkdir -p "$APP_MACOS" "$APP_RESOURCES" "$APP_FRAMEWORKS"
 cp "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
+if [[ ! -d "$SPARKLE_FRAMEWORK" ]]; then
+  echo "Sparkle.framework was not produced by the Swift build." >&2
+  exit 1
+fi
+cp -R "$SPARKLE_FRAMEWORK" "$APP_FRAMEWORKS/Sparkle.framework"
+install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_BINARY"
 if [[ -f "$APP_ICON_SOURCE" ]]; then
   cp "$APP_ICON_SOURCE" "$APP_RESOURCES/AppIcon.icns"
 fi
@@ -61,6 +77,14 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$BUILD_VERSION</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
+  <key>SUFeedURL</key>
+  <string>$SPARKLE_FEED_URL</string>
+  <key>SUPublicEDKey</key>
+  <string>$SPARKLE_PUBLIC_KEY</string>
+  <key>SUEnableAutomaticChecks</key>
+  <true/>
+  <key>SUAutomaticallyUpdate</key>
+  <true/>
   <key>CFBundleIconFile</key>
   <string>AppIcon</string>
   <key>LSMinimumSystemVersion</key>
@@ -100,7 +124,47 @@ if [[ -z "${CODESIGN_IDENTITY:-}" ]]; then
     echo "Run script/create_signing_cert.sh once to stop macOS from dropping mic/screen permissions on every rebuild." >&2
   fi
 fi
-codesign --force --deep --sign "$CODESIGN_IDENTITY" --identifier "$BUNDLE_ID" "$APP_BUNDLE"
+
+sign_code() {
+  local target="$1"
+  shift
+  local arguments=(--force --options runtime --sign "$CODESIGN_IDENTITY")
+  if [[ "$CODESIGN_IDENTITY" != "-" ]]; then
+    arguments+=(--timestamp)
+  fi
+  codesign "${arguments[@]}" "$@" "$target"
+}
+
+# codesign --deep only discovers nested code in standard bundle locations.
+# The Node and Recall SDK binaries live under Resources, so sign every Mach-O
+# there explicitly before sealing the app bundle.
+while IFS= read -r -d '' target; do
+  if /usr/bin/file "$target" | /usr/bin/grep -q "Mach-O"; then
+    if [[ "$target" == "$APP_RESOURCES/node/bin/node" ]]; then
+      sign_code "$target" --entitlements "$NODE_ENTITLEMENTS"
+    else
+      sign_code "$target"
+    fi
+  fi
+done < <(find "$APP_RESOURCES" -type f -print0)
+
+if [[ "$CODESIGN_IDENTITY" == "-" ]]; then
+  codesign \
+    --force \
+    --deep \
+    --options runtime \
+    --entitlements "$ADHOC_APP_ENTITLEMENTS" \
+    --sign "$CODESIGN_IDENTITY" \
+    "$APP_BUNDLE"
+else
+  codesign --force --deep --options runtime --timestamp --sign "$CODESIGN_IDENTITY" "$APP_BUNDLE"
+fi
+codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
+
+if [[ "$MODE" == "--package" || "$MODE" == "package" ]]; then
+  printf '%s\n' "$APP_BUNDLE"
+  exit 0
+fi
 
 # Reset stale TCC grants when the signature identity changes, or on every
 # binary change while ad-hoc signed. Otherwise macOS keeps the old grant for
@@ -146,7 +210,7 @@ case "$MODE" in
     pgrep -x "$APP_NAME" >/dev/null
     ;;
   *)
-    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify]" >&2
+    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--package]" >&2
     exit 2
     ;;
 esac

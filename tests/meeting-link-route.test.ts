@@ -4,6 +4,7 @@ const getCurrentUser = vi.fn();
 const getMeetingBotProfile = vi.fn();
 const scheduleRecallBot = vi.fn();
 const createScheduledMeetingBot = vi.fn();
+const joinScheduledMeetingBotNow = vi.fn();
 const markMeetingBotFailed = vi.fn();
 const markMeetingBotScheduled = vi.fn();
 
@@ -39,6 +40,10 @@ vi.mock("@/lib/meeting-bot-records", () => ({
   markMeetingBotScheduled,
 }));
 
+vi.mock("@/lib/meeting-bot-join", () => ({
+  joinScheduledMeetingBotNow,
+}));
+
 async function postMeetingLink(body: unknown) {
   const { POST } = await import("@/app/api/meetings/link/route");
 
@@ -66,6 +71,7 @@ describe("POST /api/meetings/link", () => {
     getMeetingBotProfile.mockReset();
     scheduleRecallBot.mockReset();
     createScheduledMeetingBot.mockReset();
+    joinScheduledMeetingBotNow.mockReset();
     markMeetingBotFailed.mockReset();
     markMeetingBotScheduled.mockReset();
     vi.unstubAllGlobals();
@@ -280,7 +286,7 @@ describe("POST /api/meetings/link", () => {
     );
   });
 
-  it("returns an existing scheduled calendar bot without creating another bot", async () => {
+  it("asks an existing scheduled calendar bot to join now", async () => {
     getCurrentUser.mockResolvedValue({
       id: "user_123",
       email: "user@example.com",
@@ -292,17 +298,29 @@ describe("POST /api/meetings/link", () => {
       startAt: "2026-07-02T02:00:00.000Z",
       recallBotId: "existing_bot",
     });
+    joinScheduledMeetingBotNow.mockResolvedValue({
+      botId: "adhoc_bot",
+      meetingId: "22222222-2222-4222-8222-222222222222",
+    });
 
     const meetingUrl = "https://zoom.us/j/8851797582";
     const response = await postMeetingLink({ meetingUrl });
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      botId: "existing_bot",
+      botId: "adhoc_bot",
       meetingId: "22222222-2222-4222-8222-222222222222",
       meetingUrl,
       platform: "zoom",
-      status: "scheduled",
+      status: "joining",
+    });
+    expect(joinScheduledMeetingBotNow).toHaveBeenCalledWith({
+      meetingId: "22222222-2222-4222-8222-222222222222",
+      sessionUser: {
+        id: "user_123",
+        email: "user@example.com",
+        name: null,
+      },
     });
     expect(scheduleRecallBot).not.toHaveBeenCalled();
     expect(markMeetingBotScheduled).not.toHaveBeenCalled();

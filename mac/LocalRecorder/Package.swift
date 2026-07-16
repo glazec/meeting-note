@@ -8,11 +8,17 @@ let package = Package(
         .executable(name: "MeetingNoteLocalRecorder", targets: ["MeetingNoteLocalRecorder"]),
         .library(name: "LocalRecorderCore", targets: ["LocalRecorderCore"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.2"),
+    ],
     targets: [
         .target(name: "LocalRecorderCore"),
         .executableTarget(
             name: "MeetingNoteLocalRecorder",
-            dependencies: ["LocalRecorderCore"]
+            dependencies: [
+                "LocalRecorderCore",
+                .product(name: "Sparkle", package: "Sparkle"),
+            ]
         ),
         .testTarget(
             name: "LocalRecorderCoreTests",

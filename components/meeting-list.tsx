@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronRight,
   History,
+  LogIn,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -259,7 +260,10 @@ function MeetingTableRow({
   return (
     <TableRow
       aria-expanded={relatedCount > 0 ? isExpanded : undefined}
-      className={cn(isChild && "bg-muted/15 hover:bg-muted/30")}
+      className={cn(
+        "group/meeting-row meeting-row",
+        isChild && "bg-muted/15 hover:bg-muted/30",
+      )}
     >
       <TableCell className="min-w-56 py-3">
         <MeetingTitleCell
@@ -290,11 +294,89 @@ function MeetingTableRow({
         <LocalDateTime value={meeting.startedAt} />
       </TableCell>
       <TableCell className="text-right">
-        <Badge variant={getStatusVariant(displayStatus)}>
-          {statusLabels[displayStatus]}
-        </Badge>
+        {displayStatus === "scheduled" &&
+        meeting.hasRecallBot &&
+        meeting.accessScope !== "shared" ? (
+          <ScheduledMeetingAction meeting={meeting} />
+        ) : (
+          <Badge variant={getStatusVariant(displayStatus)}>
+            {statusLabels[displayStatus]}
+          </Badge>
+        )}
       </TableCell>
     </TableRow>
+  );
+}
+
+function ScheduledMeetingAction({ meeting }: { meeting: MeetingListBaseItem }) {
+  const endpoint = `/api/meetings/${meeting.id}/join`;
+  const [state, setState] = useState<"idle" | "joining" | "joined" | "error">(
+    "idle",
+  );
+
+  async function handleJoinNow() {
+    setState("joining");
+
+    try {
+      const response = await fetch(endpoint, { method: "POST" });
+
+      if (!response.ok) {
+        throw new Error("Meeting bot could not join");
+      }
+
+      setState("joined");
+    } catch {
+      setState("error");
+    }
+  }
+
+  const announcement =
+    state === "joined"
+      ? `Bot is joining ${meeting.title} and should appear within about 30 seconds`
+      : state === "error"
+        ? `Bot could not join ${meeting.title}`
+        : state === "joining"
+          ? `Asking the bot to join ${meeting.title}`
+          : "";
+
+  return (
+    <span className="inline-grid w-24 justify-items-end">
+      {state === "idle" ? (
+        <Badge
+          className="meeting-join-badge col-start-1 row-start-1 hidden transition-opacity"
+          variant="outline"
+        >
+          Scheduled
+        </Badge>
+      ) : null}
+      <Button
+        aria-label={`Join ${meeting.title} now`}
+        className={cn(
+          "meeting-join-action col-start-1 row-start-1 h-11 w-24 rounded-lg px-3 text-xs transition-opacity",
+          state === "error" && "text-destructive",
+        )}
+        data-endpoint={endpoint}
+        data-state={state}
+        disabled={state === "joining" || state === "joined"}
+        onClick={handleJoinNow}
+        size="xs"
+        title="Send the bot to this meeting now"
+        type="button"
+        variant="outline"
+      >
+        <LogIn aria-hidden="true" />
+        {state === "joining"
+          ? "Joining..."
+          : state === "joined"
+            ? "Bot joining"
+            : state === "error"
+              ? "Try again"
+              : "Join now"}
+      </Button>
+      <span aria-live="polite" className="sr-only">
+        {announcement}
+      </span>
+    </span>
   );
 }
 

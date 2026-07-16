@@ -1,63 +1,71 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { AlertCircle, Check, CheckCircle2, Copy, Send } from "lucide-react";
+import {
+  AlertCircle,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  Copy,
+  Send,
+} from "lucide-react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { ShareRecipient } from "@/lib/meeting-queries";
 
 type ShareDialogProps = {
+  instanceId: string;
   meetingId: string;
   organizationDomain: string;
-  teamMembers: ShareRecipient[];
 };
 
 type ShareState = "idle" | "sharing" | "success" | "error";
 
 export function ShareDialog({
+  instanceId,
   meetingId,
   organizationDomain,
-  teamMembers,
 }: ShareDialogProps) {
   const [email, setEmail] = useState("");
-  const [selectedMemberEmail, setSelectedMemberEmail] = useState(
-    teamMembers[0]?.email ?? "",
-  );
   const [state, setState] = useState<ShareState>("idle");
   const [message, setMessage] = useState<string | null>(null);
   const [includeRelated, setIncludeRelated] = useState(false);
   const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
   const encodedMeetingId = encodeURIComponent(meetingId);
   const meetingPath = `/meetings/${encodedMeetingId}`;
+  const titleId = `${instanceId}-share-title`;
+  const emailId = `${instanceId}-share-email`;
+  const relatedId = `${instanceId}-include-related`;
 
   async function copyMeetingLink() {
     const url = new URL(meetingPath, window.location.origin).toString();
 
-    await navigator.clipboard.writeText(url);
-    setCopyState("copied");
-    window.setTimeout(() => setCopyState("idle"), 2000);
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopyState("copied");
+      setState("idle");
+      setMessage(null);
+      window.setTimeout(() => setCopyState("idle"), 2000);
+    } catch {
+      setState("error");
+      setMessage("Could not copy the link. Try again.");
+    }
   }
 
-  async function shareWithEmail(emailToShare: string) {
+  async function shareWithEmail(emailToShare: string): Promise<boolean> {
     setState("sharing");
     setMessage(null);
 
     const response = await fetch(`/api/meetings/${encodedMeetingId}/share`, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-      },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ email: emailToShare, includeRelated }),
     });
 
@@ -68,7 +76,7 @@ export function ShareDialog({
 
       setState("error");
       setMessage(body?.error ?? "Could not share this meeting.");
-      return;
+      return false;
     }
 
     const body = (await response.json()) as {
@@ -78,166 +86,151 @@ export function ShareDialog({
       user?: { email: string; name: string | null };
       email?: string;
     };
+    const recipient = body.user?.email ?? body.email ?? emailToShare;
+    const meetingCount = body.meetingCount ?? 1;
+    const meetingLabel = `matching meeting${meetingCount === 1 ? "" : "s"}`;
 
     setState("success");
-    const accessMessage = body.pending
-      ? "Invite saved. They can sign in to read this transcript."
-      : `Access granted to ${body.user?.email ?? emailToShare}.`;
-    const meetingCount = body.meetingCount ?? 1;
-    const relatedMessage = body.futureMeetings
-      ? ` Access now covers ${meetingCount} matching meeting${meetingCount === 1 ? "" : "s"}. Future matches will be shared automatically.`
-      : "";
-
-    setMessage(`${accessMessage}${relatedMessage}`);
-  }
-
-  async function shareSelectedMember(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!selectedMemberEmail) {
-      return;
+    if (body.futureMeetings) {
+      setMessage(
+        body.pending
+          ? `Access saved for ${recipient} across ${meetingCount} ${meetingLabel}. Future matches will be shared automatically.`
+          : `Shared ${meetingCount} ${meetingLabel} with ${recipient}. Future matches will be shared automatically.`,
+      );
+    } else {
+      setMessage(
+        body.pending
+          ? `Access saved for ${recipient}. They can open it after signing in.`
+          : `Shared with ${recipient}.`,
+      );
     }
 
-    await shareWithEmail(selectedMemberEmail);
+    return true;
   }
 
   async function shareEnteredEmail(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    await shareWithEmail(email);
-    setEmail("");
+    if (await shareWithEmail(email)) {
+      setEmail("");
+    }
   }
 
   return (
-    <Card aria-labelledby="share-dialog-title">
+    <Card aria-labelledby={titleId} size="sm">
       <CardHeader>
-        <CardTitle id="share-dialog-title">Share transcript</CardTitle>
-        <CardDescription>
-          Send the meeting link or grant transcript access.
-        </CardDescription>
+        <CardTitle id={titleId}>Share</CardTitle>
       </CardHeader>
-      <CardContent className="flex flex-col gap-5">
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="share-link">Meeting link</Label>
-          <div className="flex gap-2">
-            <Input id="share-link" readOnly value={meetingPath} />
-            <Button onClick={copyMeetingLink} type="button" variant="outline">
-              {copyState === "copied" ? (
-                <Check data-icon="inline-start" />
-              ) : (
-                <Copy data-icon="inline-start" />
-              )}
-              {copyState === "copied" ? "Copied" : "Copy link"}
-            </Button>
-          </div>
-          <p className="text-sm leading-6 text-muted-foreground">
-            Anyone signed in with @{organizationDomain} can open this link.
-          </p>
-        </div>
+      <CardContent className="flex flex-col gap-3">
+        <p className="text-sm leading-5 text-muted-foreground">
+          Anyone at @{organizationDomain} can open this meeting.
+        </p>
+        <Button
+          className="min-h-11 w-full"
+          onClick={copyMeetingLink}
+          type="button"
+        >
+          {copyState === "copied" ? (
+            <Check data-icon="inline-start" />
+          ) : (
+            <Copy data-icon="inline-start" />
+          )}
+          {copyState === "copied" ? "Link copied" : "Copy link"}
+        </Button>
+        <span aria-live="polite" className="sr-only">
+          {copyState === "copied" ? "Meeting link copied" : ""}
+        </span>
 
-        <label className="flex items-start gap-3 rounded-lg border p-3">
-          <input
-            checked={includeRelated}
-            className="mt-1 size-4"
-            name="includeRelated"
-            onChange={(event) => setIncludeRelated(event.currentTarget.checked)}
-            type="checkbox"
-          />
-          <span>
-            <span className="block text-sm font-medium">
-              Share related and future meetings
-            </span>
-            <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-              Apply access to meetings with the same title or external people,
-              including future matches.
-            </span>
-          </span>
-        </label>
-
-        <form className="flex flex-col gap-3" onSubmit={shareSelectedMember}>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="share-member">Select someone in organization</Label>
-            <select
-              className="h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50"
-              disabled={teamMembers.length === 0}
-              id="share-member"
-              onChange={(event) => {
-                setSelectedMemberEmail(event.currentTarget.value);
-                setState("idle");
-                setMessage(null);
-              }}
-              value={selectedMemberEmail}
-            >
-              {teamMembers.length === 0 ? (
-                <option value="">No teammates yet</option>
-              ) : (
-                teamMembers.map((member) => (
-                  <option key={member.email} value={member.email}>
-                    {member.name
-                      ? `${member.name} (${member.email})`
-                      : member.email}
-                  </option>
-                ))
-              )}
-            </select>
-          </div>
-          <Button
-            className="w-fit"
-            disabled={state === "sharing" || !selectedMemberEmail}
-            type="submit"
-            variant="outline"
-          >
-            <Send data-icon="inline-start" />
-            Share selected
-          </Button>
-        </form>
-
-        <form className="flex flex-col gap-3" onSubmit={shareEnteredEmail}>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="share-email">Add by email</Label>
+        <details className="group border-t pt-1">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-lg text-sm font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
+            Share outside the organization
+            <ChevronDown className="size-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
+          </summary>
+          <form className="mt-2 flex flex-col gap-3" onSubmit={shareEnteredEmail}>
+            <Label htmlFor={emailId}>Email address</Label>
             <Input
               autoComplete="email"
-              id="share-email"
+              className="h-11"
+              id={emailId}
               name="email"
               onChange={(event) => {
                 setEmail(event.currentTarget.value);
                 setState("idle");
                 setMessage(null);
               }}
-              placeholder="teammate@example.com"
+              placeholder="partner@example.com"
               required
               type="email"
               value={email}
             />
-            <p className="text-sm leading-6 text-muted-foreground">
-              External people get read only transcript access after they sign in.
+            <p className="text-xs leading-5 text-muted-foreground">
+              They can view this transcript after signing in.
             </p>
-          </div>
-          <Button
-            className="w-fit"
-            disabled={state === "sharing"}
-            type="submit"
-          >
-            <Send data-icon="inline-start" />
-            {state === "sharing" ? "Sharing" : "Add email"}
-          </Button>
-        </form>
+
+            <details>
+              <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1.5 rounded-lg text-xs font-medium text-muted-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
+                More options
+                <ChevronDown className="size-3.5" />
+              </summary>
+              <label className="flex items-start gap-3 pb-1">
+                <input
+                  checked={includeRelated}
+                  className="mt-0.5 size-4"
+                  id={relatedId}
+                  name="includeRelated"
+                  onChange={(event) =>
+                    setIncludeRelated(event.currentTarget.checked)
+                  }
+                  type="checkbox"
+                />
+                <span>
+                  <span className="block text-sm font-medium">
+                    Include related meetings
+                  </span>
+                  {includeRelated ? (
+                    <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                      Matches by title or external attendees, including future
+                      meetings.
+                    </span>
+                  ) : null}
+                </span>
+              </label>
+            </details>
+
+            <Button
+              className="min-h-11 w-full"
+              disabled={state === "sharing"}
+              type="submit"
+            >
+              <Send data-icon="inline-start" />
+              {state === "sharing"
+                ? "Sharing…"
+                : includeRelated
+                  ? "Share matching meetings"
+                  : "Share"}
+            </Button>
+          </form>
+        </details>
+
         {message ? (
-          <Alert variant={state === "error" ? "destructive" : "default"}>
-            {state === "error" ? <AlertCircle /> : <CheckCircle2 />}
-            <AlertTitle>
-              {state === "error" ? "Share failed" : "Shared"}
-            </AlertTitle>
-            <AlertDescription>{message}</AlertDescription>
-          </Alert>
+          <div
+            aria-live="polite"
+            className={`flex items-start gap-2 rounded-lg px-3 py-2 text-xs leading-5 ${
+              state === "error"
+                ? "bg-destructive/10 text-destructive"
+                : "bg-muted text-foreground"
+            }`}
+            role={state === "error" ? "alert" : "status"}
+          >
+            {state === "error" ? (
+              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+            ) : (
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
+            )}
+            <span>{message}</span>
+          </div>
         ) : null}
       </CardContent>
-      <CardFooter className="border-t pt-4">
-        <p className="text-xs leading-5 text-muted-foreground">
-          Sharing grants transcript viewing only. Meeting creation stays inside
-          the workspace.
-        </p>
-      </CardFooter>
     </Card>
   );
 }
