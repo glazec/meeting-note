@@ -44,8 +44,80 @@ describe("OpenRouter translation", () => {
       "https://openrouter.ai/api/v1/chat/completions",
     );
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+      reasoning: { effort: "none" },
       response_format: { type: "json_object" },
     });
+  });
+
+  it("retries an empty completion before failing the batch", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "openrouter-key");
+    vi.stubEnv("OPENROUTER_MODEL", "qwen/qwen3.7-plus");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [{ finish_reason: "stop", message: { content: "" } }],
+            model: "qwen/qwen3.7-plus",
+            provider: "Alibaba",
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                finish_reason: "stop",
+                message: {
+                  content:
+                    '{"translations":[{"id":"segment_1","text":"大家好"}]}',
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { translateTranscriptSegmentsToChinese } = await import(
+      "@/lib/vendors/openrouter"
+    );
+
+    await expect(
+      translateTranscriptSegmentsToChinese([
+        { id: "segment_1", text: "Hello team" },
+      ]),
+    ).resolves.toEqual([{ id: "segment_1", text: "大家好" }]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails with the model name after repeated empty completions", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "openrouter-key");
+    vi.stubEnv("OPENROUTER_MODEL", "qwen/qwen3.7-plus");
+    const fetchMock = vi.fn().mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({ choices: [{ message: { content: null } }] }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { translateTranscriptSegmentsToChinese } = await import(
+      "@/lib/vendors/openrouter"
+    );
+
+    await expect(
+      translateTranscriptSegmentsToChinese([
+        { id: "segment_1", text: "Hello team" },
+      ]),
+    ).rejects.toThrow(
+      "OpenRouter model qwen/qwen3.7-plus returned no content after 3 attempts",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("polishes transcript segments in their original language", async () => {

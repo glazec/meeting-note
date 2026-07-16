@@ -179,6 +179,7 @@ export const enrichTranscript = inngest.createFunction(
   async ({ event }) => {
     const data = enrichTranscriptDataSchema.parse(event.data);
     const shouldTranslateToChinese = data.translateToChinese ?? true;
+    let translationFinished = !shouldTranslateToChinese;
 
     try {
       const segments = await db
@@ -199,6 +200,60 @@ export const enrichTranscript = inngest.createFunction(
           ),
         )
         .orderBy(asc(transcriptSegments.startMs));
+      let newTranslatedCount = 0;
+
+      if (shouldTranslateToChinese) {
+        const untranslatedSegments = segments
+          .filter((segment) => !segment.translatedText?.trim())
+          .map((segment) => ({
+            id: segment.id,
+            text: segment.text,
+          }));
+
+        if (untranslatedSegments.length > 0) {
+          await markMeetingTranslationRunning(data.meetingId);
+        }
+
+        for (
+          let index = 0;
+          index < untranslatedSegments.length;
+          index += TRANSLATION_BATCH_SIZE
+        ) {
+          const batch = untranslatedSegments.slice(
+            index,
+            index + TRANSLATION_BATCH_SIZE,
+          );
+          const translations = await translateTranscriptSegmentsToChinese(
+            batch,
+            { batchSize: TRANSLATION_BATCH_SIZE },
+          );
+
+          for (const translation of translations) {
+            await db
+              .update(transcriptSegments)
+              .set({
+                translatedText: translation.text,
+                updatedAt: new Date(),
+              })
+              .where(eq(transcriptSegments.id, translation.id));
+          }
+
+          newTranslatedCount += translations.length;
+        }
+
+        const translatedCount =
+          segments.length - untranslatedSegments.length + newTranslatedCount;
+
+        if (translatedCount < segments.length) {
+          throw new Error(
+            `Translation incomplete: ${translatedCount} of ${segments.length} lines translated`,
+          );
+        }
+
+        translationFinished = true;
+        await markMeetingTranslationCompleted(data.meetingId);
+      }
+
       const unpolishedSegments = segments
         .filter((segment) => !segment.polishedText?.trim())
         .map((segment) => ({
@@ -206,7 +261,6 @@ export const enrichTranscript = inngest.createFunction(
           text: segment.text,
         }));
       let newPolishedCount = 0;
-      const polishedTextById = new Map<string, string>();
 
       for (
         let index = 0;
@@ -230,7 +284,6 @@ export const enrichTranscript = inngest.createFunction(
               updatedAt: new Date(),
             })
             .where(eq(transcriptSegments.id, polishedSegment.id));
-          polishedTextById.set(polishedSegment.id, polishedSegment.text);
         }
 
         newPolishedCount += polishedSegments.length;
@@ -245,63 +298,12 @@ export const enrichTranscript = inngest.createFunction(
         );
       }
 
-      if (!shouldTranslateToChinese) {
-        return { polishedCount: newPolishedCount, translatedCount: 0 };
-      }
-
-      await markMeetingTranslationRunning(data.meetingId);
-
-      const untranslatedSegments = segments
-        .filter((segment) => !segment.translatedText?.trim())
-        .map((segment) => ({
-          id: segment.id,
-          text:
-            polishedTextById.get(segment.id) ??
-            segment.polishedText?.trim() ??
-            segment.text,
-        }));
-      let newTranslatedCount = 0;
-
-      for (
-        let index = 0;
-        index < untranslatedSegments.length;
-        index += TRANSLATION_BATCH_SIZE
-      ) {
-        const batch = untranslatedSegments.slice(
-          index,
-          index + TRANSLATION_BATCH_SIZE,
-        );
-        const translations = await translateTranscriptSegmentsToChinese(batch, {
-          batchSize: TRANSLATION_BATCH_SIZE,
-        });
-
-        for (const translation of translations) {
-          await db
-            .update(transcriptSegments)
-            .set({
-              translatedText: translation.text,
-              updatedAt: new Date(),
-            })
-            .where(eq(transcriptSegments.id, translation.id));
-        }
-
-        newTranslatedCount += translations.length;
-      }
-
-      const translatedCount =
-        segments.length - untranslatedSegments.length + newTranslatedCount;
-
-      if (translatedCount < segments.length) {
-        throw new Error(
-          `Translation incomplete: ${translatedCount} of ${segments.length} lines translated`,
-        );
-      }
-
-      await markMeetingTranslationCompleted(data.meetingId);
-
-      return { translatedCount: newTranslatedCount };
+      return {
+        polishedCount: newPolishedCount,
+        translatedCount: newTranslatedCount,
+      };
     } catch (error) {
-      if (shouldTranslateToChinese) {
+      if (shouldTranslateToChinese && !translationFinished) {
         await markMeetingTranslationFailed(data.meetingId, error);
       }
       throw error;

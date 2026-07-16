@@ -33,6 +33,7 @@ const openRouterResponseSchema = z.object({
 });
 export const TRANSLATION_BATCH_SIZE = 10;
 const TRANSLATION_BATCH_CHARACTER_LIMIT = 1800;
+const OPENROUTER_EMPTY_CONTENT_ATTEMPTS = 3;
 
 export async function generateOpenRouterChatReply(input: {
   question: string;
@@ -200,38 +201,47 @@ async function createOpenRouterChatCompletion(input: {
   temperature: number;
 }) {
   const env = openRouterEnvSchema.parse(process.env);
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      ...(env.NEXT_PUBLIC_APP_URL
-        ? { "HTTP-Referer": env.NEXT_PUBLIC_APP_URL }
-        : {}),
-      "X-Title": "Meeting Note",
-    },
-    body: JSON.stringify({
-      model: env.OPENROUTER_MODEL,
-      messages: input.messages,
-      temperature: input.temperature,
-      max_tokens: input.maxTokens,
-      response_format: { type: "json_object" },
-    }),
-  });
+  for (
+    let attempt = 1;
+    attempt <= OPENROUTER_EMPTY_CONTENT_ATTEMPTS;
+    attempt += 1
+  ) {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(env.NEXT_PUBLIC_APP_URL
+          ? { "HTTP-Referer": env.NEXT_PUBLIC_APP_URL }
+          : {}),
+        "X-Title": "Meeting Note",
+      },
+      body: JSON.stringify({
+        model: env.OPENROUTER_MODEL,
+        messages: input.messages,
+        temperature: input.temperature,
+        max_tokens: input.maxTokens,
+        reasoning: { effort: "none" },
+        response_format: { type: "json_object" },
+      }),
+    });
 
-  if (!response.ok) {
-    throw new Error(
-      `OpenRouter chat completion failed with ${response.status} ${response.statusText}`,
-    );
+    if (!response.ok) {
+      throw new Error(
+        `OpenRouter chat completion failed with ${response.status} ${response.statusText}`,
+      );
+    }
+
+    const parsed = openRouterResponseSchema.parse(await response.json());
+    const content = parsed.choices[0]?.message?.content?.trim();
+
+    if (content) {
+      return content;
+    }
   }
 
-  const parsed = openRouterResponseSchema.parse(await response.json());
-  const content = parsed.choices[0]?.message?.content?.trim();
-
-  if (!content) {
-    throw new Error("OpenRouter chat completion response missing content");
-  }
-
-  return content;
+  throw new Error(
+    `OpenRouter model ${env.OPENROUTER_MODEL} returned no content after ${OPENROUTER_EMPTY_CONTENT_ATTEMPTS} attempts`,
+  );
 }
