@@ -1,12 +1,15 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, or } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
-import { meetings, transcriptSegments } from "@/db/schema";
+import { mediaAssets, meetings, transcriptSegments } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { currentTranscriptJobIdSubquery } from "@/lib/current-transcript-job";
 import { getReadableMeetingsCondition } from "@/lib/meeting-access-policy";
+import { buildImageEntryName } from "@/lib/meeting-image-export";
+import { createReadUrl } from "@/lib/r2";
 import { getOrCreateWorkspaceForSessionUser } from "@/lib/workspace";
+import { buildZipArchive, type ZipEntry } from "@/lib/zip";
 
 export const runtime = "nodejs";
 
@@ -44,7 +47,7 @@ export async function GET(
     );
   }
 
-  if (format !== "text") {
+  if (format !== "text" && format !== "images") {
     return Response.json(
       { error: "Unsupported export format" },
       { status: 400 },
@@ -69,6 +72,10 @@ export async function GET(
 
   if (!meeting) {
     return Response.json({ error: "Meeting not found" }, { status: 404 });
+  }
+
+  if (format === "images") {
+    return exportMeetingImages(meeting);
   }
 
   const segments = await db
@@ -98,6 +105,60 @@ export async function GET(
       },
     },
   );
+}
+
+async function exportMeetingImages(meeting: { id: string; title: string }) {
+  const assets = await db
+    .select({
+      id: mediaAssets.id,
+      mimeType: mediaAssets.mimeType,
+      objectKey: mediaAssets.objectKey,
+      timestampMs: mediaAssets.timestampMs,
+    })
+    .from(mediaAssets)
+    .where(
+      and(
+        eq(mediaAssets.meetingId, meeting.id),
+        or(
+          eq(mediaAssets.type, "screenshot"),
+          eq(mediaAssets.type, "video_frame"),
+        ),
+      ),
+    )
+    .orderBy(asc(mediaAssets.timestampMs), asc(mediaAssets.createdAt));
+
+  if (assets.length === 0) {
+    return Response.json({ error: "Meeting has no images" }, { status: 404 });
+  }
+
+  const entries: ZipEntry[] = [];
+
+  for (const [index, asset] of assets.entries()) {
+    const response = await fetch(await createReadUrl({ key: asset.objectKey }));
+
+    if (!response.ok) {
+      continue;
+    }
+
+    entries.push({
+      data: new Uint8Array(await response.arrayBuffer()),
+      name: buildImageEntryName(index, asset.timestampMs, asset.mimeType),
+    });
+  }
+
+  if (entries.length === 0) {
+    return Response.json(
+      { error: "Meeting images could not be exported" },
+      { status: 502 },
+    );
+  }
+
+  return new Response(buildZipArchive(entries), {
+    headers: {
+      "content-disposition": `attachment; filename="${sanitizeFilename(meeting.title)} images.zip"`,
+      "content-type": "application/zip",
+    },
+  });
 }
 
 function formatTranscriptExport(

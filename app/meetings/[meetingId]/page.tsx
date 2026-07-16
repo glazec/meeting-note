@@ -80,6 +80,7 @@ export default async function MeetingPage({
             {canManage ? (
               <div className="lg:hidden">
                 <MeetingActions
+                  imageCount={meeting.visualAssets.length}
                   instanceId="mobile"
                   meetingId={meetingId}
                 />
@@ -151,6 +152,7 @@ export default async function MeetingPage({
             <>
               <div className="hidden lg:flex">
                 <MeetingActions
+                  imageCount={meeting.visualAssets.length}
                   instanceId="desktop"
                   meetingId={meetingId}
                 />

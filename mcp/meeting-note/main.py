@@ -1437,6 +1437,66 @@ async def get_meeting_audio(meeting_id: str) -> dict[str, Any]:
     }
 
 
+def _meeting_images_payload(
+    meeting_id: str,
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not APP_BASE_URL:
+        return {
+            "available": False,
+            "reason": "APP_BASE_URL is required so MCP images use the authenticated app route.",
+        }
+    return {
+        "available": bool(rows),
+        "image_count": len(rows),
+        "url_type": "authenticated_app_route",
+        "requires_app_session": True,
+        "images": [
+            {
+                "id": str(row["id"]),
+                "mime_type": row.get("mime_type"),
+                "timestamp_ms": row.get("timestamp_ms"),
+                "captured_at": _iso(row.get("captured_at")),
+                "url": f"{APP_BASE_URL}/api/meetings/{meeting_id}/images/{row['id']}",
+            }
+            for row in rows
+        ],
+    }
+
+
+@mcp.tool
+async def get_meeting_images(meeting_id: str) -> dict[str, Any]:
+    """List captured meeting images (screenshots and video frames) for one readable meeting with transcript timestamps. The tool returns protected app route URLs, not image bytes."""
+    user_id = _current_user_id()
+    try:
+        workspace = await _workspace_for_current_user()
+        meeting = await _get_accessible_meeting(meeting_id, workspace)
+        rows = await _fetch_all(
+            """
+            select ma.id, ma.mime_type, ma.timestamp_ms, ma.captured_at
+            from media_assets ma
+            where ma.meeting_id = %(meeting_id)s::uuid
+              and ma.type::text in ('screenshot', 'video_frame')
+            order by ma.timestamp_ms asc nulls last, ma.created_at asc
+            """,
+            {"meeting_id": str(meeting["id"])},
+        )
+        result = _meeting_images_payload(str(meeting["id"]), rows)
+    except Exception as exc:
+        _ph_capture_exception(exc, user_id, {"tool": "get_meeting_images"})
+        raise
+
+    _ph_capture(
+        "get_meeting_images_called",
+        user_id,
+        {"meeting_id": meeting_id, "image_count": len(rows)},
+    )
+    return {
+        "meeting": _meeting_summary(meeting, workspace),
+        **result,
+    }
+
+
 @mcp.tool
 async def execute_meeting_sql(
     sql: str,

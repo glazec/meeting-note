@@ -6,6 +6,7 @@ import {
   getSpeakerPreviewClips,
   getSpeakerPreviewTransition,
   getSpeakerRenameSuggestions,
+  getVisualAssetPlacements,
   getWaveformHoverSnapshot,
   shouldDecodeAudioWaveform,
   TranscriptViewer,
@@ -638,7 +639,7 @@ describe("TranscriptViewer", () => {
     expect(html).not.toContain("High pressure words or fast pace");
   });
 
-  it("shows captured meeting images with transcript jump controls", () => {
+  it("shows captured meeting images inline at their transcript position", () => {
     const html = renderToStaticMarkup(
       <TranscriptViewer
         segments={segments}
@@ -655,9 +656,42 @@ describe("TranscriptViewer", () => {
 
     expect(html).toContain("Meeting images");
     expect(html).toContain("Open image from 1:05");
-    expect(html).toContain("Jump to transcript");
     expect(html).toContain('loading="lazy"');
     expect(html).toContain('id="segment_123"');
+    expect(html.indexOf('id="segment_123"')).toBeLessThan(
+      html.lastIndexOf("Open image from 1:05"),
+    );
+  });
+
+  it("places visual assets on the segment speaking when they were captured", () => {
+    const timelineSegments: TranscriptSegment[] = [
+      { id: "seg_a", speaker: "A", startMs: 0, endMs: 30000, text: "Intro" },
+      { id: "seg_b", speaker: "B", startMs: 30000, endMs: 60000, text: "Demo" },
+      { id: "seg_c", speaker: "A", startMs: 60000, endMs: null, text: "Wrap" },
+    ];
+    const placements = getVisualAssetPlacements(timelineSegments, [
+      { id: "img_0", capturedAt: null, timestampMs: 45000, url: "/img_0" },
+      { id: "img_1", capturedAt: null, timestampMs: 59000, url: "/img_1" },
+      { id: "img_2", capturedAt: null, timestampMs: 60000, url: "/img_2" },
+      { id: "img_3", capturedAt: "2026-06-29T14:01:05.000Z", timestampMs: null, url: "/img_3" },
+    ]);
+
+    expect(placements.bySegmentId.get("seg_b")).toEqual([0, 1]);
+    expect(placements.bySegmentId.get("seg_c")).toEqual([2]);
+    expect(placements.bySegmentId.has("seg_a")).toBe(false);
+    expect(placements.leading).toEqual([]);
+  });
+
+  it("keeps assets captured before the first segment ahead of the transcript", () => {
+    const timelineSegments: TranscriptSegment[] = [
+      { id: "seg_a", speaker: "A", startMs: 10000, endMs: null, text: "Late start" },
+    ];
+    const placements = getVisualAssetPlacements(timelineSegments, [
+      { id: "img_0", capturedAt: null, timestampMs: 2000, url: "/img_0" },
+    ]);
+
+    expect(placements.leading).toEqual([0]);
+    expect(placements.bySegmentId.size).toBe(0);
   });
 
   it("renders the transcript waveform immediately with subtle loading motion", () => {

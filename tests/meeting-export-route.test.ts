@@ -2,14 +2,21 @@ import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { getCurrentUser, getWorkspace, select } = vi.hoisted(() => ({
-  getCurrentUser: vi.fn(),
-  getWorkspace: vi.fn(),
-  select: vi.fn(),
-}));
+const { createReadUrl, getCurrentUser, getWorkspace, select } = vi.hoisted(
+  () => ({
+    createReadUrl: vi.fn(),
+    getCurrentUser: vi.fn(),
+    getWorkspace: vi.fn(),
+    select: vi.fn(),
+  }),
+);
 
 vi.mock("@/lib/auth", () => ({
   getCurrentUser,
+}));
+
+vi.mock("@/lib/r2", () => ({
+  createReadUrl,
 }));
 
 vi.mock("@/lib/workspace", () => ({
@@ -45,9 +52,11 @@ async function getMeetingExport(
 
 describe("GET /api/meetings/[meetingId]/export", () => {
   afterEach(() => {
+    createReadUrl.mockReset();
     getCurrentUser.mockReset();
     getWorkspace.mockReset();
     select.mockReset();
+    vi.unstubAllGlobals();
     vi.resetModules();
   });
 
@@ -288,6 +297,129 @@ describe("GET /api/meetings/[meetingId]/export", () => {
       "11111111-1111-4111-8111-111111111111",
       "user_123",
     ]);
+  });
+
+  it("exports meeting images as a zip archive", async () => {
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({ teamId: "team_123" });
+
+    select
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            limit: vi.fn().mockResolvedValue([
+              {
+                id: "11111111-1111-4111-8111-111111111111",
+                title: "Nascent Sync",
+              },
+            ]),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: vi.fn().mockResolvedValue([
+              {
+                id: "asset_1",
+                mimeType: "image/png",
+                objectKey: "teams/team_123/img-1.png",
+                timestampMs: 65000,
+              },
+              {
+                id: "asset_2",
+                mimeType: "image/jpeg",
+                objectKey: "teams/team_123/img-2.jpg",
+                timestampMs: null,
+              },
+            ]),
+          }),
+        }),
+      });
+    createReadUrl.mockResolvedValue("https://r2.example.com/signed");
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockImplementation(async () =>
+          new Response(new Uint8Array([137, 80, 78, 71])),
+        ),
+    );
+
+    const response = await getMeetingExport(
+      "https://app.example.com/api/meetings/11111111-1111-4111-8111-111111111111/export?format=images",
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/zip");
+    expect(response.headers.get("content-disposition")).toContain(
+      "Nascent Sync images.zip",
+    );
+    const body = new Uint8Array(await response.arrayBuffer());
+
+    expect(Array.from(body.slice(0, 4))).toEqual([0x50, 0x4b, 0x03, 0x04]);
+    const bodyText = new TextDecoder().decode(body);
+
+    expect(bodyText).toContain("image-01-1m05s.png");
+    expect(bodyText).toContain("image-02.jpg");
+    expect(createReadUrl).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns 404 when an images export has no captured images", async () => {
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({ teamId: "team_123" });
+
+    select
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            limit: vi.fn().mockResolvedValue([
+              {
+                id: "11111111-1111-4111-8111-111111111111",
+                title: "Nascent Sync",
+              },
+            ]),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      });
+
+    const response = await getMeetingExport(
+      "https://app.example.com/api/meetings/11111111-1111-4111-8111-111111111111/export?format=images",
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Meeting has no images",
+    });
+  });
+
+  it("names image entries with sequence, timestamp, and extension", async () => {
+    const { buildImageEntryName } = await import(
+      "@/lib/meeting-image-export"
+    );
+
+    expect(buildImageEntryName(0, 65000, "image/png")).toBe(
+      "image-01-1m05s.png",
+    );
+    expect(buildImageEntryName(11, null, "image/jpeg")).toBe("image-12.jpg");
+    expect(buildImageEntryName(2, 0, "application/octet-stream")).toBe(
+      "image-03-0m00s.bin",
+    );
   });
 
   it("redirects MP3 exports to the authenticated meeting audio route", async () => {

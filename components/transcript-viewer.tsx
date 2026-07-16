@@ -6,6 +6,7 @@ import {
   type MouseEvent,
   type PointerEvent,
   type RefObject,
+  Fragment,
   useEffect,
   useMemo,
   useRef,
@@ -14,6 +15,8 @@ import {
 import { useRouter } from "next/navigation";
 import {
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Check,
   Languages,
   Pause,
@@ -262,6 +265,51 @@ function formatVisualAssetTimestamp(asset: MeetingVisualAsset) {
   return "unknown time";
 }
 
+export type VisualAssetPlacements = {
+  bySegmentId: Map<string, number[]>;
+  leading: number[];
+};
+
+export function getVisualAssetPlacements(
+  segments: TranscriptSegment[],
+  visualAssets: MeetingVisualAsset[],
+): VisualAssetPlacements {
+  const bySegmentId = new Map<string, number[]>();
+  const leading: number[] = [];
+
+  visualAssets.forEach((asset, assetIndex) => {
+    if (asset.timestampMs === null) {
+      return;
+    }
+
+    let targetSegmentId: string | null = null;
+
+    for (const segment of segments) {
+      if (segment.startMs > asset.timestampMs) {
+        break;
+      }
+
+      targetSegmentId = segment.id;
+    }
+
+    if (targetSegmentId === null) {
+      leading.push(assetIndex);
+      return;
+    }
+
+    const existing = bySegmentId.get(targetSegmentId);
+
+    if (existing) {
+      existing.push(assetIndex);
+      return;
+    }
+
+    bySegmentId.set(targetSegmentId, [assetIndex]);
+  });
+
+  return { bySegmentId, leading };
+}
+
 export function TranscriptViewer({
   audioUrl,
   meetingId,
@@ -374,6 +422,61 @@ export function TranscriptViewer({
       })?.id ?? null
     );
   }, [currentTime, displaySegments]);
+
+  const visualAssetPlacements = useMemo(
+    () => getVisualAssetPlacements(displaySegments, visualAssets),
+    [displaySegments, visualAssets],
+  );
+  const [lightboxAssetIndex, setLightboxAssetIndex] = useState<number | null>(
+    null,
+  );
+
+  function showAssetInTranscript(asset: MeetingVisualAsset) {
+    if (asset.timestampMs === null) {
+      return;
+    }
+
+    setLightboxAssetIndex(null);
+    scrollTranscriptToTime(asset.timestampMs / 1000);
+  }
+
+  function renderInlineVisualAssets(assetIndexes: number[], rowKey: string) {
+    return (
+      <li
+        className="grid grid-cols-[2rem_minmax(0,1fr)] gap-3 px-3 sm:-mx-3"
+        key={rowKey}
+      >
+        <span aria-hidden="true" />
+        <div className="flex flex-wrap gap-2">
+          {assetIndexes.map((assetIndex) => {
+            const asset = visualAssets[assetIndex];
+
+            if (!asset) {
+              return null;
+            }
+
+            return (
+              <button
+                aria-label={`Open image from ${formatVisualAssetTimestamp(asset)}`}
+                className="h-20 overflow-hidden rounded-md border bg-muted outline-none transition-shadow hover:shadow-md focus-visible:ring-3 focus-visible:ring-ring/50"
+                key={asset.id}
+                onClick={() => setLightboxAssetIndex(assetIndex)}
+                type="button"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element -- protected image routes need browser auth cookies */}
+                <img
+                  alt=""
+                  className="h-full w-auto object-cover"
+                  loading="lazy"
+                  src={asset.url}
+                />
+              </button>
+            );
+          })}
+        </div>
+      </li>
+    );
+  }
 
   function clearSpeakerPreview() {
     speakerPreviewRef.current = null;
@@ -820,9 +923,7 @@ export function TranscriptViewer({
               </div>
             ) : null}
             <MeetingVisualTimeline
-              onJumpToTranscript={(timestampMs) =>
-                scrollTranscriptToTime(timestampMs / 1000)
-              }
+              onOpenAsset={setLightboxAssetIndex}
               visualAssets={visualAssets}
             />
             <div className="mb-6">
@@ -914,6 +1015,12 @@ export function TranscriptViewer({
               </div>
             </div>
             <ol className="space-y-2">
+              {visualAssetPlacements.leading.length > 0
+                ? renderInlineVisualAssets(
+                    visualAssetPlacements.leading,
+                    "leading-images",
+                  )
+                : null}
               {displaySegments.map((segment, index) => {
                 const speakerStat = speakerStatByRawKey.get(
                   getSpeakerKey(segment.speaker),
@@ -960,10 +1067,13 @@ export function TranscriptViewer({
                       currentTime * 1000,
                     )
                   : null;
+                const inlineAssetIndexes =
+                  visualAssetPlacements.bySegmentId.get(segment.id);
+
                 return (
+                  <Fragment key={segment.id}>
                   <li
                     id={segment.id}
-                    key={segment.id}
                     ref={(node) => {
                       if (node) {
                         segmentRefs.current.set(segment.id, node);
@@ -1093,12 +1203,29 @@ export function TranscriptViewer({
                       </div>
                     </div>
                   </li>
+                  {inlineAssetIndexes
+                    ? renderInlineVisualAssets(
+                        inlineAssetIndexes,
+                        `${segment.id}-images`,
+                      )
+                    : null}
+                  </Fragment>
                 );
               })}
             </ol>
           </>
         )}
       </section>
+
+      {lightboxAssetIndex !== null && visualAssets[lightboxAssetIndex] ? (
+        <MeetingVisualLightbox
+          assetIndex={lightboxAssetIndex}
+          onClose={() => setLightboxAssetIndex(null)}
+          onNavigate={setLightboxAssetIndex}
+          onShowInTranscript={showAssetInTranscript}
+          visualAssets={visualAssets}
+        />
+      ) : null}
 
       {audioUrl ? (
         <TranscriptAudioPlayer
@@ -1258,16 +1385,12 @@ function normalizeTranscriptDisplayText(text: string) {
 }
 
 function MeetingVisualTimeline({
-  onJumpToTranscript,
+  onOpenAsset,
   visualAssets,
 }: {
-  onJumpToTranscript: (timestampMs: number) => void;
+  onOpenAsset: (assetIndex: number) => void;
   visualAssets: MeetingVisualAsset[];
 }) {
-  const [selectedAsset, setSelectedAsset] = useState<MeetingVisualAsset | null>(
-    null,
-  );
-
   if (visualAssets.length === 0) {
     return null;
   }
@@ -1281,21 +1404,18 @@ function MeetingVisualTimeline({
         </span>
       </div>
       <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
-        {visualAssets.map((asset) => {
+        {visualAssets.map((asset, assetIndex) => {
           const timestampLabel = formatVisualAssetTimestamp(asset);
-          const canJump = asset.timestampMs !== null;
 
           return (
-            <div
-              className="w-44 shrink-0 overflow-hidden rounded-md border bg-background"
+            <button
+              aria-label={`Open image from ${timestampLabel}`}
+              className="w-40 shrink-0 overflow-hidden rounded-md border bg-background text-left outline-none transition-shadow hover:shadow-md focus-visible:ring-3 focus-visible:ring-ring/50"
               key={asset.id}
+              onClick={() => onOpenAsset(assetIndex)}
+              type="button"
             >
-              <button
-                aria-label={`Open image from ${timestampLabel}`}
-                className="block aspect-video w-full overflow-hidden bg-muted outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-                onClick={() => setSelectedAsset(asset)}
-                type="button"
-              >
+              <span className="block aspect-video w-full overflow-hidden bg-muted">
                 {/* eslint-disable-next-line @next/next/no-img-element -- protected image routes need browser auth cookies */}
                 <img
                   alt=""
@@ -1303,60 +1423,131 @@ function MeetingVisualTimeline({
                   loading="lazy"
                   src={asset.url}
                 />
-              </button>
-              <div className="flex items-center justify-between gap-2 px-2 py-2">
-                <span className="text-xs font-medium text-muted-foreground">
-                  {timestampLabel}
-                </span>
-                <button
-                  className="text-xs font-medium text-primary outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 disabled:text-muted-foreground disabled:no-underline"
-                  disabled={!canJump}
-                  onClick={() => {
-                    if (asset.timestampMs !== null) {
-                      onJumpToTranscript(asset.timestampMs);
-                    }
-                  }}
-                  type="button"
-                >
-                  Jump to transcript
-                </button>
-              </div>
-            </div>
+              </span>
+              <span className="block px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                {timestampLabel}
+              </span>
+            </button>
           );
         })}
       </div>
-      {selectedAsset ? (
-        <div
-          aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 p-4 backdrop-blur"
-          role="dialog"
-        >
-          <div className="flex max-h-full w-full max-w-5xl flex-col gap-3">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-sm font-semibold">
-                Image from {formatVisualAssetTimestamp(selectedAsset)}
-              </p>
+    </section>
+  );
+}
+
+function MeetingVisualLightbox({
+  assetIndex,
+  onClose,
+  onNavigate,
+  onShowInTranscript,
+  visualAssets,
+}: {
+  assetIndex: number;
+  onClose: () => void;
+  onNavigate: (assetIndex: number) => void;
+  onShowInTranscript: (asset: MeetingVisualAsset) => void;
+  visualAssets: MeetingVisualAsset[];
+}) {
+  const asset = visualAssets[assetIndex];
+  const hasPrevious = assetIndex > 0;
+  const hasNext = assetIndex < visualAssets.length - 1;
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+
+      if (event.key === "ArrowLeft" && assetIndex > 0) {
+        onNavigate(assetIndex - 1);
+        return;
+      }
+
+      if (event.key === "ArrowRight" && assetIndex < visualAssets.length - 1) {
+        onNavigate(assetIndex + 1);
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [assetIndex, onClose, onNavigate, visualAssets.length]);
+
+  if (!asset) {
+    return null;
+  }
+
+  return (
+    <div
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 p-4 backdrop-blur"
+      role="dialog"
+    >
+      <div className="flex max-h-full w-full max-w-5xl flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm font-semibold">
+            Image from {formatVisualAssetTimestamp(asset)}
+            <span className="ml-2 font-medium text-muted-foreground">
+              {assetIndex + 1} of {visualAssets.length}
+            </span>
+          </p>
+          <div className="flex items-center gap-2">
+            {asset.timestampMs !== null ? (
               <Button
-                onClick={() => setSelectedAsset(null)}
+                onClick={() => onShowInTranscript(asset)}
                 size="sm"
                 type="button"
                 variant="outline"
               >
-                Close image
+                Show in transcript
               </Button>
-            </div>
-            <div className="min-h-0 overflow-hidden rounded-lg border bg-muted">
-              {/* eslint-disable-next-line @next/next/no-img-element -- protected image routes need browser auth cookies */}
-              <img
-                alt=""
-                className="max-h-[80vh] w-full object-contain"
-                src={selectedAsset.url}
-              />
-            </div>
+            ) : null}
+            <Button
+              onClick={onClose}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <X data-icon="inline-start" />
+              Close
+            </Button>
           </div>
         </div>
-      ) : null}
-    </section>
+        <div className="relative min-h-0 overflow-hidden rounded-lg border bg-muted">
+          {/* eslint-disable-next-line @next/next/no-img-element -- protected image routes need browser auth cookies */}
+          <img
+            alt=""
+            className="max-h-[80vh] w-full object-contain"
+            src={asset.url}
+          />
+          {hasPrevious ? (
+            <Button
+              aria-label="Previous image"
+              className="absolute left-3 top-1/2 -translate-y-1/2 shadow-sm"
+              onClick={() => onNavigate(assetIndex - 1)}
+              size="icon"
+              type="button"
+              variant="secondary"
+            >
+              <ChevronLeft />
+            </Button>
+          ) : null}
+          {hasNext ? (
+            <Button
+              aria-label="Next image"
+              className="absolute right-3 top-1/2 -translate-y-1/2 shadow-sm"
+              onClick={() => onNavigate(assetIndex + 1)}
+              size="icon"
+              type="button"
+              variant="secondary"
+            >
+              <ChevronRight />
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </div>
   );
 }
 

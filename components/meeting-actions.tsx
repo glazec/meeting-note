@@ -14,13 +14,15 @@ import { Button } from "@/components/ui/button";
 
 type MeetingActionsProps = {
   meetingId: string;
+  imageCount?: number;
   instanceId?: string;
 };
 
-type ExportFormat = "transcript" | "mp3";
+type ExportFormat = "transcript" | "mp3" | "images";
 
 export function MeetingActions({
   meetingId,
+  imageCount = 0,
   instanceId = "default",
 }: MeetingActionsProps) {
   const router = useRouter();
@@ -29,6 +31,7 @@ export function MeetingActions({
   const [selectedExportFormats, setSelectedExportFormats] = useState<
     Record<ExportFormat, boolean>
   >({
+    images: true,
     mp3: true,
     transcript: true,
   });
@@ -40,8 +43,12 @@ export function MeetingActions({
   const exportMenuId = `meeting-export-menu-${instanceId}-${meetingId}`;
   const textExportUrl = `/api/meetings/${encodedMeetingId}/export?format=text`;
   const mp3ExportUrl = `/api/meetings/${encodedMeetingId}/export?format=mp3`;
+  const imagesExportUrl = `/api/meetings/${encodedMeetingId}/export?format=images`;
+  const includeImages = imageCount > 0 && selectedExportFormats.images;
   const hasSelectedExport =
-    selectedExportFormats.transcript || selectedExportFormats.mp3;
+    selectedExportFormats.transcript ||
+    selectedExportFormats.mp3 ||
+    includeImages;
 
   useEffect(() => {
     if (!isExportMenuOpen) {
@@ -96,6 +103,7 @@ export function MeetingActions({
     const urls = [
       selectedExportFormats.transcript ? textExportUrl : null,
       selectedExportFormats.mp3 ? mp3ExportUrl : null,
+      includeImages ? imagesExportUrl : null,
     ].filter((url): url is string => Boolean(url));
 
     urls.forEach((url, index) => {
@@ -189,6 +197,19 @@ export function MeetingActions({
             />
             <span className="font-medium">MP3</span>
           </label>
+          {imageCount > 0 ? (
+            <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 hover:bg-muted">
+              <input
+                checked={selectedExportFormats.images}
+                className="size-4 rounded border-input accent-primary"
+                onChange={() => toggleExportFormat("images")}
+                type="checkbox"
+              />
+              <span className="font-medium">
+                Images ({imageCount})
+              </span>
+            </label>
+          ) : null}
           <Button
             className="mt-2 w-full"
             disabled={!hasSelectedExport}
