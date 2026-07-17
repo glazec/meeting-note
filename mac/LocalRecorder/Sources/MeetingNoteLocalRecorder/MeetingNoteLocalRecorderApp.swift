@@ -6,7 +6,7 @@ import LocalRecorderCore
 import ServiceManagement
 import Sparkle
 import SwiftUI
-import UserNotifications
+@preconcurrency import UserNotifications
 
 private enum LocalRecorderAppVersion {
     static var current: String {
