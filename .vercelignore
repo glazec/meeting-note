@@ -1,0 +1,14 @@
+.git/
+.next/
+.superpowers/
+.vercel/
+.worktrees/
+coverage/
+node_modules/
+playwright-report/
+test-results/
+mac/LocalRecorder/.build/
+mac/LocalRecorder/dist/
+mac/LocalRecorder/Sidecar/node_modules/
+.env*
+!.env.example

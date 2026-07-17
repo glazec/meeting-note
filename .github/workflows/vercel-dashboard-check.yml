@@ -1,0 +1,30 @@
+name: Vercel Dashboard Check
+
+on:
+  repository_dispatch:
+    types:
+      - vercel.deployment.ready
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  dashboard:
+    name: Dashboard readiness
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check dashboard readiness
+        env:
+          DEPLOYMENT_URL: ${{ github.event.client_payload.url }}
+        run: >-
+          curl --fail --show-error --silent
+          --retry 5 --retry-all-errors --retry-delay 5
+          "${DEPLOYMENT_URL%/}/api/health/dashboard"
+
+      - name: Notify Vercel
+        if: always()
+        uses: vercel/repository-dispatch/actions/status@v1
+        with:
+          name: "Vercel - meeting-note: dashboard"
