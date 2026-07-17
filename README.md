@@ -91,9 +91,9 @@ Ask these questions in order.
 
 5. [OpenRouter](https://openrouter.ai) model calls
 
-   The app uses OpenRouter chat completions for live Recall chat answers and transcript translation. The default model is `qwen/qwen3.7-plus` in `.env.example`. Create a key in [OpenRouter keys](https://openrouter.ai/settings/keys), then keep the model slug explicit.
+   The app uses OpenRouter chat completions for live Recall chat answers and transcript translation. The default model is `qwen/qwen3.7-plus` in `.env.example`. Create a key in [OpenRouter keys](https://openrouter.ai/settings/keys), then keep the model slug explicit. Live meeting answers can use [Exa](https://exa.ai) for grounded web search when `EXA_API_KEY` is configured. Without that key, the search tool stays disabled.
 
-   Prompt: Please provide `OPENROUTER_API_KEY` and confirm `OPENROUTER_MODEL=qwen/qwen3.7-plus`, or name another model gateway or direct model provider.
+   Prompt: Please provide `OPENROUTER_API_KEY`, confirm `OPENROUTER_MODEL=qwen/qwen3.7-plus`, and provide `EXA_API_KEY` if the meeting agent should search the web. You can also name another model gateway or search provider.
 
 6. [Inngest](https://www.inngest.com) workers
 

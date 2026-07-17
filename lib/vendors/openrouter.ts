@@ -8,6 +8,7 @@ import {
   parseOriginalTranscriptPolishResponse,
   TranslationResponseError,
 } from "@/lib/meeting-translation";
+import { searchWebWithExa } from "@/lib/vendors/exa";
 
 const optionalUrl = z.preprocess(
   (value) =>
@@ -21,6 +22,15 @@ const openRouterEnvSchema = z.object({
   NEXT_PUBLIC_APP_URL: optionalUrl,
 });
 
+const openRouterToolCallSchema = z.object({
+  id: z.string().min(1),
+  type: z.literal("function"),
+  function: z.object({
+    name: z.string().min(1),
+    arguments: z.string(),
+  }),
+});
+
 const openRouterResponseSchema = z.object({
   choices: z.array(
     z.object({
@@ -28,6 +38,7 @@ const openRouterResponseSchema = z.object({
       message: z
         .object({
           content: z.string().optional().nullable(),
+          tool_calls: z.array(openRouterToolCallSchema).optional(),
         })
         .optional()
         .nullable(),
@@ -37,6 +48,46 @@ const openRouterResponseSchema = z.object({
 export const TRANSLATION_BATCH_SIZE = 10;
 const TRANSLATION_BATCH_CHARACTER_LIMIT = 1800;
 const OPENROUTER_COMPLETION_ATTEMPTS = 3;
+const MEETING_CHAT_MAX_TOKENS = 900;
+
+const searchWebToolArgumentsSchema = z.object({
+  query: z.string().trim().min(1),
+});
+
+const searchWebTool = {
+  type: "function" as const,
+  function: {
+    name: "search_web",
+    description:
+      "Search the public web with Exa for current, external, or factual information. Do not use it for private meeting data or questions that can be answered without web research.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "A focused web search question.",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+};
+
+type OpenRouterToolCall = z.infer<typeof openRouterToolCallSchema>;
+type MeetingChatMessage =
+  | { role: "system" | "user"; content: string }
+  | {
+      role: "assistant";
+      content: string | null;
+      tool_calls: OpenRouterToolCall[];
+    }
+  | {
+      role: "tool";
+      tool_call_id: string;
+      name: string;
+      content: string;
+    };
 
 type TranscriptSegment = { id: string; text: string };
 
@@ -44,45 +95,132 @@ export async function generateOpenRouterChatReply(input: {
   question: string;
   participantName?: string | null;
 }) {
-  const env = openRouterEnvSchema.parse(process.env);
   const participantName = input.participantName?.trim() || "A participant";
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      ...(env.NEXT_PUBLIC_APP_URL
-        ? { "HTTP-Referer": env.NEXT_PUBLIC_APP_URL }
-        : {}),
-      "X-Title": "Meeting Note",
+  const messages: MeetingChatMessage[] = [
+    {
+      role: "system",
+      content:
+        "You are IOSG Old Friend, a concise meeting assistant inside a live meeting chat. Answer the user's question directly. Use plain text without Markdown because meeting chat does not render Markdown. If the answer requires live transcript or private app data you do not have, say that briefly. Use web search for current or external facts when it is available, and include at most two short source URLs when search is used. Keep the complete answer under 700 characters.",
     },
-    body: JSON.stringify({
-      model: env.OPENROUTER_MODEL,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are IOSG Old Friend, a concise meeting assistant inside a live meeting chat. Answer the user's question directly. If the answer requires live transcript or private app data you do not have, say that briefly. Keep the answer under 700 characters.",
-        },
-        {
-          role: "user",
-          content: `${participantName} asked in the meeting chat:\n${input.question}`,
-        },
-      ],
-      temperature: 0.3,
-      max_tokens: 240,
-    }),
+    {
+      role: "user",
+      content: `${participantName} asked in the meeting chat:\n${input.question}`,
+    },
+  ];
+  const searchEnabled = Boolean(process.env.EXA_API_KEY?.trim());
+  const firstChoice = await createMeetingChatCompletion({
+    messages,
+    searchToolChoice: searchEnabled ? "auto" : null,
   });
+  const toolCall = firstChoice.message?.tool_calls?.[0];
 
-  if (!response.ok) {
-    throw new Error(
-      `OpenRouter chat completion failed with ${response.status} ${response.statusText}`,
-    );
+  if (!toolCall) {
+    return getMeetingChatContent(firstChoice);
   }
 
-  const parsed = openRouterResponseSchema.parse(await response.json());
-  const content = parsed.choices[0]?.message?.content?.trim();
+  const toolResult = await runMeetingChatTool(toolCall);
+  messages.push({
+    role: "assistant",
+    content: firstChoice.message?.content ?? null,
+    tool_calls: [toolCall],
+  });
+  messages.push({
+    role: "tool",
+    tool_call_id: toolCall.id,
+    name: toolCall.function.name,
+    content: JSON.stringify(toolResult),
+  });
+
+  const finalChoice = await createMeetingChatCompletion({
+    messages,
+    searchToolChoice: "none",
+  });
+
+  return getMeetingChatContent(finalChoice);
+}
+
+async function runMeetingChatTool(toolCall: OpenRouterToolCall) {
+  if (toolCall.function.name !== searchWebTool.function.name) {
+    return { error: "Unsupported tool" };
+  }
+
+  try {
+    const parsedArguments = searchWebToolArgumentsSchema.parse(
+      JSON.parse(toolCall.function.arguments),
+    );
+
+    return await searchWebWithExa(parsedArguments.query);
+  } catch {
+    return { error: "Web search is temporarily unavailable" };
+  }
+}
+
+async function createMeetingChatCompletion(input: {
+  messages: MeetingChatMessage[];
+  searchToolChoice: "auto" | "none" | null;
+}) {
+  const env = openRouterEnvSchema.parse(process.env);
+
+  for (
+    let attempt = 1;
+    attempt <= OPENROUTER_COMPLETION_ATTEMPTS;
+    attempt += 1
+  ) {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      signal: AbortSignal.timeout(60_000),
+      headers: {
+        Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(env.NEXT_PUBLIC_APP_URL
+          ? { "HTTP-Referer": env.NEXT_PUBLIC_APP_URL }
+          : {}),
+        "X-Title": "Meeting Note",
+      },
+      body: JSON.stringify({
+        model: env.OPENROUTER_MODEL,
+        messages: input.messages,
+        temperature: 0.3,
+        max_tokens: MEETING_CHAT_MAX_TOKENS * attempt,
+        reasoning: { effort: "none" },
+        ...(input.searchToolChoice
+          ? {
+              tools: [searchWebTool],
+              tool_choice: input.searchToolChoice,
+              parallel_tool_calls: false,
+            }
+          : {}),
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `OpenRouter chat completion failed with ${response.status} ${response.statusText}`,
+      );
+    }
+
+    const parsed = openRouterResponseSchema.parse(await response.json());
+    const choice = parsed.choices[0];
+
+    if (!choice) {
+      throw new Error("OpenRouter chat completion response missing choice");
+    }
+
+    if (choice.finish_reason === "length") {
+      continue;
+    }
+
+    return choice;
+  }
+
+  throw new Error("OpenRouter meeting chat reply stopped at the token limit");
+}
+
+function getMeetingChatContent(
+  choice: z.infer<typeof openRouterResponseSchema>["choices"][number],
+) {
+  const content = choice.message?.content?.trim();
 
   if (!content) {
     throw new Error("OpenRouter chat completion response missing content");
