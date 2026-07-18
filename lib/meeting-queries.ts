@@ -110,6 +110,9 @@ export type MeetingTranscript = {
   title: string;
   platform: MeetingListItem["platform"];
   status: MeetingListItem["status"];
+  startedAt: string | null;
+  endedAt: string | null;
+  durationMs: number | null;
   transcriptJobStatus: TranscriptJobStatus | null;
   translationSummary: MeetingTranslationSummary;
   audioUrl: string | null;
@@ -1084,6 +1087,18 @@ export async function getMeetingTranscriptForWorkspace(
       title: meetings.title,
       platform: meetings.platform,
       status: meetings.status,
+      startedAt: meetings.startedAt,
+      endedAt: meetings.endedAt,
+      createdAt: meetings.createdAt,
+      transcriptDurationMs: sql<number | null>`(
+        select max(greatest(
+          ${transcriptSegments.startMs},
+          coalesce(${transcriptSegments.endMs}, ${transcriptSegments.startMs})
+        ))::int
+        from ${transcriptSegments}
+        where ${transcriptSegments.meetingId} = ${meetings.id}
+          and ${transcriptSegments.jobId} = ${currentTranscriptJobIdSubquery(meetings.id)}
+      )`,
       transcriptJobStatus: sql<TranscriptJobStatus | null>`(
         select ${transcriptJobs.status}
         from ${transcriptJobs}
@@ -1208,6 +1223,10 @@ export async function getMeetingTranscriptForWorkspace(
     }),
     platform: meeting.platform,
     status: meeting.status,
+    startedAt:
+      (meeting.startedAt ?? meeting.createdAt)?.toISOString() ?? null,
+    endedAt: meeting.endedAt?.toISOString() ?? null,
+    durationMs: getTranscriptDurationMs(meeting.transcriptDurationMs) ?? null,
     transcriptJobStatus: meeting.transcriptJobStatus,
     translationSummary: buildMeetingTranslationSummary({
       errorMessage: meeting.translationErrorMessage,

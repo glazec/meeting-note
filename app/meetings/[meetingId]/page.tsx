@@ -4,12 +4,12 @@ import { AppShell } from "@/components/app-shell";
 import { MeetingAutoRefresh } from "@/components/meeting-auto-refresh";
 import { MeetingActions } from "@/components/meeting-actions";
 import { MeetingEntityLinks } from "@/components/meeting-entity-links";
+import { MeetingHeaderMetadata } from "@/components/meeting-header-metadata";
 import { MeetingRecoveryUploadPanel } from "@/components/meeting-recovery-upload-panel";
 import { MeetingTitleEditor } from "@/components/meeting-title-editor";
 import { RelatedMeetingsCard } from "@/components/related-meetings-card";
 import { ShareDialog } from "@/components/share-dialog";
 import { TranscriptViewer } from "@/components/transcript-viewer";
-import { Badge } from "@/components/ui/badge";
 import { requireCurrentUser } from "@/lib/auth-guards";
 import { getMeetingDisplayStatus } from "@/lib/meeting-display-status";
 import { isIosgIcTeamAvailable } from "@/lib/meeting-share-audiences";
@@ -67,10 +67,19 @@ export default async function MeetingPage({
             transcriptJobStatus={meeting.transcriptJobStatus}
             translationStatus={meeting.translationSummary.status}
           />
-          <p className="text-sm font-medium uppercase tracking-normal text-primary">
-            Meeting
-          </p>
-          <div className="mt-3 flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-primary">
+              Meeting
+            </p>
+            {canManage ? (
+              <MeetingActions
+                imageCount={meeting.visualAssets.length}
+                instanceId="header"
+                meetingId={meetingId}
+              />
+            ) : null}
+          </div>
+          <div className="mt-2 min-w-0">
             {canManage ? (
               <MeetingTitleEditor
                 meetingId={meetingId}
@@ -81,34 +90,14 @@ export default async function MeetingPage({
                 {meeting.title}
               </h1>
             )}
-            {canManage ? (
-              <div className="lg:hidden">
-                <MeetingActions
-                  imageCount={meeting.visualAssets.length}
-                  instanceId="mobile"
-                  meetingId={meetingId}
-                />
-              </div>
-            ) : null}
           </div>
-          <dl className="mt-5 grid gap-4 py-4 sm:grid-cols-2">
-            <div className="min-w-0">
-              <dt className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-                Platform
-              </dt>
-              <dd className="mt-1 text-sm font-semibold">
-                {formatPlatform(meeting.platform)}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-                Status
-              </dt>
-              <dd className="mt-1">
-                <Badge>{formatStatus(displayStatus)}</Badge>
-              </dd>
-            </div>
-          </dl>
+          <MeetingHeaderMetadata
+            durationMs={meeting.durationMs}
+            endedAt={meeting.endedAt}
+            platform={formatPlatform(meeting.platform)}
+            startedAt={meeting.startedAt}
+            status={formatStatus(displayStatus)}
+          />
         </section>
 
         <aside
@@ -118,14 +107,7 @@ export default async function MeetingPage({
         >
           {canManage ? (
             <>
-              <div className="hidden lg:flex">
-                <MeetingActions
-                  imageCount={meeting.visualAssets.length}
-                  instanceId="desktop"
-                  meetingId={meetingId}
-                />
-              </div>
-              <div className="lg:mt-8">
+              <div>
                 <ShareDialog
                   initialAccessPeople={meeting.accessPeople}
                   initialShares={activeShares}
@@ -161,7 +143,7 @@ export default async function MeetingPage({
         </aside>
 
         <section className="min-w-0 lg:col-start-1 lg:row-start-2">
-          <div className="border-t pt-6">
+          <div>
             <MeetingEntityLinks entities={meeting.entities} />
             <div className={meeting.entities.length > 0 ? "mt-8" : undefined}>
               <TranscriptViewer
