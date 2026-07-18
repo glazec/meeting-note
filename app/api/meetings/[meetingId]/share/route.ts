@@ -157,7 +157,7 @@ export async function POST(
       email: result.data.email,
       futureMeetings: true,
       meetingCount: relatedMeetings.length,
-      meetings: relatedMeetings.slice(0, 5).map(({ id, title }) => ({ id, title })),
+      meetings: relatedMeetings.map(({ id, title }) => ({ id, title })),
       preview: true,
       shared: false,
     });

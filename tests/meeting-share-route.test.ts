@@ -166,6 +166,26 @@ describe("POST /api/meetings/[meetingId]/share", () => {
         id: "22222222-2222-4222-8222-222222222222",
         title: "Quarterly update",
       },
+      {
+        attendeeEmails: ["founder@nascent.xyz"],
+        id: "33333333-3333-4333-8333-333333333333",
+        title: "Product update",
+      },
+      {
+        attendeeEmails: ["founder@nascent.xyz"],
+        id: "44444444-4444-4444-8444-444444444444",
+        title: "Fundraising update",
+      },
+      {
+        attendeeEmails: ["founder@nascent.xyz"],
+        id: "55555555-5555-4555-8555-555555555555",
+        title: "Portfolio update",
+      },
+      {
+        attendeeEmails: ["founder@nascent.xyz"],
+        id: "66666666-6666-4666-8666-666666666666",
+        title: "Annual update",
+      },
     ]);
 
     const response = await shareMeetingRequest({
@@ -175,11 +195,13 @@ describe("POST /api/meetings/[meetingId]/share", () => {
     });
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      meetingCount: 2,
+    const result = await response.json();
+    expect(result).toMatchObject({
+      meetingCount: 6,
       preview: true,
       shared: false,
     });
+    expect(result.meetings).toHaveLength(6);
     expect(createMeetingSharePolicy).not.toHaveBeenCalled();
   });
 
