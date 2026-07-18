@@ -37,13 +37,19 @@ export async function grantMeetingAccessByEmail(input: {
         source,
         source_id,
         created_by_user_id
-      ) values (
+      )
+      select
         ${input.meetingId}::uuid,
         ${email},
         ${input.role}::access_role,
         ${input.source},
         ${input.sourceId},
         ${input.createdByUserId}::uuid
+      where not exists (
+        select 1
+        from meeting_access_exclusions
+        where meeting_id = ${input.meetingId}::uuid
+          and recipient_email = ${email}
       )
       on conflict (meeting_id, recipient_email, source, source_id) do update
       set role = excluded.role,
@@ -71,6 +77,12 @@ export async function grantMeetingAccessByEmail(input: {
         ${input.source} = 'participant'
         and target_user.id = ${input.createdByUserId}::uuid
       )
+        and not exists (
+          select 1
+          from meeting_access_exclusions
+          where meeting_id = ${input.meetingId}::uuid
+            and recipient_email = ${email}
+        )
       on conflict (meeting_id, user_id) do update
       set role = excluded.role,
           source = 'effective',
@@ -95,6 +107,12 @@ export async function grantMeetingAccessByEmail(input: {
         'effective',
         'materialized'
       where not exists (select 1 from target_user)
+        and not exists (
+          select 1
+          from meeting_access_exclusions
+          where meeting_id = ${input.meetingId}::uuid
+            and recipient_email = ${email}
+        )
       on conflict (meeting_id, email) do update
       set role = excluded.role,
           created_by_user_id = excluded.created_by_user_id,

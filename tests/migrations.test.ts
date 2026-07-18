@@ -193,14 +193,18 @@ describe("database migrations", () => {
     );
   });
 
-  it("adds workspace organization sharing as an explicit meeting setting", () => {
+  it("adds durable per meeting access exclusions", () => {
     const sql = readFileSync(
-      "db/migrations/0027_organization_meeting_access.sql",
+      "db/migrations/0028_meeting_access_exclusions.sql",
       "utf8",
     ).replace(/\s+/g, " ");
 
+    expect(sql).toContain('CREATE TABLE "meeting_access_exclusions"');
     expect(sql).toContain(
-      'ADD COLUMN "organization_access_enabled" boolean DEFAULT false NOT NULL',
+      'CREATE UNIQUE INDEX "meeting_access_exclusions_meeting_email_unique"',
     );
+    expect(sql).toContain("organization_migration");
+    expect(sql).toContain('meeting."organization_access_enabled" = true');
+    expect(sql).toContain("membership.\"role\" <> 'external'");
   });
 });

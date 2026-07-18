@@ -10,7 +10,6 @@ describe("ShareDialog", () => {
         initialAccessPeople={[
           { email: "participant@example.com", name: "Meeting Participant" },
         ]}
-        initialOrganizationShared={false}
         initialShares={[
           {
             email: "guest@example.com",
@@ -29,20 +28,28 @@ describe("ShareDialog", () => {
     expect(html).toContain(">Share<");
     expect(html).not.toContain("Copy link");
     expect(html).toContain(
-      "Eligible internal participants receive access automatically. Share manually with external guests.",
+      "Eligible internal participants receive access automatically. Remove access above or share manually with external guests.",
     );
     expect(html).not.toContain("Participants already have access.");
-    expect(html).toContain("Colleague");
-    expect(html).toContain("Team Mate");
+    expect(html).toContain("Colleague or group");
+    expect(html).toContain('data-slot="combobox-input"');
+    expect(html).toContain('data-slot="combobox-trigger"');
+    expect(html).not.toContain("<datalist");
+    expect(html).toContain("Email, whole organization, or IC team");
     expect(html).toContain("Include past and future related meetings");
     expect(html).toContain("Share meeting");
-    expect(html).toContain("Share with organization");
-    expect(html).toContain("Share with IC team");
+    expect(html).not.toContain("Share this meeting with");
+    expect(html).not.toContain("Share with organization");
+    expect(html).not.toContain("Share with IC team");
+    expect(html).not.toContain("IC team includes");
     expect(html).toContain("People with access");
     expect(html).toContain("Meeting Participant");
     expect(html).toContain("participant@example.com");
     expect(html).toContain("guest@example.com");
     expect(html).toContain("Invite pending");
+    expect(html).toContain('aria-label="Remove participant@example.com"');
+    expect(html).toContain('aria-label="Remove guest@example.com"');
+    expect(html).not.toContain("Manage manual access");
     expect(html).not.toContain("Meeting labels");
     expect(html).not.toContain("Manage labels");
     expect(html).not.toContain("Meeting link");

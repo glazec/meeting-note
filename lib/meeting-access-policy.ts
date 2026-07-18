@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 
 import {
   meetingAccess,
@@ -26,21 +26,9 @@ export function getReadableMeetingsCondition(
       and ${teamMemberships.userId} = ${workspace.userId}
       and ${inArray(teamMemberships.role, meetingManagerRoles)}
   )`;
-  const organizationMemberCondition = sql`exists (
-    select 1
-    from ${teamMemberships}
-    where ${teamMemberships.teamId} = ${meetings.teamId}
-      and ${teamMemberships.userId} = ${workspace.userId}
-      and ${ne(teamMemberships.role, "external")}
-  )`;
-
   return or(
     eq(meetings.ownerUserId, workspace.userId),
     teamManagerCondition,
-    and(
-      eq(meetings.organizationAccessEnabled, true),
-      organizationMemberCondition,
-    ),
     activeGrantCondition,
   )!;
 }

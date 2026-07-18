@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PgDialect } from "drizzle-orm/pg-core";
 
 const { execute } = vi.hoisted(() => ({ execute: vi.fn() }));
 
@@ -38,6 +39,8 @@ describe("meeting access grants", () => {
       }),
     ).resolves.toMatchObject({ pending: false });
     expect(execute).toHaveBeenCalledTimes(1);
+    const query = new PgDialect().sqlToQuery(execute.mock.calls[0][0]).sql;
+    expect(query).toContain("meeting_access_exclusions");
   });
 
   it("stores an email grant until the recipient signs in", async () => {

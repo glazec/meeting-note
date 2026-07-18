@@ -13,8 +13,10 @@ import {
   createMeetingSharePolicy,
   listActiveMeetingShares,
   meetingSharePolicyAppliesToMeeting,
+  revokeMeetingRecipientAccess,
   revokeMeetingSharePolicy,
 } from "@/lib/meeting-share-service";
+import { listWorkspaceShareRecipients } from "@/lib/meeting-queries";
 import {
   getMeetingShareMatchKeys,
   hasReliableMeetingShareMatchKeys,
@@ -27,12 +29,13 @@ export const runtime = "nodejs";
 
 const meetingIdSchema = z.uuid();
 const shareIdSchema = z.uuid();
+const recipientEmailSchema = z
+  .string()
+  .trim()
+  .pipe(z.email().max(320))
+  .transform(normalizeEmail);
 const emailShareRequestSchema = z.strictObject({
-  email: z
-    .string()
-    .trim()
-    .pipe(z.email().max(320))
-    .transform(normalizeEmail),
+  email: recipientEmailSchema,
   includeRelated: z.boolean().optional().default(false),
   preview: z.boolean().optional().default(false),
 });
@@ -61,7 +64,6 @@ export async function GET(
   }
 
   return Response.json({
-    organizationShared: access.meeting.organizationAccessEnabled,
     shares: await listActiveMeetingShares(access.meeting.id),
   });
 }
@@ -212,15 +214,32 @@ export async function DELETE(
   }
 
   const searchParams = new URL(request.url).searchParams;
+  const recipientEmail = searchParams.get("email");
 
-  if (searchParams.get("audience") === "organization") {
-    await setOrganizationSharing(access.meeting.id, access.workspace.teamId, false);
+  if (recipientEmail !== null) {
+    const parsedEmail = recipientEmailSchema.safeParse(recipientEmail);
 
-    return Response.json({
-      audience: "organization",
-      organizationShared: false,
-      revoked: true,
+    if (!parsedEmail.success) {
+      return Response.json({ error: "Invalid recipient" }, { status: 400 });
+    }
+
+    if (
+      parsedEmail.data === normalizeEmail(access.user.email) ||
+      parsedEmail.data === access.meeting.ownerEmail
+    ) {
+      return Response.json(
+        { error: "Meeting owner access cannot be removed" },
+        { status: 400 },
+      );
+    }
+
+    await revokeMeetingRecipientAccess({
+      createdByUserId: access.workspace.userId,
+      meetingId: access.meeting.id,
+      recipientEmail: parsedEmail.data,
     });
+
+    return Response.json({ email: parsedEmail.data, revoked: true });
   }
 
   const shareId = searchParams.get("shareId");
@@ -273,7 +292,6 @@ async function getManageableMeeting(context: {
     .select({
       attendeeEmails: calendarEvents.attendeeEmails,
       id: meetings.id,
-      organizationAccessEnabled: meetings.organizationAccessEnabled,
       ownerEmail: sql<string>`(
         select lower(${users.email})
         from ${users}
@@ -303,17 +321,10 @@ async function shareWithAudience(
   audience: "organization" | "ic_team",
   access: ManageableMeetingAccess,
 ) {
-  if (audience === "organization") {
-    await setOrganizationSharing(access.meeting.id, access.workspace.teamId, true);
-
-    return Response.json({
-      audience,
-      organizationShared: true,
-      shared: true,
-    });
-  }
-
-  if (!isIosgIcTeamAvailable(access.workspace.domain)) {
+  if (
+    audience === "ic_team" &&
+    !isIosgIcTeamAvailable(access.workspace.domain)
+  ) {
     return Response.json(
       { error: "The IC team audience is not available in this organization" },
       { status: 400 },
@@ -321,7 +332,11 @@ async function shareWithAudience(
   }
 
   const currentUserEmail = normalizeEmail(access.user.email);
-  const recipients = icTeamMembers.filter(
+  const audienceMembers =
+    audience === "organization"
+      ? await listWorkspaceShareRecipients(access.workspace)
+      : icTeamMembers;
+  const recipients = audienceMembers.filter(
     ({ email }) =>
       email !== currentUserEmail && email !== access.meeting.ownerEmail,
   );
@@ -346,18 +361,4 @@ async function shareWithAudience(
     recipientCount: recipients.length,
     shared: true,
   });
-}
-
-async function setOrganizationSharing(
-  meetingId: string,
-  teamId: string,
-  enabled: boolean,
-) {
-  await db
-    .update(meetings)
-    .set({
-      organizationAccessEnabled: enabled,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(meetings.id, meetingId), eq(meetings.teamId, teamId)));
 }

@@ -2,6 +2,7 @@ import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
+  meetingAccessExclusions,
   meetingAccessSources,
   meetingSharePolicies,
   users,
@@ -28,7 +29,11 @@ export async function createMeetingSharePolicy(input: {
 }) {
   const policyId = crypto.randomUUID();
   const result = await db.execute<{ id: string; pending: boolean }>(sql`
-    with active_policy as (
+    with cleared_exclusions as (
+      delete from meeting_access_exclusions
+      where meeting_id = any(${input.meetingIds}::uuid[])
+        and recipient_email = ${input.recipientEmail}
+    ), active_policy as (
       insert into meeting_share_policies (
         id,
         team_id,
@@ -182,6 +187,12 @@ export async function listActiveMeetingShares(
               and ${meetingAccessSources.revokedAt} is null
           )`,
         ),
+        sql`not exists (
+          select 1
+          from ${meetingAccessExclusions}
+          where ${meetingAccessExclusions.meetingId} = ${meetingId}::uuid
+            and ${meetingAccessExclusions.recipientEmail} = ${meetingSharePolicies.recipientEmail}
+        )`,
       ),
     )
     .orderBy(asc(meetingSharePolicies.recipientEmail));
@@ -198,6 +209,54 @@ export async function listActiveMeetingShares(
         ]
       : [],
   );
+}
+
+export async function revokeMeetingRecipientAccess(input: {
+  createdByUserId: string;
+  meetingId: string;
+  recipientEmail: string;
+}) {
+  await db.execute(sql`
+    with exclusion as (
+      insert into meeting_access_exclusions (
+        meeting_id,
+        recipient_email,
+        created_by_user_id
+      ) values (
+        ${input.meetingId}::uuid,
+        ${input.recipientEmail},
+        ${input.createdByUserId}::uuid
+      )
+      on conflict (meeting_id, recipient_email) do update
+      set created_by_user_id = excluded.created_by_user_id,
+          updated_at = now()
+      returning id
+    ), revoked_sources as (
+      update meeting_access_sources
+      set revoked_at = now(), updated_at = now()
+      where meeting_id = ${input.meetingId}::uuid
+        and recipient_email = ${input.recipientEmail}
+        and revoked_at is null
+      returning id
+    ), revoked_access as (
+      update meeting_access as access
+      set revoked_at = now(), updated_at = now()
+      from users as app_user
+      where access.meeting_id = ${input.meetingId}::uuid
+        and access.user_id = app_user.id
+        and lower(app_user.email) = ${input.recipientEmail}
+        and access.revoked_at is null
+      returning access.id
+    ), revoked_invites as (
+      update meeting_share_invites as invite
+      set revoked_at = now(), updated_at = now()
+      where invite.meeting_id = ${input.meetingId}::uuid
+        and lower(invite.email) = ${input.recipientEmail}
+        and invite.revoked_at is null
+      returning invite.id
+    )
+    select exists(select 1 from exclusion) as excluded
+  `);
 }
 
 export async function meetingSharePolicyAppliesToMeeting(

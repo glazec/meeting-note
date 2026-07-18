@@ -152,9 +152,6 @@ describe("GET /api/meetings/[meetingId]/images/[assetId]", () => {
       "user_123",
       "admin",
       "owner",
-      true,
-      "user_123",
-      "external",
       "user_123",
     ]);
   });

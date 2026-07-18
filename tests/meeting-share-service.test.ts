@@ -50,6 +50,7 @@ describe("meeting share service", () => {
     expect(query).toContain("where revoked_at is null");
     expect(query).toMatch(/do update\s+set/);
     expect(query).toContain("active_policy");
+    expect(query).toContain("delete from meeting_access_exclusions");
   });
 
   it("falls back to the generated policy id when the database returns no row", async () => {
@@ -169,6 +170,26 @@ describe("meeting share service", () => {
     );
 
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("excludes and revokes one recipient from one meeting", async () => {
+    execute.mockResolvedValue({ rows: [] });
+    const { revokeMeetingRecipientAccess } = await import(
+      "@/lib/meeting-share-service"
+    );
+
+    await revokeMeetingRecipientAccess({
+      createdByUserId: "11111111-1111-4111-8111-111111111111",
+      meetingId: "22222222-2222-4222-8222-222222222222",
+      recipientEmail: "colleague@example.com",
+    });
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    const query = new PgDialect().sqlToQuery(execute.mock.calls[0][0]).sql;
+    expect(query).toContain("insert into meeting_access_exclusions");
+    expect(query).toContain("update meeting_access_sources");
+    expect(query).toContain("update meeting_access as access");
+    expect(query).toContain("update meeting_share_invites as invite");
   });
 
   it("revokes future policies when their seed meeting is deleted", async () => {

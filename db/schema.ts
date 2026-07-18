@@ -516,6 +516,27 @@ export const meetingAccessSources = pgTable(
   ],
 );
 
+export const meetingAccessExclusions = pgTable(
+  "meeting_access_exclusions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    meetingId: uuid("meeting_id")
+      .notNull()
+      .references(() => meetings.id, { onDelete: "cascade" }),
+    recipientEmail: text("recipient_email").notNull(),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("meeting_access_exclusions_meeting_email_unique").on(
+      table.meetingId,
+      table.recipientEmail,
+    ),
+  ],
+);
+
 export const meetingShareRules = pgTable(
   "meeting_share_rules",
   {

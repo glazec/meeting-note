@@ -48,6 +48,12 @@ export async function applyMeetingShareRules(input: {
         and policy.owner_user_id = ${input.ownerUserId}::uuid
         and policy.scope = 'related'
         and policy.revoked_at is null
+        and not exists (
+          select 1
+          from meeting_access_exclusions as exclusion
+          where exclusion.meeting_id = ${input.meetingId}::uuid
+            and exclusion.recipient_email = policy.recipient_email
+        )
         and (
           exists (
             select 1

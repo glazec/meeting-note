@@ -299,9 +299,6 @@ describe("GET /api/meetings/[meetingId]/export", () => {
       "user_123",
       "admin",
       "owner",
-      true,
-      "user_123",
-      "external",
       "user_123",
     ]);
   });

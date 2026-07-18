@@ -103,6 +103,7 @@ describe("meeting share rules", () => {
     expect(materializeSql).toContain("participant:email:%");
     expect(materializeSql).toContain("title:%");
     expect(materializeSql).toContain("participant:domain:%");
+    expect(materializeSql).toContain("meeting_access_exclusions");
     expect(countSql).toContain("meeting_access_sources as source");
     expect(countSql).toContain("source.source_id = policy.id::text");
     expect(countSql).toContain("source.revoked_at is null");

@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
-import { MeetingAccessSummary } from "@/components/meeting-access-summary";
 import { MeetingAutoRefresh } from "@/components/meeting-auto-refresh";
 import { MeetingActions } from "@/components/meeting-actions";
 import { MeetingEntityLinks } from "@/components/meeting-entity-links";
@@ -92,7 +91,7 @@ export default async function MeetingPage({
               </div>
             ) : null}
           </div>
-          <dl className="mt-5 grid gap-4 py-4 sm:grid-cols-3">
+          <dl className="mt-5 grid gap-4 py-4 sm:grid-cols-2">
             <div className="min-w-0">
               <dt className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
                 Platform
@@ -107,18 +106,6 @@ export default async function MeetingPage({
               </dt>
               <dd className="mt-1">
                 <Badge>{formatStatus(displayStatus)}</Badge>
-              </dd>
-            </div>
-            <div className="min-w-0">
-              <dt className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-                Access
-              </dt>
-              <dd className="mt-1">
-                <MeetingAccessSummary
-                  accessPeople={meeting.accessPeople}
-                  accessScope={meeting.accessScope}
-                  organizationShared={meeting.organizationAccessEnabled}
-                />
               </dd>
             </div>
           </dl>
@@ -141,9 +128,6 @@ export default async function MeetingPage({
               <div className="lg:mt-8">
                 <ShareDialog
                   initialAccessPeople={meeting.accessPeople}
-                  initialOrganizationShared={
-                    meeting.organizationAccessEnabled
-                  }
                   initialShares={activeShares}
                   instanceId="meeting-sharing"
                   meetingId={meetingId}
