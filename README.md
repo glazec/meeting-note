@@ -1,8 +1,42 @@
 # Meeting Transcript
 
-Team meeting transcript product.
+Meeting Transcript captures team conversations from Google Meet, Zoom, or the macOS recorder and turns them into searchable, shareable meeting records. It combines calendar based capture, speaker aware transcripts, translation, detected entities, synchronized playback, and screen share images in one review workflow.
 
 This repository is source available for noncommercial use. See [License](#license) before using or redistributing it.
+
+## Product Tour
+
+### Manage every meeting from one hub
+
+Connect a calendar to schedule automatic meeting joins, monitor recording coverage, review team activity, and find meetings by company, founder, speaker, or transcript content.
+
+<p align="center">
+  <img src="assets/product/meeting-hub.png" alt="Meeting hub with calendar capture, upcoming joins, team activity, and the searchable meeting library" width="900">
+</p>
+
+### Review the complete meeting record
+
+Each meeting brings together access controls, detected entities, translation status, captured screen share images, and synchronized audio playback.
+
+<p align="center">
+  <img src="assets/product/meeting-workspace.png" alt="Meeting workspace with detected entities, sharing, translation, screen share images, and synchronized playback" width="900">
+</p>
+
+### Inspect speakers, transcript, and visual context
+
+Review speaker participation, correct speaker names, play individual contributions, compare translated text with the original transcript, and revisit captured visuals at their meeting timestamps.
+
+<p align="center">
+  <img src="assets/product/transcript-review.png" alt="Transcript review with meeting images, speaker controls, translated text, and original transcript text" width="900">
+</p>
+
+### Record locally on macOS
+
+The companion recorder captures microphone and system audio, shows the next calendar meeting, verifies permissions, and lets the user confirm audio levels before recording.
+
+<p align="center">
+  <img src="assets/product/macos-recorder.png" alt="Meeting Note macOS recorder with the next meeting, recording control, permissions, and audio level checks" width="405">
+</p>
 
 ## Documentation
 
