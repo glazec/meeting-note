@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../../public/brand/tape-lockup.svg" alt="Tape logo" width="270">
+</p>
+
 # Tape MCP
 
 FastMCP server for Tape read access.

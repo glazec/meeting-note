@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../public/brand/tape-lockup.svg" alt="Tape logo" width="270">
+</p>
+
 # Tape Setup
 
 This guide covers the web application, provider callbacks, and the optional macOS local recorder.

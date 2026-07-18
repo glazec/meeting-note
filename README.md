@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="public/brand/tape-lockup.svg" alt="Tape logo" width="270">
+</p>
+
 # Tape
 
 Tape captures team conversations from Google Meet, Zoom, or the macOS recorder and turns them into searchable, shareable meeting records. It combines calendar based capture, speaker aware transcripts, translation, detected entities, synchronized playback, and screen share images in one review workflow.

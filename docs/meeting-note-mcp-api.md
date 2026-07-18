@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../public/brand/tape-lockup.svg" alt="Tape logo" width="270">
+</p>
+
 # Tape MCP API
 
 This MCP exposes Tape as a read only tool surface for authenticated colleagues. It reuses Neon Auth for caller identity, maps the verified subject to `users.auth_user_id`, then gives the agent a safe SQL layer over meeting data.
