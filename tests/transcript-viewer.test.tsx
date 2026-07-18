@@ -655,6 +655,7 @@ describe("TranscriptViewer", () => {
     );
 
     expect(html).toContain("Meeting images");
+    expect(html).toContain('aria-label="Browse all captured images"');
     expect(html).toContain("Open image from 1:05");
     expect(html).toContain('loading="lazy"');
     expect(html).toContain('id="segment_123"');

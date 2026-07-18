@@ -19,6 +19,7 @@ import {
   ChevronRight,
   Check,
   Languages,
+  Maximize2,
   Pause,
   Pencil,
   Play,
@@ -430,6 +431,24 @@ export function TranscriptViewer({
   const [lightboxAssetIndex, setLightboxAssetIndex] = useState<number | null>(
     null,
   );
+  const [isGalleryOverviewOpen, setIsGalleryOverviewOpen] = useState(false);
+  const [returnToGalleryOverview, setReturnToGalleryOverview] =
+    useState(false);
+
+  function openAssetFromGalleryOverview(assetIndex: number) {
+    setIsGalleryOverviewOpen(false);
+    setReturnToGalleryOverview(true);
+    setLightboxAssetIndex(assetIndex);
+  }
+
+  function closeVisualLightbox() {
+    setLightboxAssetIndex(null);
+
+    if (returnToGalleryOverview) {
+      setIsGalleryOverviewOpen(true);
+      setReturnToGalleryOverview(false);
+    }
+  }
 
   function showAssetInTranscript(asset: MeetingVisualAsset) {
     if (asset.timestampMs === null) {
@@ -437,6 +456,8 @@ export function TranscriptViewer({
     }
 
     setLightboxAssetIndex(null);
+    setIsGalleryOverviewOpen(false);
+    setReturnToGalleryOverview(false);
     scrollTranscriptToTime(asset.timestampMs / 1000);
   }
 
@@ -923,6 +944,7 @@ export function TranscriptViewer({
               </div>
             ) : null}
             <MeetingVisualTimeline
+              onOpenGallery={() => setIsGalleryOverviewOpen(true)}
               onOpenAsset={setLightboxAssetIndex}
               visualAssets={visualAssets}
             />
@@ -1217,10 +1239,18 @@ export function TranscriptViewer({
         )}
       </section>
 
+      {isGalleryOverviewOpen ? (
+        <MeetingVisualGalleryOverview
+          onClose={() => setIsGalleryOverviewOpen(false)}
+          onOpenAsset={openAssetFromGalleryOverview}
+          visualAssets={visualAssets}
+        />
+      ) : null}
+
       {lightboxAssetIndex !== null && visualAssets[lightboxAssetIndex] ? (
         <MeetingVisualLightbox
           assetIndex={lightboxAssetIndex}
-          onClose={() => setLightboxAssetIndex(null)}
+          onClose={closeVisualLightbox}
           onNavigate={setLightboxAssetIndex}
           onShowInTranscript={showAssetInTranscript}
           visualAssets={visualAssets}
@@ -1385,9 +1415,11 @@ function normalizeTranscriptDisplayText(text: string) {
 }
 
 function MeetingVisualTimeline({
+  onOpenGallery,
   onOpenAsset,
   visualAssets,
 }: {
+  onOpenGallery: () => void;
   onOpenAsset: (assetIndex: number) => void;
   visualAssets: MeetingVisualAsset[];
 }) {
@@ -1399,9 +1431,21 @@ function MeetingVisualTimeline({
     <section className="mb-5 border-t py-4">
       <div className="flex items-center justify-between gap-3">
         <h3 className="text-sm font-semibold">Meeting images</h3>
-        <span className="text-xs font-medium text-muted-foreground">
-          {visualAssets.length} captured
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs font-medium text-muted-foreground">
+            {visualAssets.length} captured
+          </span>
+          <Button
+            aria-label="Browse all captured images"
+            onClick={onOpenGallery}
+            size="icon-sm"
+            title="Browse all captured images"
+            type="button"
+            variant="ghost"
+          >
+            <Maximize2 />
+          </Button>
+        </div>
       </div>
       <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
         {visualAssets.map((asset, assetIndex) => {
@@ -1435,6 +1479,113 @@ function MeetingVisualTimeline({
   );
 }
 
+function MeetingVisualGalleryOverview({
+  onClose,
+  onOpenAsset,
+  visualAssets,
+}: {
+  onClose: () => void;
+  onOpenAsset: (assetIndex: number) => void;
+  visualAssets: MeetingVisualAsset[];
+}) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+
+    document.body.style.overflow = "hidden";
+    closeButtonRef.current?.focus();
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, []);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      aria-label="Captured image overview"
+      aria-modal="true"
+      className="fixed inset-0 z-50 overflow-y-auto bg-background"
+      role="dialog"
+    >
+      <header className="sticky top-0 z-10 border-b bg-background/95 px-4 py-4 backdrop-blur md:px-8">
+        <div className="mx-auto flex max-w-[1800px] items-center justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Meeting images
+            </p>
+            <h2 className="mt-1 text-xl font-semibold">
+              {visualAssets.length} captured
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Scroll to review every image. Select one for a focused view.
+            </p>
+          </div>
+          <Button
+            aria-label="Close image overview"
+            onClick={onClose}
+            ref={closeButtonRef}
+            size="icon"
+            title="Close image overview"
+            type="button"
+            variant="outline"
+          >
+            <X />
+          </Button>
+        </div>
+      </header>
+
+      <div className="mx-auto grid max-w-[1800px] gap-4 p-4 sm:grid-cols-2 md:p-8 2xl:grid-cols-3">
+        {visualAssets.map((asset, assetIndex) => {
+          const timestampLabel = formatVisualAssetTimestamp(asset);
+
+          return (
+            <button
+              aria-label={`Open image from ${timestampLabel}`}
+              className="group overflow-hidden rounded-xl border bg-background text-left outline-none transition-[transform,box-shadow] hover:-translate-y-0.5 hover:shadow-lg focus-visible:ring-3 focus-visible:ring-ring/50"
+              key={asset.id}
+              onClick={() => onOpenAsset(assetIndex)}
+              type="button"
+            >
+              <span className="block aspect-video overflow-hidden bg-muted">
+                {/* eslint-disable-next-line @next/next/no-img-element -- protected image routes need browser auth cookies */}
+                <img
+                  alt=""
+                  className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.01]"
+                  loading="lazy"
+                  src={asset.url}
+                />
+              </span>
+              <span className="flex items-center justify-between gap-3 px-4 py-3">
+                <span className="text-sm font-semibold">
+                  Image {assetIndex + 1}
+                </span>
+                <span className="text-sm font-medium text-muted-foreground">
+                  {timestampLabel}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function MeetingVisualLightbox({
   assetIndex,
   onClose,
@@ -1451,6 +1602,20 @@ function MeetingVisualLightbox({
   const asset = visualAssets[assetIndex];
   const hasPrevious = assetIndex > 0;
   const hasNext = assetIndex < visualAssets.length - 1;
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+
+    document.body.style.overflow = "hidden";
+    closeButtonRef.current?.focus();
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, []);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -1480,18 +1645,24 @@ function MeetingVisualLightbox({
 
   return (
     <div
+      aria-label="Meeting image gallery"
       aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 p-4 backdrop-blur"
+      className="fixed inset-0 z-50 flex bg-background/95 p-3 backdrop-blur md:p-6"
       role="dialog"
     >
-      <div className="flex max-h-full w-full max-w-5xl flex-col gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm font-semibold">
-            Image from {formatVisualAssetTimestamp(asset)}
-            <span className="ml-2 font-medium text-muted-foreground">
-              {assetIndex + 1} of {visualAssets.length}
-            </span>
-          </p>
+      <div className="flex min-h-0 w-full flex-col gap-3">
+        <div className="flex min-h-10 flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Meeting images
+            </p>
+            <p className="mt-1 text-sm font-semibold">
+              Image from {formatVisualAssetTimestamp(asset)}
+              <span className="ml-2 font-medium text-muted-foreground">
+                {assetIndex + 1} of {visualAssets.length}
+              </span>
+            </p>
+          </div>
           <div className="flex items-center gap-2">
             {asset.timestampMs !== null ? (
               <Button
@@ -1504,21 +1675,23 @@ function MeetingVisualLightbox({
               </Button>
             ) : null}
             <Button
+              aria-label="Close image gallery"
               onClick={onClose}
-              size="sm"
+              ref={closeButtonRef}
+              size="icon"
+              title="Close image gallery"
               type="button"
               variant="outline"
             >
-              <X data-icon="inline-start" />
-              Close
+              <X />
             </Button>
           </div>
         </div>
-        <div className="relative min-h-0 overflow-hidden rounded-lg border bg-muted">
+        <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-xl border bg-neutral-950 p-2 md:p-5">
           {/* eslint-disable-next-line @next/next/no-img-element -- protected image routes need browser auth cookies */}
           <img
             alt=""
-            className="max-h-[80vh] w-full object-contain"
+            className="h-full max-h-full w-full object-contain"
             src={asset.url}
           />
           {hasPrevious ? (
@@ -1545,6 +1718,42 @@ function MeetingVisualLightbox({
               <ChevronRight />
             </Button>
           ) : null}
+        </div>
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {visualAssets.map((thumbnailAsset, thumbnailIndex) => {
+            const timestampLabel = formatVisualAssetTimestamp(thumbnailAsset);
+
+            return (
+              <button
+                aria-current={
+                  thumbnailIndex === assetIndex ? "true" : undefined
+                }
+                aria-label={`View image from ${timestampLabel}`}
+                className={cn(
+                  "w-28 shrink-0 overflow-hidden rounded-md border-2 bg-background text-left outline-none transition-opacity focus-visible:ring-3 focus-visible:ring-ring/50",
+                  thumbnailIndex === assetIndex
+                    ? "border-primary opacity-100"
+                    : "border-transparent opacity-60 hover:opacity-100",
+                )}
+                key={thumbnailAsset.id}
+                onClick={() => onNavigate(thumbnailIndex)}
+                type="button"
+              >
+                <span className="block aspect-video overflow-hidden bg-muted">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- protected image routes need browser auth cookies */}
+                  <img
+                    alt=""
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                    src={thumbnailAsset.url}
+                  />
+                </span>
+                <span className="block px-2 py-1 text-xs font-medium text-muted-foreground">
+                  {timestampLabel}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
