@@ -1,3 +1,7 @@
+import Link from "next/link";
+
+import { ProductLogo } from "@/components/product-logo";
+
 import { SignInForm } from "./sign-in-form";
 
 export default async function SignInPage({
@@ -14,9 +18,13 @@ export default async function SignInPage({
     <main className="min-h-screen bg-[linear-gradient(180deg,var(--background)_0%,var(--surface)_100%)] px-4 py-10 text-foreground sm:px-6 sm:py-14">
       <section className="mx-auto grid min-h-[calc(100vh-7rem)] w-full max-w-5xl gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-center">
         <div>
-          <p className="text-sm font-medium uppercase tracking-normal text-primary">
-            Meeting Transcript
-          </p>
+          <Link
+            href="/"
+            aria-label="Tape home"
+            className="inline-flex rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4"
+          >
+            <ProductLogo />
+          </Link>
           <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-tight sm:text-6xl">
             Sign in to your workspace.
           </h1>

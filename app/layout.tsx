@@ -19,8 +19,8 @@ const oneSignalInitScript = buildOneSignalInitScript(
 );
 
 export const metadata: Metadata = {
-  title: "Meeting Transcript",
-  description: "Team meeting transcript workspace",
+  title: "Tape",
+  description: "Tape is your team meeting transcript workspace",
 };
 
 export default function RootLayout({

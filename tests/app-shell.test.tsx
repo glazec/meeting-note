@@ -17,6 +17,14 @@ vi.mock("next/navigation", () => ({
 }));
 
 describe("AppShell", () => {
+  it("renders the Tape lockup instead of the MT placeholder", () => {
+    const html = renderToStaticMarkup(<AppShell>Dashboard body</AppShell>);
+
+    expect(html).toContain("tape-lockup.svg");
+    expect(html).toContain('aria-label="Tape home"');
+    expect(html).not.toContain(">MT<");
+  });
+
   it("places sign out outside the primary navigation", () => {
     const html = renderToStaticMarkup(<AppShell>Dashboard body</AppShell>);
     const primaryNav = html.slice(

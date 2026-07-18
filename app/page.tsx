@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ProductLogo } from "@/components/product-logo";
 import { cn } from "@/lib/utils";
 
 const transcriptRows = [
@@ -52,14 +53,12 @@ export default function Home() {
     <main className="min-h-screen bg-[linear-gradient(180deg,var(--background)_0%,var(--surface)_100%)] text-foreground">
       <header className="border-b bg-background/90 backdrop-blur">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-4">
-          <Link href="/" className="inline-flex items-center gap-2 text-lg font-semibold">
-            <span
-              aria-hidden="true"
-              className="flex size-7 items-center justify-center rounded-md bg-primary text-xs font-semibold text-primary-foreground shadow-sm"
-            >
-              MT
-            </span>
-            <span>Meeting Transcript</span>
+          <Link
+            href="/"
+            aria-label="Tape home"
+            className="inline-flex rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4"
+          >
+            <ProductLogo />
           </Link>
           <Link
             href="/auth/sign-in"
@@ -76,7 +75,7 @@ export default function Home() {
             Team transcript workspace
           </p>
           <h1 className="mt-4 max-w-2xl text-5xl font-semibold leading-[1.02] sm:text-6xl">
-            Meeting Transcript
+            Tape
           </h1>
           <p className="mt-5 max-w-2xl text-lg leading-8 text-muted-foreground">
             Record Google Meet and Zoom calls, upload recordings, and keep every

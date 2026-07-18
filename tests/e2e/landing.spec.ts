@@ -1,10 +1,10 @@
 import { expect, test } from "@playwright/test";
 
-test("shows the Meeting Transcript landing page", async ({ page }) => {
+test("shows the Tape landing page", async ({ page }) => {
   await page.goto("/");
 
   await expect(
-    page.getByRole("heading", { name: "Meeting Transcript" }),
+    page.getByRole("heading", { name: "Tape" }),
   ).toBeVisible();
   await expect(
     page.getByRole("link", { name: "Sign in with Google" }),

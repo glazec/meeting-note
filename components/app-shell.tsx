@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { OneSignalLogin } from "@/components/onesignal-login";
+import { ProductLogo } from "@/components/product-logo";
 import { SignOutButton } from "@/components/sign-out-button";
 import { buttonVariants } from "@/components/ui/button";
 import { getOneSignalAllowedOrigins } from "@/lib/onesignal-web-sdk";
@@ -37,15 +38,10 @@ export function AppShell({
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <Link
             href="/dashboard"
-            className="inline-flex w-fit items-center gap-2 text-base font-semibold"
+            aria-label="Tape home"
+            className="inline-flex w-fit rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4"
           >
-            <span
-              aria-hidden="true"
-              className="flex size-7 items-center justify-center rounded-md bg-primary text-xs font-semibold text-primary-foreground shadow-sm"
-            >
-              MT
-            </span>
-            <span>Meeting Transcript</span>
+            <ProductLogo />
           </Link>
           <div className="flex flex-wrap items-center gap-2">
             <nav
