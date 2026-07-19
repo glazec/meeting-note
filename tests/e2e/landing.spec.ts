@@ -4,17 +4,16 @@ test("shows the Tape landing page", async ({ page }) => {
   await page.goto("/");
 
   await expect(
-    page.getByRole("heading", { name: "Tape" }),
+    page.getByRole("heading", {
+      name: "Every meeting, unrolled into insight.",
+    }),
   ).toBeVisible();
   await expect(
-    page.getByRole("link", { name: "Sign in with Google" }),
+    page.getByRole("link", { name: "Start free" }),
   ).toHaveAttribute("href", "/auth/sign-in");
-  await expect(page.getByText("Transcript queue")).toBeVisible();
-  await expect(page.getByText("Internal attendee access")).toBeVisible();
-  await expect(page.getByText("Search transcripts")).toBeVisible();
-  await expect(
-    page.getByRole("link", { name: "Sign in with Google" }),
-  ).toHaveClass(/bg-primary/);
+  await expect(page.getByText("Layer 01 · Recording").first()).toBeVisible();
+  await expect(page.getByText("What did we decide?")).toBeVisible();
+  await expect(page.getByText("IOSG Ventures")).toBeVisible();
 });
 
 test("opens the sign in page from the landing call to action", async ({
@@ -22,7 +21,7 @@ test("opens the sign in page from the landing call to action", async ({
 }) => {
   await page.goto("/");
 
-  await page.getByRole("link", { name: "Sign in with Google" }).click();
+  await page.getByRole("link", { name: "Get started free" }).click();
 
   await expect(page).toHaveURL("/auth/sign-in");
   await expect(

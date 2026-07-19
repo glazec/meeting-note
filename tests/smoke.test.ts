@@ -3,15 +3,19 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import Home from "@/app/page";
 
-describe("product smoke test", () => {
-  it("renders the landing page shell with the primary sign in path", () => {
+describe("landing page smoke test", () => {
+  it("renders the landing page with hero, social proof, and sign-in path", () => {
     const html = renderToStaticMarkup(Home());
 
-    expect(html).toContain("Tape");
     expect(html).toContain("tape-lockup.svg");
-    expect(html).not.toContain(">MT<");
-    expect(html).toContain("Transcript queue");
-    expect(html).toContain("Internal attendee access");
+    expect(html).toContain("Every meeting, unrolled into");
+    expect(html).toContain("Layer 01 · Recording");
+    expect(html).toContain("Layer 04 · Insight");
+    expect(html).toContain("IOSG Ventures");
+    expect(html).toContain("Bcap");
+    expect(html).toContain("Maelstrom");
+    expect(html).toContain("Anthropic");
+    expect(html).toContain("What did we decide?");
     expect(html).toContain('href="/auth/sign-in"');
   });
 });

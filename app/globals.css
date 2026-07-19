@@ -4,6 +4,25 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Landing page design tokens — "paper & ink" system */
+:root {
+  --ivory: oklch(0.971 0.012 92);
+  --ivory-deep: oklch(0.949 0.014 90);
+  --ink: oklch(0.195 0.012 75);
+  --cobalt: oklch(0.485 0.215 264);
+  --grid-line: oklch(0.195 0.012 75 / 6%);
+}
+
+@theme inline {
+  --color-ivory: var(--ivory);
+  --color-ivory-deep: var(--ivory-deep);
+  --color-ink: var(--ink);
+  --color-cobalt: var(--cobalt);
+  --font-display: var(--font-fraunces), Georgia, serif;
+  --font-landing: var(--font-space-grotesk), var(--font-geist-sans), sans-serif;
+  --font-mono: var(--font-ibm-plex-mono), ui-monospace, monospace;
+}
+
 :root {
   --surface: oklch(0.985 0 0);
   --border: oklch(0.922 0 0);
