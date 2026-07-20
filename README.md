@@ -205,7 +205,7 @@ The extraction function has concurrency one and two retries. In the Railway dash
 
 ## Local Tunnel
 
-Production uses `https://meeting-note-swart.vercel.app` as `NEXT_PUBLIC_APP_URL`. Do not use a local tunnel URL for production callbacks.
+Production uses `https://tape.inevitable.tech` as `NEXT_PUBLIC_APP_URL`. `https://meeting.inevitable.tech` is the legacy custom hostname and should redirect to the Tape origin. Do not use a local tunnel URL for production callbacks.
 
 The Cloudflare test tunnel is `meeting-note-dev.inevitable.tech`. It points to `http://localhost:3000` and is suitable for Google OAuth redirects plus Recall and ElevenLabs webhooks only while the local tunnel is healthy.
 
@@ -237,7 +237,7 @@ The sign out button calls the Neon Auth client sign out method, then posts to `/
 
 ## Push Notifications
 
-The production OneSignal web app is configured for `https://meeting-note-swart.vercel.app` with app id `117c1d1c-ada4-4b49-bb2e-9f4b5cb747ef`. The client uses that app id by default and `NEXT_PUBLIC_ONESIGNAL_APP_ID` can override it for another OneSignal app. The browser SDK only initializes on `NEXT_PUBLIC_ONESIGNAL_ALLOWED_ORIGINS`, which defaults to the production origin, so local development does not call the production OneSignal app. Set `ONESIGNAL_REST_API_KEY` in server environments so the reminder worker can send push notifications.
+The production OneSignal web app uses app id `117c1d1c-ada4-4b49-bb2e-9f4b5cb747ef`. Its Web configuration must use `https://tape.inevitable.tech` as the site URL. The client uses that app id by default and `NEXT_PUBLIC_ONESIGNAL_APP_ID` can override it for another OneSignal app. The browser SDK only initializes on `NEXT_PUBLIC_ONESIGNAL_ALLOWED_ORIGINS`, which defaults to the production origin, so local development does not call the production OneSignal app. Set `ONESIGNAL_REST_API_KEY` in server environments so the reminder worker can send push notifications.
 
 The required service worker from the OneSignal v16 package is served from `/OneSignalSDKWorker.js`, and the SDK init points to that root worker path. Signed in app pages identify the browser to OneSignal with the local workspace user id. OneSignal controls the visible permission prompt from its dashboard, so the product can keep reminder setup out of the normal meeting UI.
 
@@ -259,7 +259,7 @@ The Meeting library remains the searchable recent meeting table. It is filtered 
 
 The new meeting page posts Google Meet and Zoom links to `/api/meetings/link`. The route requires an authenticated Neon Auth session, rejects unsupported meeting hosts, creates a local meeting row, and schedules a Recall bot with `/api/recall/webhook` in metadata for status correlation plus `/api/recall/realtime/webhook` in the bot recording config for live chat and participant events. The Recall bot receives the local `meetingId` in metadata so later webhooks can update the same meeting.
 
-Google sign in identifies the user through Neon Auth, so keep the Neon Auth Google redirect URI configured for sign in. Calendar connection uses this app's Google Calendar OAuth client with `/api/calendar/oauth/callback` as the redirect URI. After the callback receives a Google refresh token, the app creates or updates the matching Recall Calendar V2 connection. Store `https://meeting-note-swart.vercel.app/api/recall/calendar/webhook` in the Recall dashboard as the Calendar V2 webhook endpoint for production. Use the local tunnel URL above for local testing.
+Google sign in identifies the user through Neon Auth, so keep the Neon Auth Google redirect URI configured for sign in. Calendar connection uses this app's Google Calendar OAuth client with `/api/calendar/oauth/callback` as the redirect URI. After the callback receives a Google refresh token, the app creates or updates the matching Recall Calendar V2 connection. Store `https://tape.inevitable.tech/api/recall/calendar/webhook` in the Recall dashboard as the Calendar V2 webhook endpoint for production. Use the local tunnel URL above for local testing.
 
 The dashboard adopts a connected Recall Calendar automatically when the Recall calendar metadata matches the workspace, or when the user completes the app calendar connection flow. The app stores the encrypted Google refresh token plus the Recall Calendar V2 id and status in Neon on `calendar_connections`. The calendar connection route needs `GOOGLE_CALENDAR_CLIENT_ID` and `GOOGLE_CALENDAR_CLIENT_SECRET`.
 
@@ -291,6 +291,8 @@ The R2 bucket must allow browser PUT requests from the app origin:
       "id": "meeting-transcript-browser-uploads",
       "allowed": {
         "origins": [
+          "https://tape.inevitable.tech",
+          "https://meeting.inevitable.tech",
           "https://meeting-note-swart.vercel.app",
           "https://meeting-note-dev.inevitable.tech",
           "http://localhost:3000"

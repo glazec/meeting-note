@@ -26,7 +26,7 @@ describe("OneSignal Web SDK setup", () => {
 
   it("uses the production OneSignal origin by default", () => {
     expect(getOneSignalAllowedOrigins({})).toEqual([
-      "https://meeting-note-swart.vercel.app",
+      "https://tape.inevitable.tech",
     ]);
   });
 
@@ -42,12 +42,12 @@ describe("OneSignal Web SDK setup", () => {
   it("initializes OneSignal with the root service worker file", () => {
     const script = buildOneSignalInitScript(
       "117c1d1c-ada4-4b49-bb2e-9f4b5cb747ef",
-      ["https://meeting-note-swart.vercel.app"],
+      ["https://tape.inevitable.tech"],
     );
 
     expect(script).toContain("MeetingNoteOneSignalReady");
     expect(script).toContain("window.location.origin");
-    expect(script).toContain('"https://meeting-note-swart.vercel.app"');
+    expect(script).toContain('"https://tape.inevitable.tech"');
     expect(script).toContain("OneSignal.init");
     expect(script).toContain('"117c1d1c-ada4-4b49-bb2e-9f4b5cb747ef"');
     expect(script).toContain('serviceWorkerPath: "OneSignalSDKWorker.js"');
@@ -57,7 +57,7 @@ describe("OneSignal Web SDK setup", () => {
   it("does not initialize OneSignal on desktop Chrome", async () => {
     const context = runOneSignalInitScript({
       matchMediaMatches: false,
-      origin: "https://meeting-note-swart.vercel.app",
+      origin: "https://tape.inevitable.tech",
       userAgent:
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
     });
@@ -69,7 +69,7 @@ describe("OneSignal Web SDK setup", () => {
   it("initializes OneSignal on mobile Chrome", async () => {
     const context = runOneSignalInitScript({
       matchMediaMatches: true,
-      origin: "https://meeting-note-swart.vercel.app",
+      origin: "https://tape.inevitable.tech",
       userAgent:
         "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36",
     });
@@ -121,7 +121,7 @@ function runOneSignalInitScript(input: {
 
   context.window = context;
   new Script(
-    buildOneSignalInitScript("app-id", ["https://meeting-note-swart.vercel.app"]),
+    buildOneSignalInitScript("app-id", ["https://tape.inevitable.tech"]),
   ).runInContext(createContext(context));
 
   return context;

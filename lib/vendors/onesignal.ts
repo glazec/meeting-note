@@ -5,7 +5,7 @@ const oneSignalEnvSchema = z.object({
     .string()
     .trim()
     .url()
-    .default("https://meeting-note-swart.vercel.app"),
+    .default("https://tape.inevitable.tech"),
   NEXT_PUBLIC_ONESIGNAL_APP_ID: z.string().trim().min(1),
   ONESIGNAL_REST_API_KEY: z.string().trim().min(1),
 });
