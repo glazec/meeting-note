@@ -9,6 +9,7 @@ describe("OneSignal vendor", () => {
 
   it("sends a location reminder to the signed in user alias", async () => {
     vi.stubEnv("ONESIGNAL_REST_API_KEY", "rest-key\n");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://tape.inevitable.tech");
     vi.stubEnv(
       "NEXT_PUBLIC_ONESIGNAL_APP_ID",
       "117c1d1c-ada4-4b49-bb2e-9f4b5cb747ef\n",

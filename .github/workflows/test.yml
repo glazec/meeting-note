@@ -30,7 +30,7 @@ jobs:
       OPENROUTER_MODEL: ci-model
       INNGEST_EVENT_KEY: ci-event-key
       INNGEST_SIGNING_KEY: ci-signing-key
-      NEXT_PUBLIC_APP_URL: https://meeting-note-swart.vercel.app
+      NEXT_PUBLIC_APP_URL: https://tape.inevitable.tech
     steps:
       - uses: actions/checkout@v7.0.0
       - uses: actions/setup-node@v7.0.0
