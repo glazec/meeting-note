@@ -9,6 +9,7 @@ const {
   getWorkspace,
   limit,
   retrieveRecallBot,
+  retrieveRecallRecording,
   where,
 } = vi.hoisted(() => ({
   createReadUrl: vi.fn(),
@@ -17,6 +18,7 @@ const {
   getWorkspace: vi.fn(),
   limit: vi.fn(),
   retrieveRecallBot: vi.fn(),
+  retrieveRecallRecording: vi.fn(),
   where: vi.fn(),
 }));
 
@@ -47,6 +49,7 @@ vi.mock("@/lib/r2", () => ({
 vi.mock("@/lib/vendors/recall", () => ({
   findRecallRecordingMediaUrl,
   retrieveRecallBot,
+  retrieveRecallRecording,
 }));
 
 vi.mock("@/db/client", () => ({
@@ -84,6 +87,7 @@ describe("GET /api/meetings/[meetingId]/audio", () => {
     getWorkspace.mockReset();
     limit.mockReset();
     retrieveRecallBot.mockReset();
+    retrieveRecallRecording.mockReset();
     where.mockReset();
     where.mockImplementation(() => ({
       orderBy: () => ({
@@ -276,6 +280,103 @@ describe("GET /api/meetings/[meetingId]/audio", () => {
       { recordings: [] },
       "recording_123",
     );
+    expect(retrieveRecallRecording).not.toHaveBeenCalled();
+  });
+
+  it("redirects manual Recall recordings that do not have a bot", async () => {
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({ teamId: "team_123" });
+    limit.mockResolvedValue([
+      {
+        objectKey: null,
+        recallBotId: null,
+        recallRecordingId: "recording_123",
+      },
+    ]);
+    retrieveRecallRecording.mockResolvedValue({
+      id: "recording_123",
+      media_shortcuts: {},
+    });
+    findRecallRecordingMediaUrl.mockReturnValue(
+      "https://recall.example.com/manual-recording.mp4",
+    );
+
+    const response = await getMeetingAudio();
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://recall.example.com/manual-recording.mp4",
+    );
+    expect(retrieveRecallBot).not.toHaveBeenCalled();
+    expect(retrieveRecallRecording).toHaveBeenCalledWith("recording_123");
+    expect(findRecallRecordingMediaUrl).toHaveBeenCalledWith(
+      { id: "recording_123", media_shortcuts: {} },
+      "recording_123",
+    );
+  });
+
+  it("falls back to the recording when a linked Recall bot is unavailable", async () => {
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({ teamId: "team_123" });
+    limit.mockResolvedValue([
+      {
+        objectKey: null,
+        recallBotId: "deleted_bot",
+        recallRecordingId: "recording_123",
+      },
+    ]);
+    retrieveRecallBot.mockRejectedValue(new Error("Recall bot not found"));
+    retrieveRecallRecording.mockResolvedValue({ id: "recording_123" });
+    findRecallRecordingMediaUrl.mockReturnValue(
+      "https://recall.example.com/recovered-recording.mp4",
+    );
+
+    const response = await getMeetingAudio();
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://recall.example.com/recovered-recording.mp4",
+    );
+    expect(retrieveRecallBot).toHaveBeenCalledWith("deleted_bot");
+    expect(retrieveRecallRecording).toHaveBeenCalledWith("recording_123");
+  });
+
+  it("falls back to the recording when the bot response omits its media", async () => {
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({ teamId: "team_123" });
+    limit.mockResolvedValue([
+      {
+        objectKey: null,
+        recallBotId: "bot_123",
+        recallRecordingId: "recording_123",
+      },
+    ]);
+    retrieveRecallBot.mockResolvedValue({ recordings: [] });
+    retrieveRecallRecording.mockResolvedValue({ id: "recording_123" });
+    findRecallRecordingMediaUrl
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce("https://recall.example.com/direct-recording.mp4");
+
+    const response = await getMeetingAudio();
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://recall.example.com/direct-recording.mp4",
+    );
+    expect(retrieveRecallBot).toHaveBeenCalledWith("bot_123");
+    expect(retrieveRecallRecording).toHaveBeenCalledWith("recording_123");
   });
 
   it("returns 404 when a Recall recording has no playable media URL", async () => {

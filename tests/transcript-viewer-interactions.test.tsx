@@ -218,6 +218,29 @@ describe("TranscriptViewer interactions", () => {
     expect(close).toHaveBeenCalled();
   });
 
+  it("stops showing waveform activity when background audio loading fails", async () => {
+    Object.defineProperty(window, "requestIdleCallback", {
+      configurable: true,
+      value: (callback: () => void) => {
+        callback();
+        return 1;
+      },
+    });
+    Object.defineProperty(window, "cancelIdleCallback", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 404 }));
+
+    render(<TranscriptViewer audioUrl="/audio.mp3" segments={segments} />);
+    const waveform = screen.getByRole("button", { name: /Audio waveform/ });
+
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(waveform.querySelector(".animate-pulse")).toBeNull(),
+    );
+  });
+
   it("previews a speaker across clips and stops at the end", async () => {
     render(<TranscriptViewer audioUrl="/audio.mp3" segments={[
       { id: "a1", speaker: "Alice", startMs: 0, endMs: 1000, text: "one" },
@@ -260,7 +283,7 @@ describe("TranscriptViewer interactions", () => {
     }
   });
 
-  it("seeks to the clicked transcript word and survives playback rejection", async () => {
+  it("reports playback rejection instead of leaving the player looking healthy", async () => {
     vi.mocked(HTMLMediaElement.prototype.play).mockRejectedValueOnce(new Error("blocked"));
     render(<TranscriptViewer audioUrl="/audio.mp3" segments={segments} />);
     const audio = document.querySelector("audio") as HTMLAudioElement;
@@ -268,9 +291,35 @@ describe("TranscriptViewer interactions", () => {
     const secondWord = transcriptButton.querySelector('[data-transcript-word-index="1"]') as HTMLElement;
     fireEvent.click(secondWord);
     await waitFor(() => expect(audio.currentTime).toBeGreaterThan(0));
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Recording could not be played. Reload and try again.",
+    );
+  });
+
+  it("reports playback rejection from the persistent audio controls", async () => {
+    vi.mocked(HTMLMediaElement.prototype.play).mockRejectedValueOnce(
+      new Error("blocked"),
+    );
+    render(<TranscriptViewer audioUrl="/audio.mp3" segments={segments} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Play audio" }));
-    expect(await screen.findByRole("button", { name: "Play audio" })).toBeTruthy();
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Recording could not be played. Reload and try again.",
+    );
+  });
+
+  it("reports media loading failures and clears the error after recovery", async () => {
+    render(<TranscriptViewer audioUrl="/audio.mp3" segments={segments} />);
+    const audio = document.querySelector("audio") as HTMLAudioElement;
+
+    fireEvent.error(audio);
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Recording could not be played. Reload and try again.",
+    );
+
+    fireEvent.canPlay(audio);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("uses the compact waveform on mobile and responds to media query changes", () => {

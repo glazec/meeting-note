@@ -9,6 +9,7 @@ import { createReadUrl } from "@/lib/r2";
 import {
   findRecallRecordingMediaUrl,
   retrieveRecallBot,
+  retrieveRecallRecording,
 } from "@/lib/vendors/recall";
 import { getOrCreateWorkspaceForSessionUser } from "@/lib/workspace";
 
@@ -77,23 +78,49 @@ export async function GET(
       : Response.redirect(audioUrl);
   }
 
-  const recallBotId = meeting?.recallBotId;
+  const recallAudioUrl = await resolveRecallAudioUrl({
+    recallBotId: meeting?.recallBotId ?? null,
+    recallRecordingId: meeting?.recallRecordingId ?? null,
+  });
 
-  if (recallBotId) {
-    const bot = await retrieveRecallBot(recallBotId);
-    const audioUrl = findRecallRecordingMediaUrl(
-      bot,
-      meeting.recallRecordingId,
-    );
-
-    if (audioUrl) {
-      return shouldProxy
-        ? proxyAudio(audioUrl, downloadFilename)
-        : Response.redirect(audioUrl);
-    }
+  if (recallAudioUrl) {
+    return shouldProxy
+      ? proxyAudio(recallAudioUrl, downloadFilename)
+      : Response.redirect(recallAudioUrl);
   }
 
   return Response.json({ error: "Audio not found" }, { status: 404 });
+}
+
+async function resolveRecallAudioUrl(input: {
+  recallBotId: string | null;
+  recallRecordingId: string | null;
+}) {
+  if (input.recallBotId) {
+    try {
+      const bot = await retrieveRecallBot(input.recallBotId);
+      const audioUrl = findRecallRecordingMediaUrl(
+        bot,
+        input.recallRecordingId,
+      );
+
+      if (audioUrl) {
+        return audioUrl;
+      }
+    } catch (error) {
+      if (!input.recallRecordingId) {
+        throw error;
+      }
+    }
+  }
+
+  if (!input.recallRecordingId) {
+    return null;
+  }
+
+  const recording = await retrieveRecallRecording(input.recallRecordingId);
+
+  return findRecallRecordingMediaUrl(recording, input.recallRecordingId);
 }
 
 async function proxyAudio(audioUrl: string, filename?: string) {

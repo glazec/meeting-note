@@ -343,6 +343,9 @@ export function TranscriptViewer({
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
+  const [failedPlaybackAudioUrl, setFailedPlaybackAudioUrl] = useState<
+    string | null
+  >(null);
   const speakerPreviewRef = useRef<SpeakerPreviewState | null>(null);
   const canEditSpeakers = Boolean(meetingId);
   const hasTranslations = useMemo(
@@ -368,6 +371,9 @@ export function TranscriptViewer({
     hasOriginalPolish || hasTranslations ? "polished" : "raw",
   );
   const canSeekTranscript = Boolean(audioUrl);
+  const hasPlaybackError = Boolean(
+    audioUrl && failedPlaybackAudioUrl === audioUrl,
+  );
   const rawDisplaySegments = useMemo(
     () =>
       getTranscriptDisplaySegments(
@@ -518,10 +524,12 @@ export function TranscriptViewer({
     setCurrentTime(audio.currentTime);
 
     try {
+      setFailedPlaybackAudioUrl(null);
       await audio.play();
       setIsPlaying(true);
     } catch {
       clearSpeakerPreview();
+      setFailedPlaybackAudioUrl(audioUrl ?? null);
       setIsPlaying(false);
     }
   }
@@ -562,7 +570,10 @@ export function TranscriptViewer({
     setCurrentTime(audio.currentTime);
 
     if (!audio.paused) {
-      void audio.play().catch(() => setIsPlaying(false));
+      void audio.play().catch(() => {
+        setFailedPlaybackAudioUrl(audioUrl ?? null);
+        setIsPlaying(false);
+      });
     }
   }
 
@@ -814,9 +825,11 @@ export function TranscriptViewer({
     setCurrentTime(audio.currentTime);
 
     try {
+      setFailedPlaybackAudioUrl(null);
       await audio.play();
       setIsPlaying(true);
     } catch {
+      setFailedPlaybackAudioUrl(audioUrl ?? null);
       setIsPlaying(false);
     }
   }
@@ -1265,11 +1278,17 @@ export function TranscriptViewer({
           audioUrl={audioUrl}
           currentTime={currentTime}
           duration={duration}
+          hasPlaybackError={hasPlaybackError}
           isPlaying={isPlaying}
           playbackRate={playbackRate}
           segments={displaySegments}
           speakerColorByKey={speakerColorByKey}
           onAudioTimeUpdate={handleAudioTimeUpdate}
+          onPlaybackError={() => {
+            setFailedPlaybackAudioUrl(audioUrl);
+            setIsPlaying(false);
+          }}
+          onPlaybackReady={() => setFailedPlaybackAudioUrl(null)}
           onPreviewCancel={clearSpeakerPreview}
           onTimelineSeek={scrollTranscriptToTime}
           setCurrentTime={setCurrentTime}
@@ -1839,11 +1858,14 @@ function TranscriptAudioPlayer({
   audioUrl,
   currentTime,
   duration,
+  hasPlaybackError,
   isPlaying,
   playbackRate,
   segments,
   speakerColorByKey,
   onAudioTimeUpdate,
+  onPlaybackError,
+  onPlaybackReady,
   onPreviewCancel,
   onTimelineSeek,
   setCurrentTime,
@@ -1856,11 +1878,14 @@ function TranscriptAudioPlayer({
   audioUrl: string;
   currentTime: number;
   duration: number;
+  hasPlaybackError: boolean;
   isPlaying: boolean;
   playbackRate: number;
   segments: TranscriptSegment[];
   speakerColorByKey: ReadonlyMap<string, string>;
   onAudioTimeUpdate: (audio: HTMLAudioElement) => void;
+  onPlaybackError: () => void;
+  onPlaybackReady: () => void;
   onPreviewCancel: () => void;
   onTimelineSeek: (timeSecond: number) => void;
   setCurrentTime: (value: number) => void;
@@ -1873,6 +1898,9 @@ function TranscriptAudioPlayer({
     barCount: number;
     peaks: number[];
   } | null>(null);
+  const [failedWaveformAudioUrl, setFailedWaveformAudioUrl] = useState<
+    string | null
+  >(null);
   const [hoveredWpmSnapshot, setHoveredWpmSnapshot] = useState<{
     leftPercent: number;
     timeSecond: number;
@@ -1949,7 +1977,10 @@ function TranscriptAudioPlayer({
     duration: safeDuration,
     timelineDuration,
   });
-  const isResolvingAudioWaveform = shouldLoadAudioWaveform && !hasAudioWaveform;
+  const isResolvingAudioWaveform =
+    shouldLoadAudioWaveform &&
+    !hasAudioWaveform &&
+    failedWaveformAudioUrl !== audioUrl;
 
   useEffect(() => {
     if (!shouldLoadAudioWaveform) {
@@ -1997,13 +2028,16 @@ function TranscriptAudioPlayer({
           const peaks = buildAudioPeaks(audioBuffer, waveformBarCount);
 
           if (!isCancelled) {
+            setFailedWaveformAudioUrl(null);
             setAudioWaveform({ audioUrl, barCount: waveformBarCount, peaks });
           }
         } finally {
           void audioContext.close();
         }
       } catch {
-        return;
+        if (!isCancelled) {
+          setFailedWaveformAudioUrl(audioUrl);
+        }
       }
     }
 
@@ -2045,10 +2079,11 @@ function TranscriptAudioPlayer({
 
     if (audio.paused) {
       try {
+        onPlaybackReady();
         await audio.play();
         setIsPlaying(true);
       } catch {
-        setIsPlaying(false);
+        onPlaybackError();
       }
       return;
     }
@@ -2135,6 +2170,7 @@ function TranscriptAudioPlayer({
   return (
     <div className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 backdrop-blur">
       <audio
+        onCanPlay={onPlaybackReady}
         onDurationChange={(event) =>
           setDuration(event.currentTarget.duration || 0)
         }
@@ -2143,8 +2179,12 @@ function TranscriptAudioPlayer({
           setIsPlaying(false);
         }}
         onPause={() => setIsPlaying(false)}
+        onError={() => {
+          onPlaybackError();
+        }}
         onPlay={(event) => {
           event.currentTarget.playbackRate = playbackRate;
+          onPlaybackReady();
           setIsPlaying(true);
         }}
         onTimeUpdate={(event) => onAudioTimeUpdate(event.currentTarget)}
@@ -2381,6 +2421,14 @@ function TranscriptAudioPlayer({
           type="range"
           value={progressValue}
         />
+        {hasPlaybackError ? (
+          <p
+            className="text-center text-xs font-medium text-destructive"
+            role="alert"
+          >
+            Recording could not be played. Reload and try again.
+          </p>
+        ) : null}
         <div className="grid min-w-0 grid-cols-2 items-center gap-x-3 gap-y-2 sm:grid-cols-[5rem_1fr_5rem]">
           <p className="order-2 text-xs font-medium tabular-nums text-muted-foreground sm:order-none">
             {formatPlayerTime(currentTime)}
