@@ -1,8 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { generateOpenRouterChatReply, sendRecallChatMessage } = vi.hoisted(
+const {
+  generateOpenRouterChatReply,
+  listRecentRecallChatWebhookPayloads,
+  sendRecallChatMessage,
+} = vi.hoisted(
   () => ({
     generateOpenRouterChatReply: vi.fn(),
+    listRecentRecallChatWebhookPayloads: vi.fn(),
     sendRecallChatMessage: vi.fn(),
   }),
 );
@@ -13,6 +18,10 @@ vi.mock("@/lib/vendors/openrouter", () => ({
 
 vi.mock("@/lib/vendors/recall", () => ({
   sendRecallChatMessage,
+}));
+
+vi.mock("@/lib/vendor-webhook-events", () => ({
+  listRecentRecallChatWebhookPayloads,
 }));
 
 import {
@@ -47,26 +56,97 @@ const directMessagePayload = {
 describe("answerRecallChatMessage", () => {
   beforeEach(() => {
     generateOpenRouterChatReply.mockReset();
+    listRecentRecallChatWebhookPayloads.mockReset();
     sendRecallChatMessage.mockReset();
     generateOpenRouterChatReply.mockResolvedValue("Here is the answer.");
+    listRecentRecallChatWebhookPayloads.mockResolvedValue([]);
     sendRecallChatMessage.mockResolvedValue({});
   });
 
   it("sends a direct answer only to the participant who messaged the bot", async () => {
     const event = normalizeRecallChatWebhook(directMessagePayload);
 
-    await expect(answerRecallChatMessage(event)).resolves.toMatchObject({
-      action: "replied",
+    await expect(
+      answerRecallChatMessage(event, { idempotencyKey: "msg_current" }),
+    ).resolves.toMatchObject({ action: "replied" });
+    expect(listRecentRecallChatWebhookPayloads).toHaveBeenCalledWith({
+      botId: "bot_123",
+      directMessageParticipantId: "16778240",
+      excludeIdempotencyKey: "msg_current",
+      limit: 5,
     });
     expect(generateOpenRouterChatReply).toHaveBeenCalledWith({
       botName: "Tape Notetaker",
       participantName: "Alice",
       question: "What is the latest market data?",
+      recentMessages: [],
     });
     expect(sendRecallChatMessage).toHaveBeenCalledWith({
       botId: "bot_123",
       message: "Here is the answer.",
       to: "16778240",
+    });
+  });
+
+  it("feeds the previous five chats to OpenRouter in chronological order", async () => {
+    listRecentRecallChatWebhookPayloads.mockResolvedValue(
+      Array.from({ length: 5 }, (_, index) => ({
+        ...directMessagePayload,
+        data: {
+          ...directMessagePayload.data,
+          data: {
+            ...directMessagePayload.data.data,
+            participant: {
+              ...directMessagePayload.data.data.participant,
+              name: `Participant ${5 - index}`,
+            },
+            timestamp: {
+              absolute: `2026-07-16T21:5${5 - index}:00.000Z`,
+            },
+            data: {
+              text: `Earlier message ${5 - index}`,
+              to: "everyone",
+            },
+          },
+        },
+      })),
+    );
+
+    const event = normalizeRecallChatWebhook(directMessagePayload);
+    await answerRecallChatMessage(event, { idempotencyKey: "msg_current" });
+
+    expect(generateOpenRouterChatReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recentMessages: [1, 2, 3, 4, 5].map((number) => ({
+          participantName: `Participant ${number}`,
+          text: `Earlier message ${number}`,
+        })),
+      }),
+    );
+  });
+
+  it("keeps private chat history out of public answers", async () => {
+    const event = normalizeRecallChatWebhook({
+      ...directMessagePayload,
+      data: {
+        ...directMessagePayload.data,
+        data: {
+          ...directMessagePayload.data.data,
+          data: {
+            text: "@Tape Notetaker summarize the discussion",
+            to: "everyone",
+          },
+        },
+      },
+    });
+
+    await answerRecallChatMessage(event, { idempotencyKey: "msg_public" });
+
+    expect(listRecentRecallChatWebhookPayloads).toHaveBeenCalledWith({
+      botId: "bot_123",
+      directMessageParticipantId: null,
+      excludeIdempotencyKey: "msg_public",
+      limit: 5,
     });
   });
 });

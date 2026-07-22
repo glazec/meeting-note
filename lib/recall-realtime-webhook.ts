@@ -73,7 +73,9 @@ export async function handleRecallRealtimeWebhook(request: Request) {
 
     const result =
       eventType === "participant_events.chat_message"
-        ? await answerRecallChatMessage(normalizeRecallChatWebhook(body))
+        ? await answerRecallChatMessage(normalizeRecallChatWebhook(body), {
+            idempotencyKey,
+          })
         : await persistRecallRealtimeParticipantTimelineEvent(body);
 
     await markVendorWebhookEventProcessed({

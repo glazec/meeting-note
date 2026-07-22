@@ -1,4 +1,4 @@
-import { and, eq, isNull, lt, or } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, ne, or, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { vendorWebhookEvents } from "@/db/schema";
@@ -143,4 +143,38 @@ export async function markVendorWebhookEventProcessed(input: {
         eq(vendorWebhookEvents.idempotencyKey, input.idempotencyKey),
       ),
     );
+}
+
+export async function listRecentRecallChatWebhookPayloads(input: {
+  botId: string;
+  directMessageParticipantId: string | null;
+  excludeIdempotencyKey: string;
+  limit: number;
+}) {
+  const publicChatCondition = sql`coalesce(${vendorWebhookEvents.payload}->'data'->'data'->'data'->>'to', '') <> 'only_bot'`;
+  const visibilityCondition = input.directMessageParticipantId
+    ? or(
+        publicChatCondition,
+        and(
+          sql`${vendorWebhookEvents.payload}->'data'->'data'->'data'->>'to' = 'only_bot'`,
+          sql`${vendorWebhookEvents.payload}->'data'->'data'->'participant'->>'id' = ${input.directMessageParticipantId}`,
+        ),
+      )
+    : publicChatCondition;
+  const rows = await db
+    .select({ payload: vendorWebhookEvents.payload })
+    .from(vendorWebhookEvents)
+    .where(
+      and(
+        eq(vendorWebhookEvents.provider, "recall"),
+        eq(vendorWebhookEvents.eventType, "participant_events.chat_message"),
+        ne(vendorWebhookEvents.idempotencyKey, input.excludeIdempotencyKey),
+        sql`${vendorWebhookEvents.payload}->'data'->'bot'->>'id' = ${input.botId}`,
+        visibilityCondition,
+      ),
+    )
+    .orderBy(desc(vendorWebhookEvents.createdAt))
+    .limit(input.limit);
+
+  return rows.map((row) => row.payload);
 }

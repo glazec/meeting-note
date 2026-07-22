@@ -211,6 +211,7 @@ describe("POST /api/recall/chat/webhook", () => {
         botId: "bot_123",
         text: "@Tape Notetaker what did we decide?",
       }),
+      { idempotencyKey: "msg_chat" },
     );
     expect(markVendorWebhookEventProcessed).toHaveBeenCalledWith({
       provider: "recall",

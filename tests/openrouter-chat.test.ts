@@ -129,6 +129,10 @@ describe("OpenRouter meeting chat", () => {
         botName: "Example Notetaker",
         question: "Were leveraged binary options ever popular in TradFi?",
         participantName: "Alice",
+        recentMessages: [
+          { participantName: "Bob", text: "TradFi used similar products." },
+          { participantName: "Alice", text: "How were they structured?" },
+        ],
       }),
     ).resolves.toContain("regulators restricted them");
 
@@ -142,6 +146,21 @@ describe("OpenRouter meeting chat", () => {
     expect(firstBody.messages[0].content).toContain(
       "You are Example Notetaker",
     );
+    expect(firstBody.messages.slice(1)).toEqual([
+      {
+        role: "user",
+        content: "Bob said in the meeting chat:\nTradFi used similar products.",
+      },
+      {
+        role: "user",
+        content: "Alice said in the meeting chat:\nHow were they structured?",
+      },
+      {
+        role: "user",
+        content:
+          "Alice asked in the meeting chat:\nWere leveraged binary options ever popular in TradFi?",
+      },
+    ]);
     expect(firstBody).toMatchObject({
       tool_choice: "auto",
       parallel_tool_calls: false,

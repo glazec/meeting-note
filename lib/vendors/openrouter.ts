@@ -96,6 +96,10 @@ export async function generateOpenRouterChatReply(input: {
   botName?: string | null;
   question: string;
   participantName?: string | null;
+  recentMessages?: Array<{
+    participantName?: string | null;
+    text: string;
+  }>;
 }) {
   const botName = input.botName?.trim() || "the meeting assistant";
   const participantName = input.participantName?.trim() || "A participant";
@@ -104,6 +108,10 @@ export async function generateOpenRouterChatReply(input: {
       role: "system",
       content: `You are ${botName}, a concise meeting assistant inside a live meeting chat. Answer the user's question directly. Use plain text without Markdown because meeting chat does not render Markdown. If the answer requires live transcript or private app data you do not have, say that briefly. Use web search for current or external facts when it is available, and include at most two short source URLs when search is used. Keep the complete answer under 700 characters.`,
     },
+    ...(input.recentMessages ?? []).slice(-5).map((message) => ({
+      role: "user" as const,
+      content: `${message.participantName?.trim() || "A participant"} said in the meeting chat:\n${message.text}`,
+    })),
     {
       role: "user",
       content: `${participantName} asked in the meeting chat:\n${input.question}`,

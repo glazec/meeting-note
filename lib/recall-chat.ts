@@ -79,17 +79,27 @@ export function shouldAnswerRecallChatMessage(event: RecallChatMessage):
   return { shouldAnswer: false, reason: "not_addressed_to_bot" };
 }
 
-export async function answerRecallChatMessage(event: RecallChatMessage) {
+export async function answerRecallChatMessage(
+  event: RecallChatMessage,
+  context: { idempotencyKey: string },
+) {
   const decision = shouldAnswerRecallChatMessage(event);
 
   if (!decision.shouldAnswer) {
     return { action: "skipped" as const, reason: decision.reason };
   }
 
+  const recentMessages = await getRecentRecallChatMessages({
+    botId: event.botId,
+    directMessageParticipantId:
+      event.to === "only_bot" ? String(event.participant.id) : null,
+    excludeIdempotencyKey: context.idempotencyKey,
+  });
   const reply = await generateOpenRouterChatReply({
     botName: getEventBotName(event),
     question: decision.question,
     participantName: event.participant.name,
+    recentMessages,
   });
 
   await sendRecallChatMessage({
@@ -102,6 +112,37 @@ export async function answerRecallChatMessage(event: RecallChatMessage) {
   });
 
   return { action: "replied" as const, reply };
+}
+
+async function getRecentRecallChatMessages(input: {
+  botId: string;
+  directMessageParticipantId: string | null;
+  excludeIdempotencyKey: string;
+}) {
+  const { listRecentRecallChatWebhookPayloads } = await import(
+    "@/lib/vendor-webhook-events"
+  );
+  const payloads = await listRecentRecallChatWebhookPayloads({
+    ...input,
+    limit: 5,
+  });
+
+  return payloads
+    .flatMap((payload) => {
+      const parsed = recallChatWebhookSchema.safeParse(payload);
+
+      if (!parsed.success) {
+        return [];
+      }
+
+      return [
+        {
+          participantName: parsed.data.data.data.participant.name ?? null,
+          text: parsed.data.data.data.data.text,
+        },
+      ];
+    })
+    .reverse();
 }
 
 function getEventBotName(event: RecallChatMessage) {
