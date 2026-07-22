@@ -58,12 +58,8 @@ export default async function MeetingPage({
     displayStatus === "failed" ||
     displayStatus === "missed" ||
     (meeting.platform === "in_person" && displayStatus === "scheduled");
-  const hasMeetingContent =
-    Boolean(meeting.audioUrl) ||
-    meeting.segments.length > 0 ||
-    meeting.visualAssets.length > 0;
   const shouldCenterMeetingSource =
-    canAddMeetingSource && meeting.segments.length === 0;
+    canManage && canAddMeetingSource && meeting.segments.length === 0;
   return (
     <AppShell
       activeHref="/dashboard"
@@ -84,10 +80,11 @@ export default async function MeetingPage({
             </p>
             {canManage ? (
               <MeetingActions
+                hasAudio={Boolean(meeting.audioUrl)}
+                hasTranscript={meeting.segments.length > 0}
                 imageCount={meeting.visualAssets.length}
                 instanceId="header"
                 meetingId={meetingId}
-                showContentActions={hasMeetingContent}
               />
             ) : null}
           </div>

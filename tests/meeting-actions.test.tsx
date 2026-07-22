@@ -40,13 +40,36 @@ describe("MeetingActions", () => {
   it("shows only delete when the meeting has no content", () => {
     const html = renderToStaticMarkup(
       <MeetingActions
+        hasAudio={false}
+        hasTranscript={false}
         meetingId="11111111-1111-4111-8111-111111111111"
-        showContentActions={false}
       />,
     );
 
     expect(html).not.toContain("Export");
     expect(html).not.toContain("Copy");
-    expect(html).toContain("Delete");
+    expect(html).toContain('aria-label="Delete meeting"');
+  });
+
+  it("offers only actions backed by available meeting content", () => {
+    const audioOnly = renderToStaticMarkup(
+      <MeetingActions
+        hasTranscript={false}
+        meetingId="11111111-1111-4111-8111-111111111111"
+      />,
+    );
+    const transcriptOnly = renderToStaticMarkup(
+      <MeetingActions
+        hasAudio={false}
+        meetingId="11111111-1111-4111-8111-111111111111"
+      />,
+    );
+
+    expect(audioOnly).toContain("MP3");
+    expect(audioOnly).not.toContain("Copy");
+    expect(audioOnly).not.toContain(">Transcript<");
+    expect(transcriptOnly).toContain(">Transcript<");
+    expect(transcriptOnly).toContain("Copy");
+    expect(transcriptOnly).not.toContain("MP3");
   });
 });

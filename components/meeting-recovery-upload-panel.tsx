@@ -44,6 +44,8 @@ export function MeetingRecoveryUploadPanel({
 }) {
   const router = useRouter();
   const titleId = useId();
+  const audioFormId = useId();
+  const transcriptFormId = useId();
   const transcriptFileInputRef = useRef<HTMLInputElement>(null);
   const [state, setState] = useState<RecoveryState>("idle");
   const [source, setSource] = useState<MeetingContentSource | null>(null);
@@ -214,6 +216,8 @@ export function MeetingRecoveryUploadPanel({
           role="group"
         >
           <button
+            aria-controls={audioFormId}
+            aria-expanded={source === "audio"}
             aria-label="Audio recording"
             aria-pressed={source === "audio"}
             className={cn(
@@ -236,6 +240,8 @@ export function MeetingRecoveryUploadPanel({
             </span>
           </button>
           <button
+            aria-controls={transcriptFormId}
+            aria-expanded={source === "transcript"}
             aria-label="Transcript"
             aria-pressed={source === "transcript"}
             className={cn(
@@ -260,6 +266,7 @@ export function MeetingRecoveryUploadPanel({
         {source === "audio" ? (
           <form
             className="space-y-4 rounded-lg border bg-muted/20 p-4"
+            id={audioFormId}
             onSubmit={handleAudioSubmit}
           >
             <div className="flex flex-col gap-2">
@@ -287,6 +294,7 @@ export function MeetingRecoveryUploadPanel({
         {source === "transcript" ? (
           <form
             className="space-y-4 rounded-lg border bg-muted/20 p-4"
+            id={transcriptFormId}
             onSubmit={handleTranscriptSubmit}
           >
             <div className="flex flex-col gap-2">

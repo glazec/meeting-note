@@ -11,21 +11,24 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 type MeetingActionsProps = {
+  hasAudio?: boolean;
+  hasTranscript?: boolean;
   meetingId: string;
   imageCount?: number;
   instanceId?: string;
-  showContentActions?: boolean;
 };
 
 type ExportFormat = "transcript" | "mp3" | "images";
 
 export function MeetingActions({
+  hasAudio = true,
+  hasTranscript = true,
   meetingId,
   imageCount = 0,
   instanceId = "default",
-  showContentActions = true,
 }: MeetingActionsProps) {
   const router = useRouter();
   const exportMenuRef = useRef<HTMLDivElement>(null);
@@ -33,9 +36,9 @@ export function MeetingActions({
   const [selectedExportFormats, setSelectedExportFormats] = useState<
     Record<ExportFormat, boolean>
   >({
-    images: true,
-    mp3: true,
-    transcript: true,
+    images: imageCount > 0,
+    mp3: hasAudio,
+    transcript: hasTranscript,
   });
   const [isDeleting, setIsDeleting] = useState(false);
   const [isCopying, setIsCopying] = useState(false);
@@ -48,9 +51,10 @@ export function MeetingActions({
   const imagesExportUrl = `/api/meetings/${encodedMeetingId}/export?format=images`;
   const includeImages = imageCount > 0 && selectedExportFormats.images;
   const hasSelectedExport =
-    selectedExportFormats.transcript ||
-    selectedExportFormats.mp3 ||
+    (hasTranscript && selectedExportFormats.transcript) ||
+    (hasAudio && selectedExportFormats.mp3) ||
     includeImages;
+  const hasExportableContent = hasAudio || hasTranscript || imageCount > 0;
 
   useEffect(() => {
     if (!isExportMenuOpen) {
@@ -103,8 +107,8 @@ export function MeetingActions({
     }
 
     const urls = [
-      selectedExportFormats.transcript ? textExportUrl : null,
-      selectedExportFormats.mp3 ? mp3ExportUrl : null,
+      hasTranscript && selectedExportFormats.transcript ? textExportUrl : null,
+      hasAudio && selectedExportFormats.mp3 ? mp3ExportUrl : null,
       includeImages ? imagesExportUrl : null,
     ].filter((url): url is string => Boolean(url));
 
@@ -161,7 +165,7 @@ export function MeetingActions({
 
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
-      {showContentActions ? (
+      {hasExportableContent ? (
         <div className="relative" ref={exportMenuRef}>
           <Button
             aria-controls={isExportMenuOpen ? exportMenuId : undefined}
@@ -182,24 +186,28 @@ export function MeetingActions({
             id={exportMenuId}
             role="menu"
           >
-            <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 hover:bg-muted">
-              <input
-                checked={selectedExportFormats.transcript}
-                className="size-4 rounded border-input accent-primary"
-                onChange={() => toggleExportFormat("transcript")}
-                type="checkbox"
-              />
-              <span className="font-medium">Transcript</span>
-            </label>
-            <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 hover:bg-muted">
-              <input
-                checked={selectedExportFormats.mp3}
-                className="size-4 rounded border-input accent-primary"
-                onChange={() => toggleExportFormat("mp3")}
-                type="checkbox"
-              />
-              <span className="font-medium">MP3</span>
-            </label>
+            {hasTranscript ? (
+              <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 hover:bg-muted">
+                <input
+                  checked={selectedExportFormats.transcript}
+                  className="size-4 rounded border-input accent-primary"
+                  onChange={() => toggleExportFormat("transcript")}
+                  type="checkbox"
+                />
+                <span className="font-medium">Transcript</span>
+              </label>
+            ) : null}
+            {hasAudio ? (
+              <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 hover:bg-muted">
+                <input
+                  checked={selectedExportFormats.mp3}
+                  className="size-4 rounded border-input accent-primary"
+                  onChange={() => toggleExportFormat("mp3")}
+                  type="checkbox"
+                />
+                <span className="font-medium">MP3</span>
+              </label>
+            ) : null}
             {imageCount > 0 ? (
               <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 hover:bg-muted">
                 <input
@@ -223,7 +231,7 @@ export function MeetingActions({
           </div>
         </div>
       ) : null}
-      {showContentActions ? (
+      {hasTranscript ? (
         <Button
           disabled={isCopying}
           onClick={copyTranscript}
@@ -239,13 +247,29 @@ export function MeetingActions({
         </Button>
       ) : null}
       <Button
+        aria-label={hasExportableContent ? undefined : "Delete meeting"}
+        className={cn(
+          !hasExportableContent &&
+            "text-muted-foreground hover:bg-destructive/10 hover:text-destructive",
+        )}
         disabled={isDeleting}
         onClick={deleteMeeting}
+        size={hasExportableContent ? "default" : "icon-sm"}
         type="button"
-        variant="destructive"
+        variant={hasExportableContent ? "destructive" : "ghost"}
       >
         <Trash2 data-icon="inline-start" />
-        {isDeleting ? "Deleting" : "Delete"}
+        {hasExportableContent ? (
+          isDeleting ? (
+            "Deleting"
+          ) : (
+            "Delete"
+          )
+        ) : (
+          <span className="sr-only">
+            {isDeleting ? "Deleting meeting" : "Delete meeting"}
+          </span>
+        )}
       </Button>
       {error ? (
         <p className="basis-full text-sm font-medium text-destructive">

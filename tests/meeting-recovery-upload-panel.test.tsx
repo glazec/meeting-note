@@ -27,7 +27,15 @@ describe("MeetingRecoveryUploadPanel", () => {
     render(<MeetingRecoveryUploadPanel meetingId="meeting_123" />);
 
     expect(screen.queryByLabelText("Audio file")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Audio recording" }));
+    const audioChoice = screen.getByRole("button", {
+      name: "Audio recording",
+    });
+    expect(audioChoice.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(audioChoice);
+    expect(audioChoice.getAttribute("aria-expanded")).toBe("true");
+    expect(
+      document.getElementById(audioChoice.getAttribute("aria-controls") ?? ""),
+    ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Upload audio" }));
     expect(await screen.findByText("Select a recording file first")).toBeTruthy();
 

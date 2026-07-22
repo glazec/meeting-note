@@ -25,7 +25,7 @@ vi.mock("@/lib/meeting-display-status", () => ({ getMeetingDisplayStatus: ({ mee
 vi.mock("@/lib/team-configuration", () => ({ getTeamConfiguration: mocks.getTeamConfiguration }));
 vi.mock("@/components/app-shell", () => ({ AppShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main> }));
 vi.mock("@/components/meeting-auto-refresh", () => ({ MeetingAutoRefresh: () => <span>auto refresh</span> }));
-vi.mock("@/components/meeting-actions", () => ({ MeetingActions: ({ showContentActions = true }: { showContentActions?: boolean }) => <span>meeting actions:{showContentActions ? "content" : "delete only"}</span> }));
+vi.mock("@/components/meeting-actions", () => ({ MeetingActions: ({ hasAudio = true, hasTranscript = true, imageCount = 0 }: { hasAudio?: boolean; hasTranscript?: boolean; imageCount?: number }) => <span>meeting actions:{hasAudio || hasTranscript || imageCount > 0 ? "content" : "delete only"}</span> }));
 vi.mock("@/components/meeting-entity-links", () => ({ MeetingEntityLinks: () => <span>entity links</span> }));
 vi.mock("@/components/meeting-header-metadata", () => ({ MeetingHeaderMetadata: (props: { platform: string; status: string }) => <span>{props.platform}:{props.status}</span> }));
 vi.mock("@/components/meeting-recovery-upload-panel", () => ({ MeetingRecoveryUploadPanel: () => <span>recovery panel</span> }));
@@ -129,6 +129,27 @@ describe("meeting page", () => {
     expect(html).not.toContain("meeting actions");
     expect(html).not.toContain("recovery panel");
     expect(mocks.listRecipients).not.toHaveBeenCalled();
+  });
+
+  it("does not offer uploads for an empty shared meeting", async () => {
+    mocks.getMeeting.mockResolvedValue(
+      meeting({
+        audioUrl: null,
+        canManage: false,
+        segments: [],
+        status: "missed",
+        visualAssets: [],
+      }),
+    );
+
+    const html = renderToStaticMarkup(
+      await MeetingPage({
+        params: Promise.resolve({ meetingId: "empty_shared_meeting" }),
+      }),
+    );
+
+    expect(html).not.toContain("recovery panel");
+    expect(html).toContain("transcript:readonly");
   });
 
   it("formats Zoom and uploaded meetings", async () => {
