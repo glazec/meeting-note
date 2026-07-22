@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, LoaderCircle, Mic, Square } from "lucide-react";
+import { AlertCircle, ArrowLeft, LoaderCircle, Mic, Square } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { ProductLogo } from "@/components/product-logo";
 import {
   Card,
   CardContent,
@@ -36,30 +37,76 @@ export function MobileMeetingRecorder({
   const [state, setState] = useState<RecorderState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const stateRef = useRef<RecorderState>("idle");
   const chunksRef = useRef<Blob[]>([]);
   const discardRecordingRef = useRef(false);
+  const skipNextPopStateRef = useRef(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<number | null>(null);
+  const uploadAbortControllerRef = useRef<AbortController | null>(null);
+  stateRef.current = state;
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (mediaRecorderRef.current?.state === "recording") {
+      if (
+        mediaRecorderRef.current?.state === "recording" ||
+        stateRef.current === "requesting" ||
+        stateRef.current === "uploading"
+      ) {
         event.preventDefault();
       }
     };
 
-    window.addEventListener("beforeunload", handleBeforeUnload);
+    const handlePopState = () => {
+      if (skipNextPopStateRef.current) {
+        skipNextPopStateRef.current = false;
+        return;
+      }
 
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
+      const isActive =
+        stateRef.current === "requesting" ||
+        stateRef.current === "recording" ||
+        stateRef.current === "uploading";
+
+      if (!isActive) {
+        return;
+      }
+
+      if (!window.confirm("Discard this recording and leave this page?")) {
+        skipNextPopStateRef.current = true;
+        window.history.forward();
+        return;
+      }
+
       discardRecordingRef.current = true;
+      uploadAbortControllerRef.current?.abort();
       clearTimer();
       const recorder = mediaRecorderRef.current;
       if (recorder?.state === "recording") {
         recorder.stop();
       }
       stopStream();
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("popstate", handlePopState);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("popstate", handlePopState);
+      discardRecordingRef.current = true;
+      uploadAbortControllerRef.current?.abort();
+      if (timerRef.current !== null) {
+        window.clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      const recorder = mediaRecorderRef.current;
+      if (recorder?.state === "recording") {
+        recorder.stop();
+      }
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
     };
   }, []);
 
@@ -83,14 +130,21 @@ export function MobileMeetingRecorder({
       return;
     }
 
+    discardRecordingRef.current = false;
+    stateRef.current = "requesting";
     setState("requesting");
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      if (discardRecordingRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
       const recorder = new MediaRecorder(stream, { mimeType });
 
       chunksRef.current = [];
-      discardRecordingRef.current = false;
       mediaRecorderRef.current = recorder;
       streamRef.current = stream;
       recorder.addEventListener("dataavailable", (event) => {
@@ -109,9 +163,13 @@ export function MobileMeetingRecorder({
       timerRef.current = window.setInterval(() => {
         setElapsedSeconds((seconds) => seconds + 1);
       }, 1000);
+      stateRef.current = "recording";
       setState("recording");
     } catch {
       stopStream();
+      if (discardRecordingRef.current) {
+        return;
+      }
       showError("Microphone access is required to record this meeting");
     }
   }
@@ -124,11 +182,44 @@ export function MobileMeetingRecorder({
     }
 
     clearTimer();
+    stateRef.current = "uploading";
     setState("uploading");
     recorder.stop();
   }
 
+  function leaveRecorder() {
+    const isActive =
+      stateRef.current === "requesting" ||
+      stateRef.current === "recording" ||
+      stateRef.current === "uploading";
+
+    if (
+      isActive &&
+      !window.confirm("Discard this recording and return to the meeting?")
+    ) {
+      return;
+    }
+
+    discardRecording();
+    router.push(`/meetings/${encodeURIComponent(meetingId)}`);
+  }
+
+  function discardRecording() {
+    discardRecordingRef.current = true;
+    uploadAbortControllerRef.current?.abort();
+    clearTimer();
+    const recorder = mediaRecorderRef.current;
+    if (recorder?.state === "recording") {
+      recorder.stop();
+    }
+    stopStream();
+  }
+
   async function uploadRecording(mimeType: string) {
+    if (discardRecordingRef.current) {
+      return;
+    }
+
     const fileType = getMobileRecordingFileType(mimeType);
 
     if (!fileType || chunksRef.current.length === 0) {
@@ -143,21 +234,37 @@ export function MobileMeetingRecorder({
     );
     const formData = new FormData();
     formData.set("meeting-audio", file);
+    const controller = new AbortController();
+    uploadAbortControllerRef.current = controller;
 
     try {
       const response = await fetch(
         `/api/meetings/${encodeURIComponent(meetingId)}/uploads/audio`,
-        { body: formData, method: "POST" },
+        { body: formData, method: "POST", signal: controller.signal },
       );
 
       if (!response.ok) {
         throw new Error("Recording upload failed");
       }
 
+      if (discardRecordingRef.current) {
+        return;
+      }
+
       router.replace(`/meetings/${encodeURIComponent(meetingId)}`);
       router.refresh();
-    } catch {
+    } catch (error) {
+      if (
+        discardRecordingRef.current ||
+        (error instanceof DOMException && error.name === "AbortError")
+      ) {
+        return;
+      }
       showError("Could not upload the recording. Please try again");
+    } finally {
+      if (uploadAbortControllerRef.current === controller) {
+        uploadAbortControllerRef.current = null;
+      }
     }
   }
 
@@ -175,6 +282,7 @@ export function MobileMeetingRecorder({
 
   function showError(message: string) {
     clearTimer();
+    stateRef.current = "error";
     setState("error");
     setErrorMessage(message);
   }
@@ -182,7 +290,22 @@ export function MobileMeetingRecorder({
   const isBusy = state === "requesting" || state === "uploading";
 
   return (
-    <Card className="w-full max-w-lg">
+    <main className="min-h-screen bg-[linear-gradient(180deg,var(--background)_0%,var(--surface)_100%)] text-foreground">
+      <header className="border-b bg-background/95">
+        <div className="mx-auto flex min-h-16 w-full max-w-3xl items-center justify-between gap-4 px-4 sm:px-6">
+          <ProductLogo />
+          <Button className="min-h-11" onClick={leaveRecorder} type="button" variant="ghost">
+            <ArrowLeft data-icon="inline-start" />
+            Back to meeting
+          </Button>
+        </div>
+      </header>
+      <section className="mx-auto flex w-full max-w-xl flex-col items-center gap-6 px-4 py-8 sm:px-6 sm:py-12">
+        <div className="text-center">
+          <p className="text-sm font-medium text-primary">Mobile recorder</p>
+          <h1 className="mt-2 text-3xl font-semibold">Record this meeting</h1>
+        </div>
+        <Card className="w-full max-w-lg">
       <CardHeader className="border-b bg-muted/35">
         <CardTitle>{meetingTitle}</CardTitle>
         <CardDescription>
@@ -211,12 +334,12 @@ export function MobileMeetingRecorder({
         ) : null}
 
         {state === "recording" ? (
-          <Button onClick={stopRecording} size="lg" variant="destructive">
+          <Button className="min-h-11" onClick={stopRecording} size="lg" variant="destructive">
             <Square data-icon="inline-start" />
             Stop and upload
           </Button>
         ) : (
-          <Button disabled={isBusy} onClick={startRecording} size="lg">
+          <Button className="min-h-11" disabled={isBusy} onClick={startRecording} size="lg">
             {isBusy ? (
               <LoaderCircle className="animate-spin" data-icon="inline-start" />
             ) : (
@@ -243,7 +366,9 @@ export function MobileMeetingRecorder({
           </Alert>
         ) : null}
       </CardContent>
-    </Card>
+        </Card>
+      </section>
+    </main>
   );
 }
 

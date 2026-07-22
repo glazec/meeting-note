@@ -21,14 +21,14 @@ describe("meeting form interactions", () => {
 
   it("validates and schedules meeting links", async () => {
     const { unmount } = render(<MeetingLinkForm />);
-    fireEvent.click(screen.getByRole("button", { name: "Schedule or join bot" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add meeting bot" }));
     expect(await screen.findByText("Enter a Google Meet or Zoom link")).toBeTruthy();
     unmount();
 
     vi.mocked(fetch).mockResolvedValueOnce(json({ status: "joining" }));
     render(<MeetingLinkForm />);
     fireEvent.change(screen.getByLabelText("Meeting link"), { target: { value: "https://meet.google.com/abc" } });
-    fireEvent.click(screen.getByRole("button", { name: "Schedule or join bot" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add meeting bot" }));
     expect(await screen.findByText("The bot should appear within about 30 seconds.")).toBeTruthy();
   });
 
@@ -36,21 +36,21 @@ describe("meeting form interactions", () => {
     vi.mocked(fetch).mockResolvedValueOnce(json({}, 401));
     const { unmount } = render(<MeetingLinkForm />);
     fillLink();
-    fireEvent.click(screen.getByRole("button", { name: "Schedule or join bot" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add meeting bot" }));
     expect(await screen.findByRole("link", { name: "Sign in" })).toBeTruthy();
     unmount();
 
     vi.mocked(fetch).mockReset().mockResolvedValueOnce(json({ error: "Bot failed to join call" }, 400));
     const second = render(<MeetingLinkForm />);
     fillLink();
-    fireEvent.click(screen.getByRole("button", { name: "Schedule or join bot" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add meeting bot" }));
     expect(await screen.findByText("Bot could not join. Try again.")).toBeTruthy();
     second.unmount();
 
     vi.mocked(fetch).mockReset().mockRejectedValueOnce(new Error("network"));
     render(<MeetingLinkForm />);
     fillLink();
-    fireEvent.click(screen.getByRole("button", { name: "Schedule or join bot" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add meeting bot" }));
     expect(await screen.findByText("Meeting bot could not be scheduled")).toBeTruthy();
   });
 

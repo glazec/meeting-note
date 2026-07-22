@@ -89,7 +89,7 @@ export function MeetingLinkForm() {
           <div>
             <CardTitle>Meeting link</CardTitle>
             <CardDescription>
-              Schedule a bot, or send it now if the meeting started early.
+              Tape joins an active meeting now or schedules a future meeting.
             </CardDescription>
           </div>
           <span
@@ -109,13 +109,17 @@ export function MeetingLinkForm() {
               name="meeting-link"
               type="url"
               placeholder="https://meet.google.com/example"
-              className="bg-background"
+              className="min-h-11 bg-background"
               aria-invalid={state === "error"}
             />
           </div>
-          <Button type="submit" disabled={state === "saving"} className="w-fit">
+          <Button
+            type="submit"
+            disabled={state === "saving"}
+            className="min-h-11 w-fit"
+          >
             <CalendarPlus data-icon="inline-start" />
-            {state === "saving" ? "Checking..." : "Schedule or join bot"}
+            {state === "saving" ? "Checking meeting" : "Add meeting bot"}
           </Button>
           {message ? (
             <Alert

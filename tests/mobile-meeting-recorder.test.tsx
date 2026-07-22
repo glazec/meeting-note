@@ -3,9 +3,15 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { refresh, replace } = vi.hoisted(() => ({ refresh: vi.fn(), replace: vi.fn() }));
+const { push, refresh, replace } = vi.hoisted(() => ({
+  push: vi.fn(),
+  refresh: vi.fn(),
+  replace: vi.fn(),
+}));
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, replace }) }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push, refresh, replace }),
+}));
 
 import { MobileMeetingRecorder } from "@/components/mobile-meeting-recorder";
 import { getMobileRecordingFileType, selectMobileRecorderMimeType } from "@/lib/mobile-recorder";
@@ -14,6 +20,7 @@ describe("mobile meeting recorder", () => {
   let trackStop: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    push.mockReset();
     refresh.mockReset();
     replace.mockReset();
     trackStop = vi.fn();
@@ -108,6 +115,70 @@ describe("mobile meeting recorder", () => {
     unmount();
     expect(trackStop).toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("guards browser history navigation while recording", async () => {
+    const forward = vi.spyOn(window.history, "forward").mockImplementation(() => undefined);
+    const confirm = vi.fn().mockReturnValue(false);
+    vi.stubGlobal("confirm", confirm);
+    render(<MobileMeetingRecorder meetingId="meeting" meetingTitle="Founder visit" />);
+    fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
+    await waitFor(() => expect(screen.getByText("Recording")).toBeTruthy());
+
+    window.dispatchEvent(new PopStateEvent("popstate"));
+
+    expect(confirm).toHaveBeenCalledWith("Discard this recording and leave this page?");
+    expect(forward).toHaveBeenCalled();
+    expect(MockMediaRecorder.instances[0]?.state).toBe("recording");
+  });
+
+  it("does not start recording when the user leaves during microphone permission", async () => {
+    let resolvePermission: ((stream: MediaStream) => void) | undefined;
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockReturnValueOnce(
+      new Promise<MediaStream>((resolve) => {
+        resolvePermission = resolve;
+      }),
+    );
+    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
+    render(<MobileMeetingRecorder meetingId="meeting" meetingTitle="Founder visit" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to meeting" }));
+    await act(async () => {
+      resolvePermission?.({
+        getTracks: () => [{ stop: trackStop }],
+      } as unknown as MediaStream);
+    });
+
+    expect(trackStop).toHaveBeenCalled();
+    expect(MockMediaRecorder.instances).toHaveLength(0);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(push).toHaveBeenCalledWith("/meetings/meeting");
+  });
+
+  it("aborts an upload when the user confirms discard", async () => {
+    let uploadSignal: AbortSignal | undefined;
+    vi.mocked(fetch).mockImplementationOnce((_input, init) => {
+      uploadSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        uploadSignal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        });
+      });
+    });
+    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
+    render(<MobileMeetingRecorder meetingId="meeting" meetingTitle="Founder visit" />);
+    fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
+    await waitFor(() => expect(screen.getByText("Recording")).toBeTruthy());
+    MockMediaRecorder.instances[0]?.emitData(new Blob(["audio"]));
+    fireEvent.click(screen.getByRole("button", { name: "Stop and upload" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to meeting" }));
+
+    expect(uploadSignal?.aborted).toBe(true);
+    expect(push).toHaveBeenCalledWith("/meetings/meeting");
+    expect(replace).not.toHaveBeenCalled();
   });
 
   it("selects recording formats accepted by transcription", () => {

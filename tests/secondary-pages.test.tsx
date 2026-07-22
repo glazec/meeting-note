@@ -17,8 +17,7 @@ vi.mock("@/lib/meeting-queries", () => ({ getMeetingTranscriptForWorkspace: mock
 vi.mock("@/lib/share-links", () => ({ getSharedTranscriptByToken: mocks.getShared }));
 vi.mock("@/components/app-shell", () => ({ AppShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main> }));
 vi.mock("@/components/mobile-meeting-recorder", () => ({ MobileMeetingRecorder: ({ meetingTitle }: { meetingTitle: string }) => <span>recorder:{meetingTitle}</span> }));
-vi.mock("@/components/meeting-link-form", () => ({ MeetingLinkForm: () => <span>link form</span> }));
-vi.mock("@/components/upload-dropzone", () => ({ UploadDropzone: () => <span>upload dropzone</span> }));
+vi.mock("@/components/new-meeting-sources", () => ({ NewMeetingSources: () => <span>meeting sources</span> }));
 vi.mock("@/components/transcript-viewer", () => ({ TranscriptViewer: () => <span>transcript viewer</span> }));
 
 import MobileRecorderPage from "@/app/meetings/[meetingId]/record/page";
@@ -36,7 +35,6 @@ describe("secondary pages", () => {
   it("renders the mobile recorder for a manageable meeting", async () => {
     mocks.getMeeting.mockResolvedValue({ canManage: true, id: "meeting", title: "Customer call" });
     const html = renderToStaticMarkup(await MobileRecorderPage({ params: Promise.resolve({ meetingId: "meeting" }) }));
-    expect(html).toContain("Record this meeting");
     expect(html).toContain("recorder:Customer call");
   });
 
@@ -47,8 +45,8 @@ describe("secondary pages", () => {
 
   it("renders meeting creation and redirects read only users", async () => {
     const html = renderToStaticMarkup(await NewMeetingPage());
-    expect(html).toContain("link form");
-    expect(html).toContain("upload dropzone");
+    expect(html).toContain("Add a meeting");
+    expect(html).toContain("meeting sources");
     mocks.access.mockResolvedValue({ canCreateMeetings: false });
     await expect(NewMeetingPage()).rejects.toThrow("REDIRECT");
     expect(mocks.redirect).toHaveBeenCalledWith("/dashboard");

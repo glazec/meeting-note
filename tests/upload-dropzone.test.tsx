@@ -20,17 +20,17 @@ describe("UploadDropzone", () => {
 
   it("validates missing, oversized, and unsupported files", async () => {
     render(<UploadDropzone />);
-    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upload recording" }));
     expect(await screen.findByText("Select a recording file first")).toBeTruthy();
 
     selectFile(new File(["bad"], "notes.txt"));
-    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upload recording" }));
     expect(await screen.findByText(/Only MP3/)).toBeTruthy();
 
     const oversized = new File(["audio"], "meeting.mp3", { type: "audio/mpeg" });
     Object.defineProperty(oversized, "size", { value: 1024 ** 3 + 1 });
     selectFile(oversized);
-    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upload recording" }));
     expect(await screen.findByText("Recording file must be 1 GB or smaller")).toBeTruthy();
   });
 
@@ -41,10 +41,10 @@ describe("UploadDropzone", () => {
       .mockResolvedValueOnce(response({ redirectTo: "/meetings/new" }));
     render(<UploadDropzone />);
     selectFile(new File(["audio"], "meeting.mp3", { type: "audio/mpeg" }));
-    fireEvent.change(screen.getByLabelText("Start time"), {
+    fireEvent.change(screen.getByLabelText("When did it start?"), {
       target: { value: "2026-07-20T09:30" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upload recording" }));
 
     expect(await screen.findByText("Upload complete. Transcription queued")).toBeTruthy();
     expect(fetch).toHaveBeenNthCalledWith(2, "https://upload", expect.objectContaining({ method: "PUT" }));
@@ -59,7 +59,7 @@ describe("UploadDropzone", () => {
       .mockResolvedValueOnce(response({}));
     render(<UploadDropzone />);
     selectFile(new File(["audio"], "meeting.m4a", { type: "audio/mp4" }));
-    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upload recording" }));
 
     await waitFor(() => expect(replace).toHaveBeenCalledWith("/dashboard"));
     expect(fetch).toHaveBeenNthCalledWith(3, "/api/uploads/audio", expect.objectContaining({ method: "POST" }));
@@ -69,12 +69,12 @@ describe("UploadDropzone", () => {
     vi.mocked(fetch).mockResolvedValueOnce(response({}, 401));
     render(<UploadDropzone />);
     selectFile(new File(["audio"], "meeting.mp3", { type: "audio/mpeg" }));
-    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upload recording" }));
     expect(await screen.findByText("Sign in to upload recordings")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Sign in" })).toBeTruthy();
 
     vi.mocked(fetch).mockResolvedValueOnce(response({}, 500));
-    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upload recording" }));
     expect((await screen.findAllByText("Upload failed")).length).toBeGreaterThan(0);
   });
 });

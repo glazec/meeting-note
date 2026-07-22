@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { inngest } from "@/inngest/client";
 import { getCurrentUser } from "@/lib/auth";
 import {
+  assertCanManageMeeting,
   completeMeetingAudioUpload,
   MeetingRecoveryUploadError,
 } from "@/lib/meeting-recovery-uploads";
@@ -29,29 +30,33 @@ export async function POST(
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const [{ meetingId }, formData] = await Promise.all([
-    context.params,
-    request.formData().catch(() => null),
-  ]);
-  const file = formData?.get("meeting-audio");
-  const uploadMedia = file instanceof File ? getUploadMediaFromFile(file) : null;
-
-  if (!(file instanceof File) || file.size === 0 || uploadMedia?.kind !== "audio") {
-    return Response.json(
-      { error: "Invalid audio upload request" },
-      { status: 400 },
-    );
-  }
-
-  if (!isUploadMediaSizeAllowed(file.size)) {
-    return Response.json(
-      { error: "Recording file must be 1 GB or smaller" },
-      { status: 413 },
-    );
-  }
-
   try {
+    const { meetingId } = await context.params;
     const workspace = await getOrCreateWorkspaceForSessionUser(user);
+    await assertCanManageMeeting(workspace, meetingId);
+    const formData = await request.formData().catch(() => null);
+    const file = formData?.get("meeting-audio");
+    const uploadMedia =
+      file instanceof File ? getUploadMediaFromFile(file) : null;
+
+    if (
+      !(file instanceof File) ||
+      file.size === 0 ||
+      uploadMedia?.kind !== "audio"
+    ) {
+      return Response.json(
+        { error: "Invalid audio upload request" },
+        { status: 400 },
+      );
+    }
+
+    if (!isUploadMediaSizeAllowed(file.size)) {
+      return Response.json(
+        { error: "Recording file must be 1 GB or smaller" },
+        { status: 413 },
+      );
+    }
+
     const uploadId = crypto.randomUUID();
     const objectKey = buildPendingUploadObjectKey({
       userId: user.id,

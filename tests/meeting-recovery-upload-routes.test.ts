@@ -5,6 +5,7 @@ const getWorkspace = vi.fn();
 const getObjectMetadata = vi.fn();
 const deleteObject = vi.fn();
 const putObject = vi.fn();
+const assertCanManageMeeting = vi.fn();
 const completeMeetingAudioUpload = vi.fn();
 const completeManualTranscriptUpload = vi.fn();
 const revalidatePath = vi.fn();
@@ -29,9 +30,13 @@ vi.mock("@/lib/r2", async (importOriginal) => {
   };
 });
 
+class MeetingRecoveryUploadError extends Error {}
+
 vi.mock("@/lib/meeting-recovery-uploads", () => ({
+  assertCanManageMeeting,
   completeManualTranscriptUpload,
   completeMeetingAudioUpload,
+  MeetingRecoveryUploadError,
 }));
 
 vi.mock("@/inngest/client", () => ({
@@ -102,6 +107,7 @@ describe("meeting recovery upload routes", () => {
   afterEach(() => {
     completeManualTranscriptUpload.mockReset();
     completeMeetingAudioUpload.mockReset();
+    assertCanManageMeeting.mockReset();
     getCurrentUser.mockReset();
     getObjectMetadata.mockReset();
     deleteObject.mockReset();
@@ -327,6 +333,35 @@ describe("meeting recovery upload routes", () => {
     });
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
     expect(revalidatePath).toHaveBeenCalledWith("/meetings/meeting_123");
+  });
+
+  it("rejects an unauthorized fallback upload before storing the object", async () => {
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({
+      userId: "user_123",
+      teamId: "team_123",
+      domain: "example.com",
+    });
+    assertCanManageMeeting.mockRejectedValue(
+      new MeetingRecoveryUploadError("Meeting not found"),
+    );
+    const formData = new FormData();
+    formData.set(
+      "meeting-audio",
+      new File([new Uint8Array([1, 2, 3])], "local.mp3", {
+        type: "audio/mpeg",
+      }),
+    );
+
+    const response = await postAudioUpload(formData);
+
+    expect(response.status).toBe(403);
+    expect(putObject).not.toHaveBeenCalled();
+    expect(completeMeetingAudioUpload).not.toHaveBeenCalled();
   });
 
   it("accepts transcript text without speaker names for the existing meeting", async () => {

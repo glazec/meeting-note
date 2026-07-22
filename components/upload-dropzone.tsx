@@ -178,23 +178,31 @@ export function UploadDropzone() {
               type="file"
               accept={uploadMediaAccept}
               onChange={handleFileChange}
-              className="bg-background"
+              className="min-h-11 bg-background"
               aria-invalid={state === "error" && !startTimeInvalid}
             />
             <p className="text-xs text-muted-foreground">1 GB maximum.</p>
           </div>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="meeting-start-time">Start time</Label>
-            <Input
-              id="meeting-start-time"
-              name="startedAt"
-              type="datetime-local"
-              value={startTime}
-              onChange={(event) => setStartTime(event.currentTarget.value)}
-              className="bg-background"
-              aria-invalid={startTimeInvalid}
-            />
-          </div>
+          <details className="group rounded-lg border bg-muted/20">
+            <summary className="flex min-h-11 cursor-pointer list-none items-center px-3 text-sm font-medium text-muted-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+              Optional meeting time
+            </summary>
+            <div className="flex flex-col gap-2 border-t p-3">
+              <Label htmlFor="meeting-start-time">When did it start?</Label>
+              <Input
+                id="meeting-start-time"
+                name="startedAt"
+                type="datetime-local"
+                value={startTime}
+                onChange={(event) => setStartTime(event.currentTarget.value)}
+                className="min-h-11 bg-background"
+                aria-invalid={startTimeInvalid}
+              />
+              <p className="text-xs leading-5 text-muted-foreground">
+                Add this only when the recording date matters in the meeting library.
+              </p>
+            </div>
+          </details>
           {selectedFile ? (
             <p className="w-fit break-all rounded-md border bg-muted/45 px-2.5 py-1.5 text-sm text-muted-foreground">
               Selected file: {selectedFile.name}
@@ -203,10 +211,10 @@ export function UploadDropzone() {
           <Button
             type="submit"
             disabled={state === "uploading"}
-            className="w-fit"
+            className="min-h-11 w-fit"
           >
             <UploadCloud data-icon="inline-start" />
-            {state === "uploading" ? "Uploading..." : "Upload"}
+            {state === "uploading" ? "Uploading recording" : "Upload recording"}
           </Button>
           {message ? (
             <Alert variant={state === "error" ? "destructive" : "default"}>

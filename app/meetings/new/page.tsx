@@ -1,8 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
-import { MeetingLinkForm } from "@/components/meeting-link-form";
-import { UploadDropzone } from "@/components/upload-dropzone";
+import { NewMeetingSources } from "@/components/new-meeting-sources";
 import { requireCurrentUser } from "@/lib/auth-guards";
 import {
   getOrCreateWorkspaceForSessionUser,
@@ -27,17 +26,13 @@ export default async function NewMeetingPage() {
           <p className="text-sm font-medium uppercase tracking-normal text-primary">
             New meeting
           </p>
-          <h1 className="mt-3 text-3xl font-semibold">
-            Add a transcript source
-          </h1>
+          <h1 className="mt-3 text-3xl font-semibold">Add a meeting</h1>
           <p className="mt-3 text-base leading-7 text-muted-foreground">
-            Paste a meeting link for a future recording or upload a recording to
-            queue transcription.
+            Choose how you want to add it.
           </p>
         </div>
 
-        <MeetingLinkForm />
-        <UploadDropzone />
+        <NewMeetingSources />
       </section>
     </AppShell>
   );

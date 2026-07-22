@@ -113,7 +113,7 @@ export async function completeManualTranscriptUpload(input: {
   };
 }
 
-async function assertCanManageMeeting(
+export async function assertCanManageMeeting(
   workspace: WorkspaceContext,
   meetingId: string,
 ) {
