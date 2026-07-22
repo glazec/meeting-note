@@ -30,6 +30,7 @@ export async function sendDueLocationReminders(input: { now?: Date } = {}) {
     .where(
       and(
         isNull(meetingReminders.sentAt),
+        eq(meetings.status, "scheduled"),
         lte(meetingReminders.scheduledFor, now),
         or(
           eq(meetingReminders.status, "pending"),

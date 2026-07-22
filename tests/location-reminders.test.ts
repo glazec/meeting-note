@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 
-const { select, sendOneSignalLocationReminder, update } = vi.hoisted(() => ({
+const { select, selectWhere, sendOneSignalLocationReminder, update } = vi.hoisted(() => ({
   select: vi.fn(),
+  selectWhere: vi.fn(),
   sendOneSignalLocationReminder: vi.fn(),
   update: vi.fn(),
 }));
@@ -17,6 +20,7 @@ vi.mock("@/lib/vendors/onesignal", () => ({
 describe("location reminders", () => {
   afterEach(() => {
     select.mockReset();
+    selectWhere.mockReset();
     sendOneSignalLocationReminder.mockReset();
     update.mockReset();
     vi.resetModules();
@@ -59,6 +63,11 @@ describe("location reminders", () => {
       status: "sent",
       updatedAt: now,
     });
+    const query = new PgDialect().sqlToQuery(
+      selectWhere.mock.calls[0][0] as SQL,
+    );
+    expect(query.sql).toContain('"meetings"."status"');
+    expect(query.params).toContain("scheduled");
   });
 
   it("does not send a reminder another worker already claimed", async () => {
@@ -119,9 +128,9 @@ function mockDueReminderRows(rows: unknown[]) {
       innerJoin: () => ({
         innerJoin: () => ({
           innerJoin: () => ({
-            where: () => ({
+            where: selectWhere.mockImplementation(() => ({
               limit: vi.fn().mockResolvedValue(rows),
-            }),
+            })),
           }),
         }),
       }),
