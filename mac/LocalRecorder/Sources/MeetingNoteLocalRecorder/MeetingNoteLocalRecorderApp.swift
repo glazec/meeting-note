@@ -132,7 +132,7 @@ struct MeetingNoteLocalRecorderApp: App {
 @MainActor
 final class RecorderAppModel: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     private static let audioLevelSampleCount = 36
-    private static let defaultServerURLText = "https://tape.inevitable.tech"
+    private static let defaultServerURLText = "http://localhost:3000"
 
     @Published var audioLevels = Array(repeating: Float(0), count: audioLevelSampleCount)
     @Published var activeRecordingTitle: String?

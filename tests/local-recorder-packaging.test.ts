@@ -68,6 +68,17 @@ describe("local recorder app packaging", () => {
       '"$ROOT_DIR/script/bundle_node_runtime.sh" "$APP_RESOURCES/node"',
     );
   });
+
+  it("disables library validation for the local development certificate", () => {
+    const buildScript = readFileSync(
+      join(packageRoot, "script", "build_and_run.sh"),
+      "utf8",
+    );
+
+    expect(buildScript).toMatch(
+      /elif \[\[ "\$CODESIGN_IDENTITY" == "\$LOCAL_CERT_NAME" \]\]; then[\s\S]*?--entitlements "\$ADHOC_APP_ENTITLEMENTS"[\s\S]*?else/,
+    );
+  });
 });
 
 function makeTemporaryDirectory() {

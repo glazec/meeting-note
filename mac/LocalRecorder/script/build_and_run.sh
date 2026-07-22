@@ -156,6 +156,15 @@ if [[ "$CODESIGN_IDENTITY" == "-" ]]; then
     --entitlements "$ADHOC_APP_ENTITLEMENTS" \
     --sign "$CODESIGN_IDENTITY" \
     "$APP_BUNDLE"
+elif [[ "$CODESIGN_IDENTITY" == "$LOCAL_CERT_NAME" ]]; then
+  codesign \
+    --force \
+    --deep \
+    --options runtime \
+    --timestamp \
+    --entitlements "$ADHOC_APP_ENTITLEMENTS" \
+    --sign "$CODESIGN_IDENTITY" \
+    "$APP_BUNDLE"
 else
   codesign --force --deep --options runtime --timestamp --sign "$CODESIGN_IDENTITY" "$APP_BUNDLE"
 fi
