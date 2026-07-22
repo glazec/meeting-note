@@ -162,6 +162,34 @@ export function ShareDialog({
     setState("loading");
     setMessage(null);
 
+    const relatedShareIds = shares
+      .filter(
+        (share) =>
+          share.email === recipientEmail && share.scope === "related",
+      )
+      .map((share) => share.id);
+
+    for (const shareId of relatedShareIds) {
+      const policyResponse = await fetch(
+        `/api/meetings/${encodedMeetingId}/share?shareId=${encodeURIComponent(shareId)}`,
+        { method: "DELETE" },
+      ).catch(() => null);
+      const policyBody = (await policyResponse?.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+
+      if (!policyResponse?.ok) {
+        setState("error");
+        setMessage(
+          policyResponse?.status === 401
+            ? "Sign in to manage access."
+            : policyBody?.error ??
+                "Could not remove access right now. Try again.",
+        );
+        return;
+      }
+    }
+
     const response = await fetch(
       `/api/meetings/${encodedMeetingId}/share?email=${encodeURIComponent(recipientEmail)}`,
       { method: "DELETE" },

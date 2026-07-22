@@ -8,8 +8,10 @@ vi.mock("@/db/client", () => ({
     select: () => ({
       from: () => ({
         innerJoin: () => ({
-          leftJoin: () => ({
-            where: () => ({ orderBy }),
+          innerJoin: () => ({
+            leftJoin: () => ({
+              where: () => ({ orderBy }),
+            }),
           }),
         }),
       }),
@@ -42,6 +44,9 @@ describe("share links", () => {
     orderBy.mockResolvedValue([
       {
         title: "Weekly review",
+        startedAt: new Date("2026-07-20T09:30:00.000Z"),
+        sharedByEmail: "alice@example.com",
+        sharedByName: "Alice",
         segmentId: "segment_1",
         speaker: "Alice",
         startMs: 100,
@@ -51,6 +56,9 @@ describe("share links", () => {
       },
       {
         title: "Weekly review",
+        startedAt: new Date("2026-07-20T09:30:00.000Z"),
+        sharedByEmail: "alice@example.com",
+        sharedByName: "Alice",
         segmentId: null,
         speaker: null,
         startMs: null,
@@ -62,6 +70,8 @@ describe("share links", () => {
     const { getSharedTranscriptByToken } = await import("@/lib/share-links");
 
     await expect(getSharedTranscriptByToken("valid")).resolves.toEqual({
+      sharedBy: "Alice",
+      startedAt: "2026-07-20T09:30:00.000Z",
       title: "Weekly review",
       segments: [
         {

@@ -53,7 +53,12 @@ describe("secondary pages", () => {
   });
 
   it("renders and validates shared transcript links", async () => {
-    mocks.getShared.mockResolvedValue({ title: "Shared call", segments: [] });
+    mocks.getShared.mockResolvedValue({
+      sharedBy: "Alice",
+      startedAt: "2026-07-20T09:30:00.000Z",
+      title: "Shared call",
+      segments: [],
+    });
     const html = renderToStaticMarkup(await SharedTranscriptPage({ params: Promise.resolve({ token: "token" }) }));
     expect(html).toContain("Shared call");
     expect(html).toContain("transcript viewer");

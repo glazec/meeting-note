@@ -97,6 +97,40 @@ describe("ShareDialog interactions", () => {
     expect(await screen.findByText("Sign in to manage access.")).toBeTruthy();
   });
 
+  it("revokes a related policy before removing current meeting access", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(response({ revoked: true }))
+      .mockResolvedValueOnce(response({ revoked: true }))
+      .mockResolvedValueOnce(response({ shares: [] }));
+    render(
+      <ShareDialog
+        {...props}
+        initialShares={[
+          {
+            email: "guest@example.com",
+            id: "55555555-5555-4555-8555-555555555555",
+            pending: false,
+            scope: "related",
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove guest@example.com" }));
+
+    expect(await screen.findByText("Access removed.")).toBeTruthy();
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "/api/meetings/meeting%2Fone/share?shareId=55555555-5555-4555-8555-555555555555",
+      { method: "DELETE" },
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "/api/meetings/meeting%2Fone/share?email=guest%40example.com",
+      { method: "DELETE" },
+    );
+  });
+
   it("shows response and network errors without clearing the recipient", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(response({ error: "Unknown colleague" }, 400));
     const { unmount } = render(<ShareDialog {...props} />);

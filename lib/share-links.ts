@@ -3,11 +3,13 @@ import { createHash } from "node:crypto";
 import { and, asc, eq, gt, isNull } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { meetings, shareLinks, transcriptSegments } from "@/db/schema";
+import { meetings, shareLinks, transcriptSegments, users } from "@/db/schema";
 import type { TranscriptSegment } from "@/components/transcript-viewer";
 import { currentTranscriptJobIdSubquery } from "@/lib/current-transcript-job";
 
 export type SharedTranscript = {
+  sharedBy: string;
+  startedAt: string | null;
   title: string;
   segments: TranscriptSegment[];
 };
@@ -22,6 +24,9 @@ export async function getSharedTranscriptByToken(
   const rows = await db
     .select({
       title: meetings.title,
+      startedAt: meetings.startedAt,
+      sharedByEmail: users.email,
+      sharedByName: users.name,
       segmentId: transcriptSegments.id,
       speaker: transcriptSegments.speaker,
       startMs: transcriptSegments.startMs,
@@ -31,6 +36,7 @@ export async function getSharedTranscriptByToken(
     })
     .from(shareLinks)
     .innerJoin(meetings, eq(shareLinks.meetingId, meetings.id))
+    .innerJoin(users, eq(shareLinks.createdByUserId, users.id))
     .leftJoin(
       transcriptSegments,
       and(
@@ -52,6 +58,8 @@ export async function getSharedTranscriptByToken(
   }
 
   return {
+    sharedBy: rows[0].sharedByName || rows[0].sharedByEmail,
+    startedAt: rows[0].startedAt?.toISOString() ?? null,
     title: rows[0].title,
     segments: rows
       .filter((row) => row.segmentId !== null)
