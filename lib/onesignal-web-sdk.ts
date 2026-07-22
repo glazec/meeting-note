@@ -1,18 +1,10 @@
-const DEFAULT_ONESIGNAL_APP_ID =
-  "117c1d1c-ada4-4b49-bb2e-9f4b5cb747ef";
-
 const ONESIGNAL_SERVICE_WORKER_PATH = "OneSignalSDKWorker.js";
 const ONESIGNAL_MOBILE_MEDIA_QUERY = "(hover: none) and (pointer: coarse)";
-const DEFAULT_ONESIGNAL_ALLOWED_ORIGINS = [
-  "https://tape.inevitable.tech",
-];
 
 export function getOneSignalAppId(
   source: Record<string, string | undefined> = process.env,
 ) {
-  return (
-    source.NEXT_PUBLIC_ONESIGNAL_APP_ID?.trim() || DEFAULT_ONESIGNAL_APP_ID
-  );
+  return source.NEXT_PUBLIC_ONESIGNAL_APP_ID?.trim() || null;
 }
 
 export function getOneSignalAllowedOrigins(
@@ -22,7 +14,9 @@ export function getOneSignalAllowedOrigins(
     source.NEXT_PUBLIC_ONESIGNAL_ALLOWED_ORIGINS?.trim();
 
   if (!configuredOrigins) {
-    return DEFAULT_ONESIGNAL_ALLOWED_ORIGINS;
+    const appUrl = source.NEXT_PUBLIC_APP_URL?.trim();
+
+    return appUrl ? [new URL(appUrl).origin] : [];
   }
 
   return configuredOrigins
@@ -34,7 +28,7 @@ export function getOneSignalAllowedOrigins(
 
 export function buildOneSignalInitScript(
   appId: string,
-  allowedOrigins = DEFAULT_ONESIGNAL_ALLOWED_ORIGINS,
+  allowedOrigins: string[],
 ) {
   return `
 	window.OneSignalDeferred = window.OneSignalDeferred || [];

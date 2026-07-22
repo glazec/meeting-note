@@ -10,6 +10,7 @@
   },
   "scripts": {
     "dev": "next dev",
+    "setup:check": "node --env-file-if-exists=.env.local scripts/check-deployment-env.mjs",
     "db:migrate": "drizzle-kit migrate --config=drizzle.config.ts",
     "build": "next build",
     "vercel-build": "node scripts/vercel-build.mjs",

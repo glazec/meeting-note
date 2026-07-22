@@ -20,6 +20,7 @@ const eslintConfig = defineConfig([
     ".vercel/**",
     ".superpowers/**",
     ".worktrees/**",
+    "tmp/**",
   ]),
 ]);
 

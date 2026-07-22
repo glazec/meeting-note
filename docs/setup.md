@@ -52,6 +52,16 @@ openssl rand -base64 32
 
 `RECALL_API_BASE_URL` must match the region of the Recall.ai API key. `RECALL_WEBHOOK_SECRET` must begin with `whsec_`. For local browser access, use `NEXT_PUBLIC_APP_URL=http://localhost:3000` until webhook testing requires a public origin.
 
+Check the complete configuration before running a production deployment:
+
+```bash
+npm run setup:check
+```
+
+The check reports every missing or invalid value in one pass. Optional services
+do not block deployment. OneSignal remains disabled unless both its app id and
+REST API key are configured.
+
 ## Feature configuration
 
 | Feature | Variables |
@@ -111,6 +121,38 @@ npm run inngest:sync
 ```
 
 The R2 bucket must allow browser `PUT` requests from the application origin. The complete CORS example is in the root README.
+
+## Deploy the web application
+
+[Vercel](https://vercel.com) is the supported web deployment target. Import the
+repository into a new Vercel project, add the required variables from
+`.env.example`, and set `NEXT_PUBLIC_APP_URL` to the final HTTPS origin.
+
+For a CLI deployment:
+
+```bash
+npm run setup:check
+npx vercel --prod
+```
+
+The production build validates the deployment environment, validates the
+migration lineage, applies pending database migrations, and only then builds
+the application. Preview deployments build without mutating the production
+database.
+
+After the first successful deployment:
+
+1. Register the callback routes above using the deployed origin.
+2. Add the deployed origin to the R2 browser upload CORS policy.
+3. Configure the Google OAuth callback if calendar connection is enabled.
+4. Run `npm run inngest:sync` with the production environment loaded.
+5. Open `/settings/team` as the first administrator and set the team name,
+   meeting bot identity, optional sharing group, and transcription vocabulary.
+6. Verify `/api/health/dashboard` before inviting the team.
+
+The screen share image worker is a separate optional Railway deployment. Follow
+the Image Worker section in the root README only when screen share extraction
+is needed.
 
 ## macOS local recorder
 

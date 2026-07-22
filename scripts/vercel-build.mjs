@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 
 export function getVercelBuildScripts(vercelEnvironment) {
   return vercelEnvironment === "production"
-    ? ["test:deployment-schema", "build", "db:migrate"]
+    ? ["setup:check", "test:deployment-schema", "db:migrate", "build"]
     : ["build"];
 }
 

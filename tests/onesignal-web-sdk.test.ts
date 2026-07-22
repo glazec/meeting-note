@@ -10,10 +10,8 @@ import {
 } from "@/lib/onesignal-web-sdk";
 
 describe("OneSignal Web SDK setup", () => {
-  it("uses the IOSG OneSignal app id by default", () => {
-    expect(getOneSignalAppId({})).toBe(
-      "117c1d1c-ada4-4b49-bb2e-9f4b5cb747ef",
-    );
+  it("keeps OneSignal disabled until a deployment configures it", () => {
+    expect(getOneSignalAppId({})).toBeNull();
   });
 
   it("lets deployments override the OneSignal app id", () => {
@@ -24,10 +22,12 @@ describe("OneSignal Web SDK setup", () => {
     ).toBe("custom-app-id");
   });
 
-  it("uses the production OneSignal origin by default", () => {
-    expect(getOneSignalAllowedOrigins({})).toEqual([
-      "https://tape.inevitable.tech",
-    ]);
+  it("uses the configured application origin by default", () => {
+    expect(
+      getOneSignalAllowedOrigins({
+        NEXT_PUBLIC_APP_URL: "https://app.example.com/path",
+      }),
+    ).toEqual(["https://app.example.com"]);
   });
 
   it("normalizes configured OneSignal origins", () => {

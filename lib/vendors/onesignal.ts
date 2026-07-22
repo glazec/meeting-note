@@ -4,8 +4,7 @@ const oneSignalEnvSchema = z.object({
   NEXT_PUBLIC_APP_URL: z
     .string()
     .trim()
-    .url()
-    .default("https://tape.inevitable.tech"),
+    .url(),
   NEXT_PUBLIC_ONESIGNAL_APP_ID: z.string().trim().min(1),
   ONESIGNAL_REST_API_KEY: z.string().trim().min(1),
 });

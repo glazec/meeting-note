@@ -27,10 +27,10 @@ const ibmPlexMono = IBM_Plex_Mono({
   weight: ["400", "500", "600"],
 });
 const oneSignalAllowedOrigins = getOneSignalAllowedOrigins();
-const oneSignalInitScript = buildOneSignalInitScript(
-  getOneSignalAppId(),
-  oneSignalAllowedOrigins,
-);
+const oneSignalAppId = getOneSignalAppId();
+const oneSignalInitScript = oneSignalAppId
+  ? buildOneSignalInitScript(oneSignalAppId, oneSignalAllowedOrigins)
+  : null;
 
 export const metadata: Metadata = {
   title: "Tape",
@@ -53,13 +53,17 @@ export default function RootLayout({
     >
       <body>
         {children}
-        <Script id="onesignal-init" strategy="beforeInteractive">
-          {oneSignalInitScript}
-        </Script>
-        <Script
-          src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js"
-          strategy="afterInteractive"
-        />
+        {oneSignalInitScript ? (
+          <>
+            <Script id="onesignal-init" strategy="beforeInteractive">
+              {oneSignalInitScript}
+            </Script>
+            <Script
+              src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js"
+              strategy="afterInteractive"
+            />
+          </>
+        ) : null}
       </body>
     </html>
   );
