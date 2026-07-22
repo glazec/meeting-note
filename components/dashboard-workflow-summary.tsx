@@ -33,7 +33,7 @@ function UserStatsCard({ stats }: { stats: DashboardUserStats }) {
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-1 flex-col gap-4">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <StatBlock
             label="Meetings"
             value={stats.last7DaysMeetings.toLocaleString()}
@@ -42,14 +42,10 @@ function UserStatsCard({ stats }: { stats: DashboardUserStats }) {
             label="Meeting time"
             value={formatMeetingHours(stats.meetingHours)}
           />
-        </div>
-        <div className="grid grid-cols-2 gap-4 border-t pt-4">
           <StatBlock
-            detail={formatTalkShare(stats)}
             label="Words"
             value={stats.spokenWords.toLocaleString()}
           />
-          <StatBlock label="Tone" value={formatMeetingTone(stats)} />
         </div>
       </CardContent>
     </Card>
@@ -90,30 +86,4 @@ function formatSignedPercent(value: number) {
 
 function formatMeetingHours(hours: number) {
   return Number.isInteger(hours) ? `${hours}h` : `${hours.toFixed(1)}h`;
-}
-
-function formatTalkShare(stats: DashboardUserStats) {
-  return stats.talkSharePercent === null
-    ? "Talk share unavailable"
-    : `${stats.talkSharePercent}% talk share`;
-}
-
-function formatMeetingTone(stats: DashboardUserStats) {
-  if (!stats.dominantEmotion) {
-    return "No tone yet";
-  }
-
-  const emotion = formatEmotionName(stats.dominantEmotion);
-
-  return stats.dominantEmotionPercent === null
-    ? emotion
-    : `${emotion} ${stats.dominantEmotionPercent}%`;
-}
-
-function formatEmotionName(emotion: DashboardUserStats["dominantEmotion"]) {
-  if (!emotion) {
-    return "";
-  }
-
-  return `${emotion.charAt(0).toUpperCase()}${emotion.slice(1)}`;
 }

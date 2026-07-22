@@ -158,13 +158,18 @@ describe("DashboardPage", () => {
       },
     );
     expect(html).toContain('name="scope"');
-    expect(html).toContain('value="participants" selected="">Participants</option>');
+    expect(html).toContain('id="meeting-search-scope"');
+    expect(html).toContain('value="participants"');
+    expect(html).toContain("Participants");
     expect(html).toContain('name="sort"');
-    expect(html).toContain('value="duration_desc" selected="">Longest first</option>');
+    expect(html).toContain('id="meeting-sort"');
+    expect(html).toContain('value="duration_desc"');
+    expect(html).toContain("Longest first");
+    expect(html).not.toContain("<select");
     expect(html).not.toContain("Save as my view");
     expect(html).toContain("Showing last 12 months, page 2");
     expect(html).toContain("min-w-0 space-y-2");
-    expect(html).toContain("h-8 w-full min-w-0");
+    expect(html).toContain("h-11 w-full min-w-0");
     expect(html).toContain("flex min-w-0 flex-wrap items-center gap-2");
     expect(html).toContain(
       "/dashboard?q=founder&amp;scope=participants&amp;status=ready&amp;sort=duration_desc&amp;syncCalendar=1&amp;historyMonths=12&amp;relatedMonths=18",
@@ -174,7 +179,13 @@ describe("DashboardPage", () => {
     );
     expect(html).toContain("Showing last 12 months");
     expect(html).toContain("Load more meetings");
+    expect(html).toContain("Meetings");
+    expect(html).toContain('<h2 class="text-xl font-semibold tracking-tight">Meetings</h2>');
     expect(html).toContain("Welcome back, member.");
+    expect(html).toContain("You had 0 meetings in the last 7 days.");
+    expect(html).not.toContain("need your attention");
+    expect(html).not.toContain("Everything is on track");
+    expect(html).not.toContain("Workspace activity");
     expect(html).not.toContain("Meeting hub");
   });
 

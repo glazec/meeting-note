@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   CalendarCheck2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Search,
@@ -21,6 +22,13 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { requireCurrentUser } from "@/lib/auth-guards";
 import { getCalendarConnectionSummaryForWorkspace } from "@/lib/calendar-connection-queries";
 import {
@@ -130,22 +138,12 @@ export default async function DashboardPage({
       canCreateMeetings={accessSummary.canCreateMeetings}
       oneSignalExternalId={workspace.userId}
     >
-      <section className="flex flex-col gap-6">
-        {accessSummary.isSharedOnly ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>Shared transcripts</CardTitle>
-              <CardDescription>
-                Open transcripts that teammates shared with you.
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        ) : (
+      <section className="flex flex-col gap-4">
+        {!accessSummary.isSharedOnly ? (
           <div className="grid gap-4 lg:grid-cols-2">
             <DashboardGreetingCard
               meetingCount={dashboardSummary?.userStats.last7DaysMeetings ?? 0}
               name={getDashboardFirstName(user.name, user.email)}
-              needsAttention={dashboardSummary?.needsAttention ?? 0}
             />
             {dashboardSummary ? (
               <DashboardWorkflowSummary summary={dashboardSummary} />
@@ -159,30 +157,32 @@ export default async function DashboardPage({
               />
             ) : null}
           </div>
-        )}
+        ) : null}
 
         <Card className="gap-0 py-0 shadow-sm">
           <CardHeader className="border-b bg-muted/25 px-4 py-4 sm:px-5">
-            <CardTitle>Meeting library</CardTitle>
+            <CardTitle>
+              {accessSummary.isSharedOnly ? (
+                <h1 className="text-xl font-semibold tracking-tight">
+                  Meetings
+                </h1>
+              ) : (
+                <h2 className="text-xl font-semibold tracking-tight">
+                  Meetings
+                </h2>
+              )}
+            </CardTitle>
             <CardDescription>
               {accessSummary.isSharedOnly
-                ? "Transcripts shared with your account."
-                : "Recent transcripts, scheduled joins, and recordings that need review."}
+                ? "Transcripts shared with you."
+                : "Search transcripts, recordings, and upcoming meetings."}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col px-0">
-            <div className="border-b px-4 py-3 sm:px-5">
-              <MeetingLibraryViewBar
-                activeViewConfig={activeViewConfig}
-                historyMonths={meetingLibraryPage.historyMonths}
-                hasSavedView={Boolean(savedViewConfig)}
-                relatedHistoryMonths={meetingLibraryPage.relatedHistoryMonths}
-                syncCalendar={syncCalendar}
-              />
-            </div>
             <MeetingLibraryControls
               activeViewConfig={activeViewConfig}
               historyMonths={meetingLibraryPage.historyMonths}
+              hasSavedView={Boolean(savedViewConfig)}
               isSharedOnly={accessSummary.isSharedOnly}
               relatedHistoryMonths={meetingLibraryPage.relatedHistoryMonths}
               syncCalendar={syncCalendar}
@@ -247,6 +247,7 @@ export default async function DashboardPage({
             />
           </CardContent>
         </Card>
+
       </section>
     </AppShell>
   );
@@ -255,25 +256,23 @@ export default async function DashboardPage({
 function DashboardGreetingCard({
   meetingCount,
   name,
-  needsAttention,
 }: {
   meetingCount: number;
   name: string;
-  needsAttention: number;
 }) {
   return (
-    <Card className="relative min-h-72 overflow-hidden bg-[radial-gradient(circle_at_top_right,color-mix(in_oklch,var(--primary)_12%,transparent),transparent_42%)] lg:row-span-2">
-      <CardContent className="flex flex-1 flex-col justify-center py-8 sm:px-8">
+    <Card className="relative min-h-44 overflow-hidden bg-[radial-gradient(circle_at_top_right,color-mix(in_oklch,var(--primary)_12%,transparent),transparent_42%)] lg:row-span-2 lg:min-h-72">
+      <CardContent className="flex flex-1 flex-col justify-center py-6 sm:px-8 sm:py-8">
         <div className="relative z-10 max-w-md">
           <p className="text-sm font-medium text-primary">Dashboard</p>
-          <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:mt-3 sm:text-4xl">
             Welcome back, {name}.
           </h1>
-          <p className="mt-4 text-base leading-7 text-muted-foreground">
-            {formatGreetingSummary(meetingCount, needsAttention)}
+          <p className="mt-3 text-base leading-7 text-muted-foreground sm:mt-4">
+            {formatGreetingSummary(meetingCount)}
           </p>
         </div>
-        <CalendarCheck2 className="absolute right-8 bottom-8 size-24 text-primary/10 sm:size-32" />
+        <CalendarCheck2 className="absolute right-6 bottom-6 size-20 text-primary/10 sm:right-8 sm:bottom-8 sm:size-32" />
       </CardContent>
     </Card>
   );
@@ -289,22 +288,10 @@ function getDashboardFirstName(name: string | null, email: string) {
   return email.split("@")[0] || "there";
 }
 
-function formatGreetingSummary(meetingCount: number, needsAttention: number) {
-  const meetingSummary =
-    meetingCount === 1
-      ? "You had 1 meeting in the last 7 days."
-      : `You had ${meetingCount.toLocaleString()} meetings in the last 7 days.`;
-
-  if (needsAttention === 0) {
-    return `${meetingSummary} Everything is on track.`;
-  }
-
-  const attentionSummary =
-    needsAttention === 1
-      ? "One needs your attention."
-      : `${needsAttention.toLocaleString()} need your attention.`;
-
-  return `${meetingSummary} ${attentionSummary}`;
+function formatGreetingSummary(meetingCount: number) {
+  return meetingCount === 1
+    ? "You had 1 meeting in the last 7 days."
+    : `You had ${meetingCount.toLocaleString()} meetings in the last 7 days.`;
 }
 
 function MeetingLibraryViewBar({
@@ -409,12 +396,14 @@ function MeetingLibraryViewBar({
 function MeetingLibraryControls({
   activeViewConfig,
   historyMonths,
+  hasSavedView,
   isSharedOnly,
   relatedHistoryMonths,
   syncCalendar,
 }: {
   activeViewConfig: MeetingLibraryViewConfig;
   historyMonths: number;
+  hasSavedView: boolean;
   isSharedOnly: boolean;
   relatedHistoryMonths: number;
   syncCalendar?: string | string[];
@@ -422,7 +411,7 @@ function MeetingLibraryControls({
   const syncCalendarValue = getSearchParamValue(syncCalendar);
 
   return (
-    <form className="grid gap-3 border-b bg-muted/20 px-4 py-3 sm:px-5 md:grid-cols-[minmax(12rem,1fr)_10rem_10rem_12rem_auto] md:items-end">
+    <form className="grid gap-3 border-b bg-muted/20 px-4 py-3 sm:px-5 md:grid-cols-[minmax(12rem,1fr)_10rem_auto] md:items-end">
       {syncCalendarValue ? (
         <input name="syncCalendar" type="hidden" value={syncCalendarValue} />
       ) : null}
@@ -450,7 +439,7 @@ function MeetingLibraryControls({
             name="q"
             type="search"
             defaultValue={activeViewConfig.query ?? ""}
-            className="bg-background pl-8"
+            className="h-11 bg-background pl-8"
             placeholder={
               isSharedOnly
                 ? "Search shared transcript"
@@ -459,16 +448,6 @@ function MeetingLibraryControls({
           />
         </div>
       </div>
-      <SelectField
-        id="meeting-search-scope"
-        label="Search in"
-        name="scope"
-        options={meetingLibrarySearchScopes.map((value) => ({
-          label: meetingLibrarySearchScopeLabels[value],
-          value,
-        }))}
-        value={activeViewConfig.searchScope}
-      />
       <SelectField
         id="meeting-status"
         label="Status"
@@ -479,19 +458,46 @@ function MeetingLibraryControls({
         }))}
         value={activeViewConfig.status}
       />
-      <SelectField
-        id="meeting-sort"
-        label="Sort"
-        name="sort"
-        options={meetingLibrarySorts.map((value) => ({
-          label: meetingLibrarySortLabels[value],
-          value,
-        }))}
-        value={activeViewConfig.sort}
-      />
-      <button className={cn(buttonVariants())} type="submit">
-        Apply
+      <button className={cn(buttonVariants(), "h-11")} type="submit">
+        Search
       </button>
+      <details className="group md:col-span-3">
+        <summary className="flex min-h-11 w-fit cursor-pointer list-none items-center gap-2 rounded-lg px-1 text-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50">
+          More filters
+          <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
+        </summary>
+        <div className="mt-3 grid gap-3 border-t pt-3 md:grid-cols-2">
+          <SelectField
+            id="meeting-search-scope"
+            label="Search in"
+            name="scope"
+            options={meetingLibrarySearchScopes.map((value) => ({
+              label: meetingLibrarySearchScopeLabels[value],
+              value,
+            }))}
+            value={activeViewConfig.searchScope}
+          />
+          <SelectField
+            id="meeting-sort"
+            label="Sort"
+            name="sort"
+            options={meetingLibrarySorts.map((value) => ({
+              label: meetingLibrarySortLabels[value],
+              value,
+            }))}
+            value={activeViewConfig.sort}
+          />
+          <div className="md:col-span-2">
+            <MeetingLibraryViewBar
+              activeViewConfig={activeViewConfig}
+              historyMonths={historyMonths}
+              hasSavedView={hasSavedView}
+              relatedHistoryMonths={relatedHistoryMonths}
+              syncCalendar={syncCalendar}
+            />
+          </div>
+        </div>
+      </details>
     </form>
   );
 }
@@ -512,18 +518,22 @@ function SelectField({
   return (
     <div className="min-w-0 space-y-2">
       <Label htmlFor={id}>{label}</Label>
-      <select
-        className="h-8 w-full min-w-0 rounded-lg border border-input bg-background px-2.5 py-1 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+      <Select
         defaultValue={value}
-        id={id}
+        items={options}
         name={name}
       >
+        <SelectTrigger className="h-11 w-full min-w-0 bg-background" id={id}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent align="start">
         {options.map((option) => (
-          <option key={option.value} value={option.value}>
+          <SelectItem key={option.value} value={option.value}>
             {option.label}
-          </option>
+          </SelectItem>
         ))}
-      </select>
+        </SelectContent>
+      </Select>
     </div>
   );
 }

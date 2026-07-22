@@ -113,7 +113,10 @@ export function MeetingList({
       <Table>
         <TableHeader className="bg-muted/30">
           <TableRow className="hover:bg-muted/30">
-            <TableHead aria-sort={getHeaderAriaSort("title", sort)}>
+            <TableHead
+              aria-sort={getHeaderAriaSort("title", sort)}
+              className="pl-8"
+            >
               <SortableHeader
                 activeDirection={getSortDirection("title", sort)}
                 href={sortLinks?.title}
@@ -151,7 +154,7 @@ export function MeetingList({
                 label="Started"
               />
             </TableHead>
-            <TableHead className="text-right">Status</TableHead>
+            <TableHead className="w-28 text-center">Status</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -256,7 +259,6 @@ function MeetingTableRow({
     meetingStatus: meeting.status,
     transcriptJobStatus: meeting.transcriptJobStatus,
   });
-
   return (
     <TableRow
       aria-expanded={relatedCount > 0 ? isExpanded : undefined}
@@ -293,7 +295,7 @@ function MeetingTableRow({
       <TableCell className="hidden text-muted-foreground md:table-cell">
         <LocalDateTime value={meeting.startedAt} />
       </TableCell>
-      <TableCell className="text-right">
+      <TableCell className="w-28 text-center">
         {displayStatus === "scheduled" &&
         meeting.hasRecallBot &&
         meeting.accessScope !== "shared" ? (
@@ -340,7 +342,7 @@ function ScheduledMeetingAction({ meeting }: { meeting: MeetingListBaseItem }) {
           : "";
 
   return (
-    <span className="inline-grid w-[5.625rem] items-center justify-items-end">
+    <span className="inline-grid w-[5.625rem] items-center justify-items-center">
       {state === "idle" ? (
         <Badge
           className="meeting-join-badge col-start-1 row-start-1 hidden transition-opacity"
@@ -399,6 +401,8 @@ function MeetingTitleCell({
     meetingStatus: meeting.status,
     transcriptJobStatus: meeting.transcriptJobStatus,
   });
+  const shouldDimMeetingCopy =
+    displayStatus === "failed" || displayStatus === "missed";
 
   return (
     <div
@@ -435,8 +439,13 @@ function MeetingTitleCell({
       <div className="min-w-0">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <Link
+            className={cn(
+              "font-medium hover:underline",
+              shouldDimMeetingCopy
+                ? "text-muted-foreground hover:text-foreground"
+                : "text-foreground",
+            )}
             href={`/meetings/${meeting.id}`}
-            className="font-medium text-foreground hover:underline"
           >
             {meeting.title}
           </Link>
@@ -456,25 +465,9 @@ function MeetingTitleCell({
           displayStatus={displayStatus}
           hasRecallBot={meeting.hasRecallBot}
         />
-        {meeting.primaryEntity ? (
-          <span className="mt-1 block text-xs text-muted-foreground">
-            Detected entity:{" "}
-            <span className="font-medium text-foreground">
-              {formatDetectedEntity(meeting.primaryEntity)}
-            </span>
-          </span>
-        ) : null}
       </div>
     </div>
   );
-}
-
-function formatDetectedEntity(entity: string) {
-  return entity
-    .trim()
-    .split(/\s+/)
-    .map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
-    .join(" ");
 }
 
 function SortableHeader({
@@ -588,7 +581,7 @@ function MeetingCoverageNote({
 
   if (displayStatus === "failed") {
     return (
-      <span className="mt-1 block text-xs text-destructive">
+      <span className="mt-1 block text-xs text-muted-foreground">
         Needs review
       </span>
     );
@@ -608,6 +601,10 @@ function MeetingCoverageNote({
 function getStatusVariant(status: MeetingDisplayStatus) {
   if (status === "failed") {
     return "destructive";
+  }
+
+  if (status === "ready") {
+    return "secondary";
   }
 
   if (

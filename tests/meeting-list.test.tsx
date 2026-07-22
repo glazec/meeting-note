@@ -26,6 +26,8 @@ describe("MeetingList", () => {
     expect(html).toContain("Duration");
     expect(html).toContain("3 people");
     expect(html).toContain("1h 30m");
+    expect(html).toContain("pl-8");
+    expect(html).toContain("w-28 text-center");
   });
 
   it("uses transcript timing when a meeting end time is missing", () => {
@@ -84,7 +86,7 @@ describe("MeetingList", () => {
     expect(html).not.toContain("No meetings found");
   });
 
-  it("shows related meetings expanded by default", () => {
+  it("expands related meetings by default", () => {
     const html = renderToStaticMarkup(
       <MeetingList
         meetings={[
@@ -111,8 +113,7 @@ describe("MeetingList", () => {
 
     expect(html).toContain("Nascent follow up");
     expect(html).toContain("Nascent intro");
-    expect(html).toContain("Detected entity");
-    expect(html).toContain("Nascent");
+    expect(html).not.toContain("Detected entity");
     expect(html).toContain("1 related");
     expect(html).toContain('aria-expanded="true"');
     expect(html).toContain('aria-label="Collapse Nascent follow up"');
@@ -146,12 +147,13 @@ describe("MeetingList", () => {
       />,
     );
 
+    expect(html).toContain("1 related");
     expect(html).toContain("Load older related");
     expect(html).toContain("Search before last 6 months");
     expect(html).toContain('href="/dashboard?relatedMonths=12"');
   });
 
-  it("shows grouped row status and collapsed related count", () => {
+  it("shows grouped row status and expanded related count", () => {
     const html = renderToStaticMarkup(
       <MeetingList
         meetings={[
@@ -178,6 +180,7 @@ describe("MeetingList", () => {
     expect(html).toContain("Scheduled");
     expect(html).toContain("1 related");
     expect(html).toContain("Ready");
+    expect(html).toContain('data-variant="secondary"');
     expect(html).toContain("David &lt;&gt; YP");
     expect(html).toContain("size-5 shrink-0");
     expect(html).toContain("items-start gap-1 relative pl-8");
@@ -222,7 +225,7 @@ describe("MeetingList", () => {
     expect(joinButton).toContain("Join now");
     expect(html).toContain("meeting-join-badge");
     expect(html).toContain(
-      "inline-grid w-[5.625rem] items-center justify-items-end",
+      "inline-grid w-[5.625rem] items-center justify-items-center",
     );
     expect(html).toContain("Scheduled");
   });
@@ -267,8 +270,35 @@ describe("MeetingList", () => {
     expect(html).toContain("Partner sync");
     expect(html).toContain("No recording");
     expect(html).toContain("Bot did not join");
+    expect(html).toContain(
+      "text-muted-foreground hover:text-foreground",
+    );
     expect(html).not.toContain("Needs review");
     expect(html).not.toContain("Failed");
+  });
+
+  it("dims failed meeting copy while preserving the error status", () => {
+    const html = renderToStaticMarkup(
+      <MeetingList
+        meetings={[
+          {
+            id: "55555555-5555-4555-8555-555555555555",
+            title: "Failed upload",
+            platform: "upload",
+            startedAt: "2026-06-27T12:00:00.000Z",
+            status: "failed",
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain("Failed upload");
+    expect(html).toContain("Needs review");
+    expect(html).toContain('data-variant="destructive"');
+    expect(html).toContain(
+      "text-muted-foreground hover:text-foreground",
+    );
+    expect(html).not.toContain("text-xs text-destructive");
   });
 
   it("renders sortable headers for meeting name, participants, duration, and time", () => {

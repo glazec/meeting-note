@@ -232,9 +232,8 @@ describe("DashboardWorkflowSummary", () => {
     expect(html).toContain("+100% vs last week");
     expect(html).toContain("2h");
     expect(html).toContain("Words");
-    expect(html).toContain("33% talk share");
-    expect(html).toContain("Tone");
-    expect(html).toContain("Hard 67%");
+    expect(html).not.toContain("talk share");
+    expect(html).not.toContain("Tone");
   });
 });
 
