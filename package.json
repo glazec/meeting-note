@@ -22,6 +22,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:deployment-schema": "vitest run tests/migrations.test.ts",
+    "test:migrations": "vitest run tests/migrations.test.ts && drizzle-kit check --config=drizzle.config.ts && node scripts/check-migration-drift.mjs",
     "test:calendar-live": "node --env-file-if-exists=.env.local --import=tsx scripts/verify-calendar-connection.ts",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
