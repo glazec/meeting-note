@@ -8,7 +8,7 @@ MIN_SYSTEM_VERSION="15.0"
 APP_VERSION="${APP_VERSION:-0.2.0}"
 BUILD_VERSION="${BUILD_VERSION:-$(date -u +%Y%m%d%H%M%S)}"
 BUILD_CONFIGURATION="${BUILD_CONFIGURATION:-debug}"
-SPARKLE_FEED_URL="https://github.com/glazec/meeting-note/releases/download/macos-appcast/appcast.xml"
+SPARKLE_FEED_URL="https://github.com/glazec/tape/releases/download/macos-appcast/appcast.xml"
 SPARKLE_PUBLIC_KEY="C+6MwGr+m9w8H9o0A6dX6epFkSNcf5OOdT70ir8SVFA="
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

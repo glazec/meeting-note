@@ -69,6 +69,23 @@ describe("local recorder app packaging", () => {
     );
   });
 
+  it("uses the repository release origin for the Sparkle feed", () => {
+    const buildScript = readFileSync(
+      join(packageRoot, "script", "build_and_run.sh"),
+      "utf8",
+    );
+    const packageJson = JSON.parse(
+      readFileSync(join(process.cwd(), "package.json"), "utf8"),
+    ) as { repository: { url: string } };
+    const repositoryUrl = packageJson.repository.url
+      .replace(/^git\+/, "")
+      .replace(/\.git$/, "");
+
+    expect(buildScript).toContain(
+      `SPARKLE_FEED_URL="${repositoryUrl}/releases/download/macos-appcast/appcast.xml"`,
+    );
+  });
+
   it("disables library validation for the local development certificate", () => {
     const buildScript = readFileSync(
       join(packageRoot, "script", "build_and_run.sh"),
