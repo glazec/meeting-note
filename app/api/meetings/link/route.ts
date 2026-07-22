@@ -269,12 +269,12 @@ function selectBackToBackMeetings(
       : [];
   });
   const previous = candidates
-    .filter((meeting) => meeting.endedAtMs < nowMs)
+    .filter((meeting) => meeting.endedAtMs <= nowMs)
     .sort((left, right) => right.endedAtMs - left.endedAtMs)[0];
   const current = candidates
     .filter(
       (meeting) =>
-        meeting.startedAtMs <= nowMs && meeting.endedAtMs >= nowMs,
+        meeting.startedAtMs <= nowMs && meeting.endedAtMs > nowMs,
     )
     .sort((left, right) => right.startedAtMs - left.startedAtMs)[0];
   const next = candidates

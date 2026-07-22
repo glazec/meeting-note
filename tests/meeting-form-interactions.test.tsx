@@ -88,6 +88,8 @@ describe("meeting form interactions", () => {
     expect(screen.getByText("Previous")).toBeTruthy();
     expect(screen.getByText("Happening now")).toBeTruthy();
     expect(screen.getByText("Next")).toBeTruthy();
+    expect(screen.getAllByText("Add bot now")).toHaveLength(2);
+    expect(screen.getByText("Schedule bot")).toBeTruthy();
     fireEvent.click(
       screen.getByRole("button", {
         name: "Merge with IOSG <> Greenfield Capital, Previous",

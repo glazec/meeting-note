@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogTitle,
@@ -288,7 +289,7 @@ export function MeetingLinkForm() {
                     <span className="shrink-0 text-sm font-medium text-primary">
                       {state === "saving" && pendingChoiceId === value
                         ? "Adding bot"
-                        : "Use this meeting"}
+                        : getMeetingActionLabel(meeting.action)}
                     </span>
                   </button>
                 );
@@ -314,6 +315,16 @@ export function MeetingLinkForm() {
             ) : null}
 
             <div className="flex flex-col-reverse gap-2 px-5 py-4 sm:flex-row sm:justify-end">
+              <DialogClose asChild>
+                <Button
+                  className="min-h-11"
+                  disabled={state === "saving"}
+                  variant="ghost"
+                  type="button"
+                >
+                  Cancel
+                </Button>
+              </DialogClose>
               <Button
                 className="min-h-11"
                 disabled={state === "saving"}
@@ -363,6 +374,10 @@ function getMeetingTimingLabel(timing: MeetingChoice["timing"]) {
     : timing === "current"
       ? "Happening now"
       : "Next";
+}
+
+function getMeetingActionLabel(action: MeetingChoice["action"]) {
+  return action === "join" ? "Add bot now" : "Schedule bot";
 }
 
 function parsePotentialMeetings(value: unknown): MeetingChoice[] {

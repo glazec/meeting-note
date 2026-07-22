@@ -242,7 +242,7 @@ describe("POST /api/meetings/link", () => {
 
   it("returns the previous, current, and next meetings", async () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-22T12:15:00.000Z"));
+    vi.setSystemTime(new Date("2026-07-22T12:00:00.000Z"));
     getCurrentUser.mockResolvedValue({
       id: "user_123",
       email: "user@example.com",
