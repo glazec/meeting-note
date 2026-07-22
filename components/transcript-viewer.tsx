@@ -49,6 +49,11 @@ import {
   type MeetingTranslationSummary,
 } from "@/lib/meeting-translation-status";
 import {
+  DEFAULT_TRANSLATION_LANGUAGE,
+  translationLanguageLabels,
+  type TranslationLanguage,
+} from "@/lib/meeting-translation-language";
+import {
   getSpeakerFirstName,
   getSpeakerIdentityKey,
   getUniqueFullNameByFirstName,
@@ -119,9 +124,11 @@ const TRANSCRIPT_CJK_CHARACTER_PATTERN = /[\u3400-\u9fff\uf900-\ufaff]/g;
 type TranscriptViewerProps = {
   audioUrl?: string | null;
   meetingId?: string | null;
+  preferredTranslationLanguage?: TranslationLanguage;
   segments: TranscriptSegment[];
   speakerAliases?: SpeakerAlias[];
   speakerSuggestions?: SpeakerSuggestion[];
+  translationLanguage?: TranslationLanguage;
   translationSummary?: MeetingTranslationSummary;
   visualAssets?: MeetingVisualAsset[];
 };
@@ -182,11 +189,6 @@ type TranscriptTextToken = {
   wordIndex: number | null;
 };
 
-const transcriptLanguageOptions = [
-  { label: "Original language", value: "original" },
-  { label: "Chinese", value: "zh" },
-] as const;
-
 const transcriptStyleOptions = [
   { label: "Polished", value: "polished" },
   { label: "Raw", value: "raw" },
@@ -205,12 +207,22 @@ function formatTimestamp(startMs: number) {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
-function shouldShowTranslationPanel(summary: MeetingTranslationSummary) {
-  return summary.totalSegments > 0 && summary.status !== "completed";
+function shouldShowTranslationPanel(
+  summary: MeetingTranslationSummary,
+  translationTargetChanged: boolean,
+) {
+  return (
+    summary.totalSegments > 0 &&
+    (summary.status !== "completed" || translationTargetChanged)
+  );
 }
 
-function shouldShowTranslationAction(summary: MeetingTranslationSummary) {
+function shouldShowTranslationAction(
+  summary: MeetingTranslationSummary,
+  translationTargetChanged: boolean,
+) {
   return (
+    translationTargetChanged ||
     summary.status === "not_started" ||
     summary.status === "not_needed" ||
     summary.status === "failed"
@@ -241,13 +253,16 @@ function getTranslationStatusTitle(summary: MeetingTranslationSummary) {
   return "Translation not started";
 }
 
-function getTranslationStatusBody(summary: MeetingTranslationSummary) {
+function getTranslationStatusBody(
+  summary: MeetingTranslationSummary,
+  translationLanguageLabel: string,
+) {
   if (summary.status === "queued") {
-    return " Chinese translation will start shortly.";
+    return ` ${translationLanguageLabel} translation will start shortly.`;
   }
 
   if (summary.status === "running") {
-    return " Chinese view will appear here automatically.";
+    return ` ${translationLanguageLabel} view will appear here automatically.`;
   }
 
   if (summary.status === "partial") {
@@ -259,10 +274,10 @@ function getTranslationStatusBody(summary: MeetingTranslationSummary) {
   }
 
   if (summary.status === "not_needed") {
-    return " This transcript already appears to be Chinese.";
+    return ` This transcript already appears to be ${translationLanguageLabel}.`;
   }
 
-  return " Start Chinese translation when you need it.";
+  return ` Start ${translationLanguageLabel} translation when you need it.`;
 }
 
 function formatVisualAssetTimestamp(asset: MeetingVisualAsset) {
@@ -328,9 +343,11 @@ export function getVisualAssetPlacements(
 export function TranscriptViewer({
   audioUrl,
   meetingId,
+  preferredTranslationLanguage,
   segments: initialSegments,
   speakerAliases = [],
   speakerSuggestions = [],
+  translationLanguage = DEFAULT_TRANSLATION_LANGUAGE,
   translationSummary,
   visualAssets = [],
 }: TranscriptViewerProps) {
@@ -377,9 +394,37 @@ export function TranscriptViewer({
           status: "queued" as const,
         }
       : translationSummary;
+  const effectivePreferredTranslationLanguage =
+    preferredTranslationLanguage ?? translationLanguage;
+  const storedTranslationLanguageLabel =
+    translationLanguageLabels[translationLanguage];
+  const preferredTranslationLanguageLabel =
+    translationLanguageLabels[effectivePreferredTranslationLanguage];
+  const translationTargetChanged = Boolean(
+    displayTranslationSummary &&
+      displayTranslationSummary.hasTranslations &&
+      displayTranslationSummary.status !== "queued" &&
+      displayTranslationSummary.status !== "running" &&
+      translationLanguage !== effectivePreferredTranslationLanguage,
+  );
+  const activeTranslationLanguageLabel =
+    displayTranslationSummary?.status === "queued" ||
+    displayTranslationSummary?.status === "running"
+      ? preferredTranslationLanguageLabel
+      : storedTranslationLanguageLabel;
+  const transcriptLanguageOptions = [
+    { label: "Original language", value: "original" },
+    { label: storedTranslationLanguageLabel, value: "translated" },
+  ] as const;
   const [transcriptLanguage, setTranscriptLanguage] = useState<
-    "original" | "zh"
-  >(hasOriginalPolish ? "original" : hasTranslations ? "zh" : "original");
+    "original" | "translated"
+  >(
+    hasOriginalPolish
+      ? "original"
+      : hasTranslations
+        ? "translated"
+        : "original",
+  );
   const [textVersion, setTextVersion] = useState<"polished" | "raw">(
     hasOriginalPolish || hasTranslations ? "polished" : "raw",
   );
@@ -910,10 +955,11 @@ export function TranscriptViewer({
                   <TranscriptControlSelect
                     ariaLabel="Transcript language"
                     onChange={(value) => {
-                      const language = value === "zh" ? "zh" : "original";
+                      const language =
+                        value === "translated" ? "translated" : "original";
 
                       setTranscriptLanguage(language);
-                      if (language === "zh") {
+                      if (language === "translated") {
                         setTextVersion("polished");
                       } else if (!hasOriginalPolish) {
                         setTextVersion("raw");
@@ -945,17 +991,34 @@ export function TranscriptViewer({
         ) : (
           <>
             {displayTranslationSummary &&
-            shouldShowTranslationPanel(displayTranslationSummary) ? (
+            shouldShowTranslationPanel(
+              displayTranslationSummary,
+              translationTargetChanged,
+            ) ? (
               <div className="mb-5 rounded-lg border bg-muted/30 p-4">
                 <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
                     <p className="flex items-center gap-2 text-sm font-semibold">
                       <Languages className="size-4 text-primary" />
-                      {getTranslationStatusTitle(displayTranslationSummary)}
+                      {translationTargetChanged
+                        ? "Translation language changed"
+                        : getTranslationStatusTitle(displayTranslationSummary)}
                     </p>
                     <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                      {getTranslationProgressLabel(displayTranslationSummary)}.
-                      {getTranslationStatusBody(displayTranslationSummary)}
+                      {translationTargetChanged ? (
+                        `This meeting is translated into ${storedTranslationLanguageLabel}. The team default is now ${preferredTranslationLanguageLabel}.`
+                      ) : (
+                        <>
+                          {getTranslationProgressLabel(
+                            displayTranslationSummary,
+                          )}
+                          .
+                          {getTranslationStatusBody(
+                            displayTranslationSummary,
+                            activeTranslationLanguageLabel,
+                          )}
+                        </>
+                      )}
                     </p>
                     {translationRequestError ? (
                       <p className="mt-1 text-xs font-medium text-destructive">
@@ -964,14 +1027,19 @@ export function TranscriptViewer({
                     ) : null}
                   </div>
                   {meetingId &&
-                  shouldShowTranslationAction(displayTranslationSummary) ? (
+                  shouldShowTranslationAction(
+                    displayTranslationSummary,
+                    translationTargetChanged,
+                  ) ? (
                     <Button
                       disabled={isRequestingTranslation}
                       onClick={requestTranslation}
                       type="button"
                       variant="outline"
                     >
-                      {displayTranslationSummary.status === "failed"
+                      {translationTargetChanged
+                        ? `Translate to ${preferredTranslationLanguageLabel}`
+                        : displayTranslationSummary.status === "failed"
                         ? "Retry translation"
                         : displayTranslationSummary.status === "not_needed"
                           ? "Translate anyway"
@@ -1098,7 +1166,8 @@ export function TranscriptViewer({
                 const polishedText = segment.polishedText?.trim();
                 const translatedText = segment.translatedText?.trim();
                 const shouldShowTranslation =
-                  transcriptLanguage === "zh" && Boolean(translatedText);
+                  transcriptLanguage === "translated" &&
+                  Boolean(translatedText);
                 const shouldShowOriginalPolish =
                   transcriptLanguage === "original" &&
                   textVersion === "polished" &&

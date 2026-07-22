@@ -2,6 +2,10 @@ import { eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { meetings } from "@/db/schema";
+import {
+  normalizeTranslationLanguage,
+  type TranslationLanguage,
+} from "@/lib/meeting-translation-language";
 
 export async function markMeetingTranslationQueued(meetingId: string) {
   await db
@@ -15,7 +19,24 @@ export async function markMeetingTranslationQueued(meetingId: string) {
     .where(eq(meetings.id, meetingId));
 }
 
-export async function markMeetingTranslationRunning(meetingId: string) {
+export async function getStoredMeetingTranslationLanguage(meetingId: string) {
+  const [meeting] = await db
+    .select({ translationLanguage: meetings.translationLanguage })
+    .from(meetings)
+    .where(eq(meetings.id, meetingId))
+    .limit(1);
+
+  if (!meeting) {
+    throw new Error("Meeting not found");
+  }
+
+  return normalizeTranslationLanguage(meeting.translationLanguage);
+}
+
+export async function markMeetingTranslationRunning(
+  meetingId: string,
+  translationLanguage: TranslationLanguage,
+) {
   await db
     .update(meetings)
     .set({
@@ -23,18 +44,23 @@ export async function markMeetingTranslationRunning(meetingId: string) {
       translationErrorMessage: null,
       translationStartedAt: new Date(),
       translationStatus: "running",
+      translationLanguage,
       updatedAt: new Date(),
     })
     .where(eq(meetings.id, meetingId));
 }
 
-export async function markMeetingTranslationCompleted(meetingId: string) {
+export async function markMeetingTranslationCompleted(
+  meetingId: string,
+  translationLanguage?: TranslationLanguage,
+) {
   await db
     .update(meetings)
     .set({
       translationCompletedAt: new Date(),
       translationErrorMessage: null,
       translationStatus: "completed",
+      ...(translationLanguage ? { translationLanguage } : {}),
       updatedAt: new Date(),
     })
     .where(eq(meetings.id, meetingId));

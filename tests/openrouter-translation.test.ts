@@ -109,6 +109,35 @@ describe("OpenRouter translation", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("sends the selected English target to the model", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "openrouter-key");
+    vi.stubEnv("OPENROUTER_MODEL", "qwen/qwen3.7-plus");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            { message: { content: '{"translations":["Hello team"]}' } },
+          ],
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { translateTranscriptSegments } = await import(
+      "@/lib/vendors/openrouter"
+    );
+
+    await expect(
+      translateTranscriptSegments(
+        [{ id: "segment_1", text: "大家好" }],
+        { targetLanguage: "en" },
+      ),
+    ).resolves.toEqual([{ id: "segment_1", text: "Hello team" }]);
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.messages[0].content).toContain("concise English");
+  });
+
   it("fails with the model name after repeated empty completions", async () => {
     vi.stubEnv("OPENROUTER_API_KEY", "openrouter-key");
     vi.stubEnv("OPENROUTER_MODEL", "qwen/qwen3.7-plus");

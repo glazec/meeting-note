@@ -1,8 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { getCurrentUser, getWorkspace, limit, send, set, where } = vi.hoisted(
+const {
+  getCurrentUser,
+  getTeamConfiguration,
+  getWorkspace,
+  limit,
+  send,
+  set,
+  where,
+} = vi.hoisted(
   () => ({
     getCurrentUser: vi.fn(),
+    getTeamConfiguration: vi.fn(),
     getWorkspace: vi.fn(),
     limit: vi.fn(),
     send: vi.fn(),
@@ -17,6 +26,10 @@ vi.mock("@/lib/auth", () => ({
 
 vi.mock("@/lib/workspace", () => ({
   getOrCreateWorkspaceForSessionUser: getWorkspace,
+}));
+
+vi.mock("@/lib/team-configuration", () => ({
+  getTeamConfiguration,
 }));
 
 vi.mock("@/inngest/client", () => ({
@@ -63,6 +76,7 @@ async function requestTranslation() {
 describe("POST /api/meetings/[meetingId]/translation", () => {
   afterEach(() => {
     getCurrentUser.mockReset();
+    getTeamConfiguration.mockReset();
     getWorkspace.mockReset();
     limit.mockReset();
     send.mockReset();
@@ -78,6 +92,7 @@ describe("POST /api/meetings/[meetingId]/translation", () => {
       name: null,
     });
     getWorkspace.mockResolvedValue({ teamId: "team_123" });
+    getTeamConfiguration.mockResolvedValue({ translationLanguage: "en" });
     limit
       .mockResolvedValueOnce([{ id: "11111111-1111-4111-8111-111111111111" }])
       .mockResolvedValueOnce([{ id: "22222222-2222-4222-8222-222222222222" }]);
@@ -102,7 +117,8 @@ describe("POST /api/meetings/[meetingId]/translation", () => {
       name: "meeting/enrich.transcript",
       data: {
         meetingId: "11111111-1111-4111-8111-111111111111",
-        translateToChinese: true,
+        translateTranscript: true,
+        translationLanguage: "en",
       },
     });
   });

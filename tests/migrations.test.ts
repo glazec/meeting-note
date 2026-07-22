@@ -221,4 +221,21 @@ describe("database migrations", () => {
     expect(sql).toContain("SET DEFAULT 'Tape Notetaker'");
     expect(sql).toContain('ON CONFLICT ("team_id") DO NOTHING');
   });
+
+  it("adds constrained team and meeting translation languages", () => {
+    const sql = readFileSync(
+      "db/migrations/0030_translation_language.sql",
+      "utf8",
+    ).replace(/\s+/g, " ");
+
+    expect(sql).toContain(
+      'ALTER TABLE "teams" ADD COLUMN "translation_language" text DEFAULT \'zh-CN\' NOT NULL',
+    );
+    expect(sql).toContain(
+      'ALTER TABLE "meetings" ADD COLUMN "translation_language" text DEFAULT \'zh-CN\' NOT NULL',
+    );
+    expect(sql).toContain("teams_translation_language_check");
+    expect(sql).toContain("meetings_translation_language_check");
+    expect(sql).toContain("in ('zh-CN', 'en')");
+  });
 });

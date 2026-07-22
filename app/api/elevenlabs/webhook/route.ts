@@ -15,6 +15,7 @@ import {
   markMeetingTranslationQueued,
 } from "@/lib/meeting-translation-jobs";
 import { shouldAutoTranslateTranscript } from "@/lib/meeting-translation-language";
+import { getMeetingTranslationLanguage } from "@/lib/team-configuration";
 import {
   verifyElevenLabsWebhook,
   webhookVerificationResponse,
@@ -64,14 +65,21 @@ export async function POST(request: Request) {
       const persistence = await applyElevenLabsTranscriptEvent(event);
 
       if (persistence.action === "complete") {
-        const translateToChinese = shouldAutoTranslateTranscript(
+        const translationLanguage = await getMeetingTranslationLanguage(
+          persistence.meetingId,
+        );
+        const translateTranscript = shouldAutoTranslateTranscript(
           persistence.text,
+          translationLanguage,
         );
 
-        if (translateToChinese) {
+        if (translateTranscript) {
           await markMeetingTranslationQueued(persistence.meetingId);
         } else {
-          await markMeetingTranslationCompleted(persistence.meetingId);
+          await markMeetingTranslationCompleted(
+            persistence.meetingId,
+            translationLanguage,
+          );
         }
 
         await inngest
@@ -79,11 +87,12 @@ export async function POST(request: Request) {
             name: "meeting/enrich.transcript",
             data: {
               meetingId: persistence.meetingId,
-              translateToChinese,
+              translateTranscript,
+              translationLanguage,
             },
           })
           .catch((error) =>
-            translateToChinese
+            translateTranscript
               ? markMeetingTranslationFailed(persistence.meetingId, error)
               : Promise.reject(error),
           );

@@ -8,6 +8,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { currentTranscriptJobIdSubquery } from "@/lib/current-transcript-job";
 import { getManageableMeetingCondition } from "@/lib/meeting-write-policy";
 import { markMeetingTranslationQueued } from "@/lib/meeting-translation-jobs";
+import { getTeamConfiguration } from "@/lib/team-configuration";
 import { getOrCreateWorkspaceForSessionUser } from "@/lib/workspace";
 
 export const runtime = "nodejs";
@@ -63,10 +64,15 @@ export async function POST(
     );
   }
 
+  const { translationLanguage } = await getTeamConfiguration(workspace.teamId);
   await markMeetingTranslationQueued(parsedMeetingId.data);
   await inngest.send({
     name: "meeting/enrich.transcript",
-    data: { meetingId: parsedMeetingId.data, translateToChinese: true },
+    data: {
+      meetingId: parsedMeetingId.data,
+      translateTranscript: true,
+      translationLanguage,
+    },
   });
 
   return Response.json({

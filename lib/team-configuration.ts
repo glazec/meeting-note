@@ -2,8 +2,13 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
-import { teams } from "@/db/schema";
+import { meetings, teams } from "@/db/schema";
 import { normalizeEmail } from "@/lib/access";
+import {
+  normalizeTranslationLanguage,
+  translationLanguageSchema,
+  type TranslationLanguage,
+} from "@/lib/meeting-translation-language";
 
 export type TeamShareAudience = {
   emails: string[];
@@ -13,6 +18,7 @@ export type TeamShareAudience = {
 export type TeamConfiguration = {
   name: string;
   shareAudience: TeamShareAudience | null;
+  translationLanguage: TranslationLanguage;
 };
 
 type UpdateTeamConfigurationInput = {
@@ -20,6 +26,7 @@ type UpdateTeamConfigurationInput = {
   shareAudienceEmails: string | null | undefined;
   shareAudienceName: string | null | undefined;
   teamId: string;
+  translationLanguage: string | null | undefined;
 };
 
 const sharingGroupEmailSchema = z.email().max(320);
@@ -39,6 +46,7 @@ export async function getTeamConfiguration(
       name: teams.name,
       shareAudienceEmails: teams.shareAudienceEmails,
       shareAudienceName: teams.shareAudienceName,
+      translationLanguage: teams.translationLanguage,
     })
     .from(teams)
     .where(eq(teams.id, teamId))
@@ -61,7 +69,25 @@ export async function getTeamConfiguration(
       audienceName && emails.length > 0
         ? { emails, name: audienceName }
         : null,
+    translationLanguage: normalizeTranslationLanguage(
+      team.translationLanguage,
+    ),
   };
+}
+
+export async function getMeetingTranslationLanguage(meetingId: string) {
+  const [team] = await db
+    .select({ translationLanguage: teams.translationLanguage })
+    .from(meetings)
+    .innerJoin(teams, eq(teams.id, meetings.teamId))
+    .where(eq(meetings.id, meetingId))
+    .limit(1);
+
+  if (!team) {
+    throw new Error("Meeting team not found");
+  }
+
+  return normalizeTranslationLanguage(team.translationLanguage);
 }
 
 export async function updateTeamConfiguration(
@@ -74,6 +100,15 @@ export async function updateTeamConfiguration(
     100,
   );
   const shareAudienceEmails = parseAudienceEmails(input.shareAudienceEmails);
+  const translationLanguage = translationLanguageSchema.safeParse(
+    input.translationLanguage,
+  );
+
+  if (!translationLanguage.success) {
+    throw new TeamConfigurationInputError(
+      "Select a supported translation language",
+    );
+  }
 
   if (
     shareAudienceName &&
@@ -104,6 +139,7 @@ export async function updateTeamConfiguration(
       name,
       shareAudienceEmails,
       shareAudienceName,
+      translationLanguage: translationLanguage.data,
       updatedAt: new Date(),
     })
     .where(eq(teams.id, input.teamId));

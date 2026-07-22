@@ -22,6 +22,10 @@ export async function POST(request: Request) {
       shareAudienceEmails: getStringFormValue(formData, "shareAudienceEmails"),
       shareAudienceName: getStringFormValue(formData, "shareAudienceName"),
       teamId: workspace.teamId,
+      translationLanguage: getStringFormValue(
+        formData,
+        "translationLanguage",
+      ),
     });
   } catch (error) {
     if (error instanceof TeamConfigurationInputError) {

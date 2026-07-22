@@ -1,13 +1,14 @@
 import { z } from "zod";
 
 import {
-  buildChineseTranslationJsonSchema,
-  buildChineseTranslationMessages,
+  buildTranslationJsonSchema,
+  buildTranslationMessages,
   buildOriginalTranscriptPolishMessages,
-  parseChineseTranslationResponse,
+  parseTranslationResponse,
   parseOriginalTranscriptPolishResponse,
   TranslationResponseError,
 } from "@/lib/meeting-translation";
+import type { TranslationLanguage } from "@/lib/meeting-translation-language";
 import { searchWebWithExa } from "@/lib/vendors/exa";
 
 const optionalUrl = z.preprocess(
@@ -230,14 +231,15 @@ function getMeetingChatContent(
   return content;
 }
 
-export async function translateTranscriptSegmentsToChinese(
+export async function translateTranscriptSegments(
   segments: TranscriptSegment[],
   options: {
     batchSize?: number;
     onTranslated?: (
       translations: Array<{ id: string; text: string }>,
     ) => Promise<void> | void;
-  } = {},
+    targetLanguage: TranslationLanguage;
+  },
 ) {
   if (segments.length === 0) {
     return [];
@@ -254,7 +256,11 @@ export async function translateTranscriptSegmentsToChinese(
     maxCharacters: TRANSLATION_BATCH_CHARACTER_LIMIT,
   })) {
     translations.push(
-      ...(await translateBatchWithRecovery(batch, options.onTranslated)),
+      ...(await translateBatchWithRecovery(
+        batch,
+        options.targetLanguage,
+        options.onTranslated,
+      )),
     );
   }
 
@@ -263,6 +269,7 @@ export async function translateTranscriptSegmentsToChinese(
 
 async function translateBatchWithRecovery(
   batch: TranscriptSegment[],
+  targetLanguage: TranslationLanguage,
   onTranslated?: (
     translations: Array<{ id: string; text: string }>,
   ) => Promise<void> | void,
@@ -273,14 +280,14 @@ async function translateBatchWithRecovery(
     try {
       const content = await createOpenRouterChatCompletion({
         attempts: 1,
-        messages: buildChineseTranslationMessages(batch),
+        messages: buildTranslationMessages(batch, targetLanguage),
         maxTokens: 3000,
         plugins: [{ id: "response-healing" }],
         provider: { require_parameters: true },
-        responseFormat: buildChineseTranslationJsonSchema(batch.length),
+        responseFormat: buildTranslationJsonSchema(batch.length),
         temperature: 0,
       });
-      const translatedRows = parseChineseTranslationResponse({
+      const translatedRows = parseTranslationResponse({
         content,
         segments: batch,
       });
@@ -306,6 +313,7 @@ async function translateBatchWithRecovery(
 
       const recoveredRows = await translateBatchWithRecovery(
         missingSegments,
+        targetLanguage,
         onTranslated,
       );
       const recoveredById = new Map(
@@ -320,13 +328,13 @@ async function translateBatchWithRecovery(
       lastError = error;
 
       if (error instanceof TranslationResponseError && batch.length > 1) {
-        return translateSplitBatch(batch, onTranslated);
+        return translateSplitBatch(batch, targetLanguage, onTranslated);
       }
     }
   }
 
   if (batch.length > 1) {
-    return translateSplitBatch(batch, onTranslated);
+    return translateSplitBatch(batch, targetLanguage, onTranslated);
   }
 
   const message =
@@ -341,6 +349,7 @@ async function translateBatchWithRecovery(
 
 async function translateSplitBatch(
   batch: TranscriptSegment[],
+  targetLanguage: TranslationLanguage,
   onTranslated?: (
     translations: Array<{ id: string; text: string }>,
   ) => Promise<void> | void,
@@ -348,14 +357,31 @@ async function translateSplitBatch(
   const middle = Math.ceil(batch.length / 2);
   const firstHalf = await translateBatchWithRecovery(
     batch.slice(0, middle),
+    targetLanguage,
     onTranslated,
   );
   const secondHalf = await translateBatchWithRecovery(
     batch.slice(middle),
+    targetLanguage,
     onTranslated,
   );
 
   return [...firstHalf, ...secondHalf];
+}
+
+export function translateTranscriptSegmentsToChinese(
+  segments: TranscriptSegment[],
+  options: {
+    batchSize?: number;
+    onTranslated?: (
+      translations: Array<{ id: string; text: string }>,
+    ) => Promise<void> | void;
+  } = {},
+) {
+  return translateTranscriptSegments(segments, {
+    ...options,
+    targetLanguage: "zh-CN",
+  });
 }
 
 export async function polishTranscriptSegmentsInOriginalLanguage(

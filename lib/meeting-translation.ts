@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import {
+  translationLanguageLabels,
+  type TranslationLanguage,
+} from "@/lib/meeting-translation-language";
+
 type SegmentForTranslation = {
   id: string;
   text: string;
@@ -12,14 +17,16 @@ export class TranslationResponseError extends Error {
   }
 }
 
-export function buildChineseTranslationMessages(
+export function buildTranslationMessages(
   segments: SegmentForTranslation[],
+  targetLanguage: TranslationLanguage,
 ) {
+  const language = translationLanguageLabels[targetLanguage];
+
   return [
     {
       role: "system" as const,
-      content:
-        "Translate each meeting transcript text into polished, concise Chinese. Return exactly one nonempty translation for every input text, in the same order. Translate short fragments and filler minimally instead of returning an empty string. Remove filler words such as 然后 when they do not change meaning. Preserve speaker intent, team tone, product names, company names, numbers, and tickers.",
+      content: `Translate each meeting transcript text into polished, concise ${language}. Return exactly one nonempty translation for every input text, in the same order. Translate short fragments and filler minimally instead of returning an empty string. Remove filler words such as 然后, then, um, and uh when they do not change meaning. Preserve speaker intent, team tone, product names, company names, numbers, and tickers.`,
     },
     {
       role: "user" as const,
@@ -30,7 +37,13 @@ export function buildChineseTranslationMessages(
   ];
 }
 
-export function buildChineseTranslationJsonSchema(itemCount: number) {
+export function buildChineseTranslationMessages(
+  segments: SegmentForTranslation[],
+) {
+  return buildTranslationMessages(segments, "zh-CN");
+}
+
+export function buildTranslationJsonSchema(itemCount: number) {
   return {
     type: "json_schema" as const,
     json_schema: {
@@ -53,6 +66,8 @@ export function buildChineseTranslationJsonSchema(itemCount: number) {
   };
 }
 
+export const buildChineseTranslationJsonSchema = buildTranslationJsonSchema;
+
 export function buildOriginalTranscriptPolishMessages(
   segments: SegmentForTranslation[],
 ) {
@@ -74,7 +89,7 @@ export function buildOriginalTranscriptPolishMessages(
   ];
 }
 
-export function parseChineseTranslationResponse(input: {
+export function parseTranslationResponse(input: {
   content: string;
   segments: SegmentForTranslation[];
 }) {
@@ -99,6 +114,8 @@ export function parseChineseTranslationResponse(input: {
     });
   }
 }
+
+export const parseChineseTranslationResponse = parseTranslationResponse;
 
 export function parseOriginalTranscriptPolishResponse(input: {
   content: string;

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildChineseTranslationJsonSchema,
   buildChineseTranslationMessages,
+  buildTranslationMessages,
   buildOriginalTranscriptPolishMessages,
   parseChineseTranslationResponse,
   parseOriginalTranscriptPolishResponse,
@@ -19,7 +20,7 @@ describe("meeting translation", () => {
       {
         role: "system",
         content:
-          "Translate each meeting transcript text into polished, concise Chinese. Return exactly one nonempty translation for every input text, in the same order. Translate short fragments and filler minimally instead of returning an empty string. Remove filler words such as 然后 when they do not change meaning. Preserve speaker intent, team tone, product names, company names, numbers, and tickers.",
+          "Translate each meeting transcript text into polished, concise Simplified Chinese. Return exactly one nonempty translation for every input text, in the same order. Translate short fragments and filler minimally instead of returning an empty string. Remove filler words such as 然后, then, um, and uh when they do not change meaning. Preserve speaker intent, team tone, product names, company names, numbers, and tickers.",
       },
       {
         role: "user",
@@ -50,6 +51,17 @@ describe("meeting translation", () => {
         },
       },
     });
+  });
+
+  it("builds an English translation prompt when English is selected", () => {
+    const [systemMessage] = buildTranslationMessages(
+      [{ id: "segment_1", text: "我们讨论下周安排。" }],
+      "en",
+    );
+
+    expect(systemMessage.content).toContain(
+      "Translate each meeting transcript text into polished, concise English",
+    );
   });
 
   it("builds an original-language polish prompt that handles Chinese meetings", () => {

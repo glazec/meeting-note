@@ -21,7 +21,7 @@ describe("meeting translation job state", () => {
     const jobs = await import("@/lib/meeting-translation-jobs");
 
     await jobs.markMeetingTranslationQueued("meeting_123");
-    await jobs.markMeetingTranslationRunning("meeting_123");
+    await jobs.markMeetingTranslationRunning("meeting_123", "en");
     await jobs.markMeetingTranslationCompleted("meeting_123");
     await jobs.markMeetingTranslationFailed(
       "meeting_123",
@@ -37,6 +37,7 @@ describe("meeting translation job state", () => {
       expect.objectContaining({
         translationStartedAt: expect.any(Date),
         translationStatus: "running",
+        translationLanguage: "en",
       }),
     );
     expect(set).toHaveBeenNthCalledWith(

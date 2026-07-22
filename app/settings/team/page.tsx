@@ -10,7 +10,18 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { requireCurrentUser } from "@/lib/auth-guards";
+import {
+  translationLanguageLabels,
+  translationLanguageOptions,
+} from "@/lib/meeting-translation-language";
 import {
   getDefaultMeetingBotAvatarJpegBase64,
   getMeetingBotProfile,
@@ -73,10 +84,10 @@ export default async function TeamSettingsPage() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Workspace identity and sharing</CardTitle>
+            <CardTitle>Workspace defaults</CardTitle>
             <CardDescription>
-              Set the team name and an optional group that appears in meeting
-              sharing.
+              Set the team name, translation language, and an optional sharing
+              group.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -100,6 +111,36 @@ export default async function TeamSettingsPage() {
                     name="teamName"
                     required
                   />
+                </div>
+                <div className="grid gap-2">
+                  <label
+                    className="text-sm leading-none font-medium"
+                    htmlFor="translationLanguage"
+                  >
+                    Translate transcripts to
+                  </label>
+                  <Select
+                    defaultValue={teamConfiguration.translationLanguage}
+                    items={translationLanguageOptions}
+                    name="translationLanguage"
+                  >
+                    <SelectTrigger
+                      className="h-11 w-full bg-background sm:max-w-xs"
+                      id="translationLanguage"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent align="start">
+                      {translationLanguageOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    New automatic and manual translations use this language.
+                  </p>
                 </div>
                 <div className="grid gap-2">
                   <label
@@ -144,6 +185,12 @@ export default async function TeamSettingsPage() {
             ) : (
               <div className="flex flex-col gap-2 text-sm">
                 <p className="font-medium">{teamConfiguration.name}</p>
+                <p className="text-muted-foreground">
+                  Translations ·{" "}
+                  {translationLanguageLabels[
+                    teamConfiguration.translationLanguage
+                  ]}
+                </p>
                 {teamConfiguration.shareAudience ? (
                   <p className="text-muted-foreground">
                     {teamConfiguration.shareAudience.name} ·{" "}

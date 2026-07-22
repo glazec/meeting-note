@@ -211,6 +211,13 @@
       "when": 1785100000000,
       "tag": "0029_team_configuration",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1785200000000,
+      "tag": "0030_translation_language",
+      "breakpoints": true
     }
   ]
 }

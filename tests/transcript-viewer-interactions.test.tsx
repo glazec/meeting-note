@@ -66,7 +66,9 @@ describe("TranscriptViewer interactions", () => {
     );
 
     fireEvent.click(screen.getByLabelText("Transcript language"));
-    const chineseOption = await screen.findByRole("option", { name: "Chinese" });
+    const chineseOption = await screen.findByRole("option", {
+      name: "Simplified Chinese",
+    });
     fireEvent.pointerDown(chineseOption, { pointerType: "mouse" });
     fireEvent.click(chineseOption);
     await waitFor(() =>

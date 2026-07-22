@@ -30,6 +30,7 @@ describe("team configuration", () => {
                 "principal@example.com",
               ],
               shareAudienceName: "Investment committee",
+              translationLanguage: "en",
             },
           ]),
         }),
@@ -44,6 +45,7 @@ describe("team configuration", () => {
         emails: ["partner@example.com", "principal@example.com"],
         name: "Investment committee",
       },
+      translationLanguage: "en",
     });
   });
 
@@ -61,6 +63,7 @@ describe("team configuration", () => {
         "Partner@Example.com\nprincipal@example.com,partner@example.com",
       shareAudienceName: " Investment   committee ",
       teamId: "team_123",
+      translationLanguage: "en",
     });
 
     expect(set).toHaveBeenCalledWith(
@@ -71,6 +74,7 @@ describe("team configuration", () => {
           "principal@example.com",
         ],
         shareAudienceName: "Investment committee",
+        translationLanguage: "en",
       }),
     );
   });
@@ -86,6 +90,7 @@ describe("team configuration", () => {
         shareAudienceEmails: "partner@example.com",
         shareAudienceName: "",
         teamId: "team_123",
+        translationLanguage: "zh-CN",
       }),
     ).rejects.toThrow(
       "Sharing group name and member emails must be provided together",
@@ -104,10 +109,28 @@ describe("team configuration", () => {
         shareAudienceEmails: "partner@example.com",
         shareAudienceName: "Whole organization",
         teamId: "team_123",
+        translationLanguage: "zh-CN",
       }),
     ).rejects.toThrow(
       "Sharing group name must be different from Whole organization",
     );
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unsupported translation language", async () => {
+    const { updateTeamConfiguration } = await import(
+      "@/lib/team-configuration"
+    );
+
+    await expect(
+      updateTeamConfiguration({
+        name: "Example Capital",
+        shareAudienceEmails: "",
+        shareAudienceName: "",
+        teamId: "team_123",
+        translationLanguage: "fr",
+      }),
+    ).rejects.toThrow("Select a supported translation language");
     expect(update).not.toHaveBeenCalled();
   });
 });

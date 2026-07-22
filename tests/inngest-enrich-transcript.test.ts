@@ -1,20 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const {
+  getStoredMeetingTranslationLanguage,
   markMeetingTranslationCompleted,
   markMeetingTranslationFailed,
   markMeetingTranslationRunning,
   polishTranscriptSegmentsInOriginalLanguage,
   select,
-  translateTranscriptSegmentsToChinese,
+  translateTranscriptSegments,
   update,
 } = vi.hoisted(() => ({
+  getStoredMeetingTranslationLanguage: vi.fn(),
   markMeetingTranslationCompleted: vi.fn(),
   markMeetingTranslationFailed: vi.fn(),
   markMeetingTranslationRunning: vi.fn(),
   polishTranscriptSegmentsInOriginalLanguage: vi.fn(),
   select: vi.fn(),
-  translateTranscriptSegmentsToChinese: vi.fn(),
+  translateTranscriptSegments: vi.fn(),
   update: vi.fn(),
 }));
 
@@ -23,6 +25,7 @@ vi.mock("@/db/client", () => ({
 }));
 
 vi.mock("@/lib/meeting-translation-jobs", () => ({
+  getStoredMeetingTranslationLanguage,
   markMeetingTranslationCompleted,
   markMeetingTranslationFailed,
   markMeetingTranslationRunning,
@@ -31,7 +34,7 @@ vi.mock("@/lib/meeting-translation-jobs", () => ({
 vi.mock("@/lib/vendors/openrouter", () => ({
   polishTranscriptSegmentsInOriginalLanguage,
   TRANSLATION_BATCH_SIZE: 10,
-  translateTranscriptSegmentsToChinese,
+  translateTranscriptSegments,
 }));
 
 type RunnableInngestFunction = {
@@ -62,6 +65,7 @@ function mockSegments(
 
   select.mockReturnValue({ from });
   update.mockReturnValue({ set });
+  getStoredMeetingTranslationLanguage.mockResolvedValue("zh-CN");
 
   return { set };
 }
@@ -78,7 +82,7 @@ describe("enrich transcript", () => {
       const { set } = mockSegments();
       const polishError = new Error("OpenRouter polish returned no content");
 
-      translateTranscriptSegmentsToChinese.mockImplementation(
+      translateTranscriptSegments.mockImplementation(
         async (_segments, options) => {
           const translations = [{ id: "segment_1", text: "团队好。" }];
           await options.onTranslated(translations);
@@ -91,18 +95,31 @@ describe("enrich transcript", () => {
 
       await expect(
         (enrichTranscript as unknown as RunnableInngestFunction).fn({
-          event: { data: { meetingId, translateToChinese: true } },
+          event: {
+            data: {
+              meetingId,
+              translateTranscript: true,
+              translationLanguage: "zh-CN",
+            },
+          },
         }),
       ).rejects.toThrow("OpenRouter polish returned no content");
 
-      expect(markMeetingTranslationRunning).toHaveBeenCalledWith(meetingId);
-      expect(markMeetingTranslationCompleted).toHaveBeenCalledWith(meetingId);
+      expect(markMeetingTranslationRunning).toHaveBeenCalledWith(
+        meetingId,
+        "zh-CN",
+      );
+      expect(markMeetingTranslationCompleted).toHaveBeenCalledWith(
+        meetingId,
+        "zh-CN",
+      );
       expect(markMeetingTranslationFailed).not.toHaveBeenCalled();
-      expect(translateTranscriptSegmentsToChinese).toHaveBeenCalledWith(
+      expect(translateTranscriptSegments).toHaveBeenCalledWith(
         [{ id: "segment_1", text: "Um, hello team." }],
         {
           batchSize: 10,
           onTranslated: expect.any(Function),
+          targetLanguage: "zh-CN",
         },
       );
       expect(set).toHaveBeenCalledWith({
@@ -110,7 +127,7 @@ describe("enrich transcript", () => {
         updatedAt: expect.any(Date),
       });
       expect(
-        translateTranscriptSegmentsToChinese.mock.invocationCallOrder[0],
+        translateTranscriptSegments.mock.invocationCallOrder[0],
       ).toBeLessThan(
         polishTranscriptSegmentsInOriginalLanguage.mock.invocationCallOrder[0],
       );
@@ -127,18 +144,27 @@ describe("enrich transcript", () => {
     mockSegments();
     const translationError = new Error("OpenRouter translation returned no content");
 
-    translateTranscriptSegmentsToChinese.mockRejectedValue(translationError);
+    translateTranscriptSegments.mockRejectedValue(translationError);
 
     const { enrichTranscript } = await import("@/inngest/functions");
 
     await expect(
       (enrichTranscript as unknown as RunnableInngestFunction).fn({
         attempt: 2,
-        event: { data: { meetingId, translateToChinese: true } },
+        event: {
+          data: {
+            meetingId,
+            translateTranscript: true,
+            translationLanguage: "zh-CN",
+          },
+        },
       }),
     ).rejects.toThrow("OpenRouter translation returned no content");
 
-    expect(markMeetingTranslationRunning).toHaveBeenCalledWith(meetingId);
+    expect(markMeetingTranslationRunning).toHaveBeenCalledWith(
+      meetingId,
+      "zh-CN",
+    );
     expect(markMeetingTranslationFailed).not.toHaveBeenCalled();
   });
 
@@ -146,14 +172,20 @@ describe("enrich transcript", () => {
     mockSegments();
     const translationError = new Error("OpenRouter translation returned no content");
 
-    translateTranscriptSegmentsToChinese.mockRejectedValue(translationError);
+    translateTranscriptSegments.mockRejectedValue(translationError);
 
     const { enrichTranscript } = await import("@/inngest/functions");
 
     await expect(
       (enrichTranscript as unknown as RunnableInngestFunction).fn({
         attempt: 4,
-        event: { data: { meetingId, translateToChinese: true } },
+        event: {
+          data: {
+            meetingId,
+            translateTranscript: true,
+            translationLanguage: "zh-CN",
+          },
+        },
       }),
     ).rejects.toThrow("OpenRouter translation returned no content");
 
@@ -175,13 +207,62 @@ describe("enrich transcript", () => {
 
     await expect(
       (enrichTranscript as unknown as RunnableInngestFunction).fn({
-        event: { data: { meetingId, translateToChinese: true } },
+        event: {
+          data: {
+            meetingId,
+            translateTranscript: true,
+            translationLanguage: "zh-CN",
+          },
+        },
       }),
     ).rejects.toThrow("OpenRouter polish returned no content");
 
     expect(markMeetingTranslationRunning).not.toHaveBeenCalled();
-    expect(markMeetingTranslationCompleted).toHaveBeenCalledWith(meetingId);
+    expect(markMeetingTranslationCompleted).toHaveBeenCalledWith(
+      meetingId,
+      "zh-CN",
+    );
     expect(markMeetingTranslationFailed).not.toHaveBeenCalled();
-    expect(translateTranscriptSegmentsToChinese).not.toHaveBeenCalled();
+    expect(translateTranscriptSegments).not.toHaveBeenCalled();
+  });
+
+  it("replaces translations when the team target language changes", async () => {
+    const { set } = mockSegments({ translatedText: "团队好。" });
+    getStoredMeetingTranslationLanguage.mockResolvedValue("zh-CN");
+    translateTranscriptSegments.mockResolvedValue([
+      { id: "segment_1", text: "Hello team." },
+    ]);
+    polishTranscriptSegmentsInOriginalLanguage.mockResolvedValue([
+      { id: "segment_1", text: "Hello team." },
+    ]);
+
+    const { enrichTranscript } = await import("@/inngest/functions");
+
+    await (enrichTranscript as unknown as RunnableInngestFunction).fn({
+      event: {
+        data: {
+          meetingId,
+          translateTranscript: true,
+          translationLanguage: "en",
+        },
+      },
+    });
+
+    expect(set).toHaveBeenCalledWith({
+      translatedText: null,
+      updatedAt: expect.any(Date),
+    });
+    expect(translateTranscriptSegments).toHaveBeenCalledWith(
+      [{ id: "segment_1", text: "Um, hello team." }],
+      expect.objectContaining({ targetLanguage: "en" }),
+    );
+    expect(markMeetingTranslationRunning).toHaveBeenCalledWith(
+      meetingId,
+      "en",
+    );
+    expect(markMeetingTranslationCompleted).toHaveBeenCalledWith(
+      meetingId,
+      "en",
+    );
   });
 });

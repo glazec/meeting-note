@@ -63,6 +63,7 @@ describe("getWorkspaceMeetingTranscript", () => {
               calendarAttendeeEmails: [],
               recallRecordingId: null,
               translationErrorMessage: null,
+              translationLanguage: "en",
               translationStatus: null,
             },
           ]),
@@ -126,6 +127,7 @@ describe("getWorkspaceMeetingTranscript", () => {
       id: "11111111-1111-4111-8111-111111111111",
       status: "cancelled",
       title: "Cancelled partner sync",
+      translationLanguage: "en",
     });
 
     const query = toQuery(meetingWhere.mock.calls[0][0]);

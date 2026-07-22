@@ -545,6 +545,23 @@ describe("TranscriptViewer", () => {
     expect(html).not.toContain("Original sentence");
   });
 
+  it("labels English translations as English", () => {
+    const html = renderToStaticMarkup(
+      <TranscriptViewer
+        segments={[
+          {
+            ...segments[0],
+            translatedText: "Hello, team.",
+          },
+        ]}
+        translationLanguage="en"
+      />,
+    );
+
+    expect(html).toContain("English");
+    expect(html).not.toContain(">Chinese<");
+  });
+
   it("shows polished Chinese source text without a translation language switch", () => {
     const html = renderToStaticMarkup(
       <TranscriptViewer
@@ -586,6 +603,73 @@ describe("TranscriptViewer", () => {
     expect(html).toContain("0 of 672 lines translated");
   });
 
+  it("uses the selected language in translation status copy", () => {
+    const html = renderToStaticMarkup(
+      <TranscriptViewer
+        segments={segments}
+        translationLanguage="en"
+        translationSummary={{
+          hasTranslations: false,
+          status: "running",
+          totalSegments: 672,
+          translatedSegments: 0,
+        }}
+      />,
+    );
+
+    expect(html).toContain("English view will appear here automatically.");
+    expect(html).not.toContain("Chinese view will appear here automatically.");
+  });
+
+  it("offers retranslation when the team target changed", () => {
+    const html = renderToStaticMarkup(
+      <TranscriptViewer
+        meetingId="11111111-1111-4111-8111-111111111111"
+        preferredTranslationLanguage="en"
+        segments={[
+          {
+            ...segments[0],
+            translatedText: "大家好",
+          },
+        ]}
+        translationLanguage="zh-CN"
+        translationSummary={{
+          hasTranslations: true,
+          status: "completed",
+          totalSegments: 1,
+          translatedSegments: 1,
+        }}
+      />,
+    );
+
+    expect(html).toContain("Translation language changed");
+    expect(html).toContain(
+      "This meeting is translated into Simplified Chinese. The team default is now English.",
+    );
+    expect(html).toContain("Translate to English");
+  });
+
+  it("does not describe untranslated text as translated after the team target changed", () => {
+    const html = renderToStaticMarkup(
+      <TranscriptViewer
+        meetingId="11111111-1111-4111-8111-111111111111"
+        preferredTranslationLanguage="en"
+        segments={segments}
+        translationLanguage="zh-CN"
+        translationSummary={{
+          hasTranslations: false,
+          status: "not_started",
+          totalSegments: 672,
+          translatedSegments: 0,
+        }}
+      />,
+    );
+
+    expect(html).not.toContain("This meeting is translated into");
+    expect(html).not.toContain("Translation language changed");
+    expect(html).toContain("Start translation");
+  });
+
   it("shows when a transcript does not need translation", () => {
     const html = renderToStaticMarkup(
       <TranscriptViewer
@@ -601,7 +685,9 @@ describe("TranscriptViewer", () => {
     );
 
     expect(html).toContain("Translation not needed");
-    expect(html).toContain("This transcript already appears to be Chinese.");
+    expect(html).toContain(
+      "This transcript already appears to be Simplified Chinese.",
+    );
     expect(html).toContain("Translate anyway");
   });
 

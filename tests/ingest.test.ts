@@ -23,6 +23,7 @@ import { generateOpenRouterChatReply } from "@/lib/vendors/openrouter";
 const {
   applyElevenLabsTranscriptEvent,
   applyRecallMeetingEvent,
+  getMeetingTranslationLanguage,
   markVendorWebhookEventProcessed,
   markMeetingTranslationCompleted,
   markMeetingTranslationFailed,
@@ -33,6 +34,7 @@ const {
 } = vi.hoisted(() => ({
     applyElevenLabsTranscriptEvent: vi.fn(),
     applyRecallMeetingEvent: vi.fn(),
+    getMeetingTranslationLanguage: vi.fn(),
     markVendorWebhookEventProcessed: vi.fn(),
     markMeetingTranslationCompleted: vi.fn(),
     markMeetingTranslationFailed: vi.fn(),
@@ -62,6 +64,10 @@ vi.mock("@/lib/meeting-translation-jobs", () => ({
   markMeetingTranslationCompleted,
   markMeetingTranslationFailed,
   markMeetingTranslationQueued,
+}));
+
+vi.mock("@/lib/team-configuration", () => ({
+  getMeetingTranslationLanguage,
 }));
 
 vi.mock("@/inngest/client", () => ({
@@ -210,6 +216,7 @@ describe("vendor webhook normalization", () => {
     markMeetingTranslationCompleted.mockResolvedValue(undefined);
     markMeetingTranslationFailed.mockResolvedValue(undefined);
     markMeetingTranslationQueued.mockResolvedValue(undefined);
+    getMeetingTranslationLanguage.mockResolvedValue("zh-CN");
     applyElevenLabsTranscriptEvent.mockResolvedValue({ action: "skip" });
     applyRecallMeetingEvent.mockResolvedValue({ action: "skip" });
   });
@@ -222,6 +229,7 @@ describe("vendor webhook normalization", () => {
     markMeetingTranslationCompleted.mockReset();
     markMeetingTranslationFailed.mockReset();
     markMeetingTranslationQueued.mockReset();
+    getMeetingTranslationLanguage.mockReset();
     recordVendorWebhookEvent.mockReset();
     sendInngestEvent.mockReset();
     applyElevenLabsTranscriptEvent.mockReset();
@@ -515,16 +523,54 @@ describe("vendor webhook normalization", () => {
     expect(response.status).toBe(200);
     expect(markMeetingTranslationCompleted).toHaveBeenCalledWith(
       "11111111-1111-4111-8111-111111111111",
+      "zh-CN",
     );
     expect(markMeetingTranslationQueued).not.toHaveBeenCalled();
     expect(sendInngestEvent).toHaveBeenCalledWith({
       name: "meeting/enrich.transcript",
       data: {
         meetingId: "11111111-1111-4111-8111-111111111111",
-        translateToChinese: false,
+        translateTranscript: false,
+        translationLanguage: "zh-CN",
       },
     });
     expect(markMeetingTranslationFailed).not.toHaveBeenCalled();
+  });
+
+  it("queues Chinese transcript translation when the team selects English", async () => {
+    getMeetingTranslationLanguage.mockResolvedValue("en");
+    applyElevenLabsTranscriptEvent.mockResolvedValueOnce({
+      action: "complete",
+      meetingId: "11111111-1111-4111-8111-111111111111",
+      text: "今天我们先聊基金表现，然后讨论下周安排和后续工作。",
+    });
+
+    const response = await postElevenLabsWebhook({
+      type: "speech_to_text_transcription",
+      data: {
+        request_id: "req_123",
+        webhook_metadata: {
+          meetingId: "11111111-1111-4111-8111-111111111111",
+          transcriptJobId: "22222222-2222-4222-8222-222222222222",
+        },
+        transcription: {
+          text: "今天我们先聊基金表现，然后讨论下周安排和后续工作。",
+        },
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(markMeetingTranslationQueued).toHaveBeenCalledWith(
+      "11111111-1111-4111-8111-111111111111",
+    );
+    expect(sendInngestEvent).toHaveBeenCalledWith({
+      name: "meeting/enrich.transcript",
+      data: {
+        meetingId: "11111111-1111-4111-8111-111111111111",
+        translateTranscript: true,
+        translationLanguage: "en",
+      },
+    });
   });
 
   it("accepts copied ElevenLabs webhook secret values", async () => {

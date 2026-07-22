@@ -12,6 +12,7 @@ import { getMeetingVocabularyKeyterms } from "@/lib/team-vocabulary";
 import { completeUploadedVideoConversion } from "@/lib/transcription-records";
 import { createElevenLabsTranscriptJob } from "@/lib/vendors/elevenlabs";
 import {
+  getStoredMeetingTranslationLanguage,
   markMeetingTranslationCompleted,
   markMeetingTranslationFailed,
   markMeetingTranslationRunning,
@@ -19,8 +20,12 @@ import {
 import {
   polishTranscriptSegmentsInOriginalLanguage,
   TRANSLATION_BATCH_SIZE,
-  translateTranscriptSegmentsToChinese,
+  translateTranscriptSegments,
 } from "@/lib/vendors/openrouter";
+import {
+  DEFAULT_TRANSLATION_LANGUAGE,
+  translationLanguageSchema,
+} from "@/lib/meeting-translation-language";
 import { scheduleRecallBot } from "@/lib/vendors/recall";
 import { syncRecallCalendarEventsForAllConnectedUsers } from "@/lib/recall-calendar-bulk-sync";
 import { reconcileStaleMeetingJobs } from "@/lib/stale-meeting-jobs";
@@ -60,6 +65,8 @@ const CONVERT_VIDEO_TO_AUDIO_RETRIES = 2;
 
 const enrichTranscriptDataSchema = z.object({
   meetingId: z.uuid(),
+  translateTranscript: z.boolean().optional(),
+  translationLanguage: translationLanguageSchema.optional(),
   translateToChinese: z.boolean().optional(),
 });
 const ENRICH_TRANSCRIPT_RETRIES = 4;
@@ -180,8 +187,11 @@ export const enrichTranscript = inngest.createFunction(
   },
   async ({ event, attempt = 0 }) => {
     const data = enrichTranscriptDataSchema.parse(event.data);
-    const shouldTranslateToChinese = data.translateToChinese ?? true;
-    let translationFinished = !shouldTranslateToChinese;
+    const shouldTranslate =
+      data.translateTranscript ?? data.translateToChinese ?? true;
+    const translationLanguage =
+      data.translationLanguage ?? DEFAULT_TRANSLATION_LANGUAGE;
+    let translationFinished = !shouldTranslate;
 
     try {
       const segments = await db
@@ -204,16 +214,42 @@ export const enrichTranscript = inngest.createFunction(
         .orderBy(asc(transcriptSegments.startMs));
       let newTranslatedCount = 0;
 
-      if (shouldTranslateToChinese) {
+      if (shouldTranslate) {
+        const storedTranslationLanguage =
+          await getStoredMeetingTranslationLanguage(data.meetingId);
+        const targetLanguageChanged =
+          storedTranslationLanguage !== translationLanguage;
+
+        if (targetLanguageChanged) {
+          await db
+            .update(transcriptSegments)
+            .set({ translatedText: null, updatedAt: new Date() })
+            .where(
+              and(
+                eq(transcriptSegments.meetingId, data.meetingId),
+                eq(
+                  transcriptSegments.jobId,
+                  currentTranscriptJobIdSubquery(data.meetingId),
+                ),
+              ),
+            );
+        }
+
         const untranslatedSegments = segments
-          .filter((segment) => !segment.translatedText?.trim())
+          .filter(
+            (segment) =>
+              targetLanguageChanged || !segment.translatedText?.trim(),
+          )
           .map((segment) => ({
             id: segment.id,
             text: segment.text,
           }));
 
         if (untranslatedSegments.length > 0) {
-          await markMeetingTranslationRunning(data.meetingId);
+          await markMeetingTranslationRunning(
+            data.meetingId,
+            translationLanguage,
+          );
         }
 
         for (
@@ -225,7 +261,7 @@ export const enrichTranscript = inngest.createFunction(
             index,
             index + TRANSLATION_BATCH_SIZE,
           );
-          const translations = await translateTranscriptSegmentsToChinese(
+          const translations = await translateTranscriptSegments(
             batch,
             {
               batchSize: TRANSLATION_BATCH_SIZE,
@@ -240,6 +276,7 @@ export const enrichTranscript = inngest.createFunction(
                     .where(eq(transcriptSegments.id, translation.id));
                 }
               },
+              targetLanguage: translationLanguage,
             },
           );
 
@@ -256,7 +293,10 @@ export const enrichTranscript = inngest.createFunction(
         }
 
         translationFinished = true;
-        await markMeetingTranslationCompleted(data.meetingId);
+        await markMeetingTranslationCompleted(
+          data.meetingId,
+          translationLanguage,
+        );
       }
 
       const unpolishedSegments = segments
@@ -309,7 +349,7 @@ export const enrichTranscript = inngest.createFunction(
       };
     } catch (error) {
       if (
-        shouldTranslateToChinese &&
+        shouldTranslate &&
         !translationFinished &&
         attempt >= ENRICH_TRANSCRIPT_RETRIES
       ) {

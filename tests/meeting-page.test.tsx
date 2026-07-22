@@ -32,7 +32,22 @@ vi.mock("@/components/meeting-recovery-upload-panel", () => ({ MeetingRecoveryUp
 vi.mock("@/components/meeting-title-editor", () => ({ MeetingTitleEditor: ({ meetingTitle }: { meetingTitle: string }) => <h1>{meetingTitle}</h1> }));
 vi.mock("@/components/related-meetings-card", () => ({ RelatedMeetingsCard: () => <span>related meetings</span> }));
 vi.mock("@/components/share-dialog", () => ({ ShareDialog: () => <span>share dialog</span> }));
-vi.mock("@/components/transcript-viewer", () => ({ TranscriptViewer: ({ meetingId }: { meetingId: string | null }) => <span>transcript:{meetingId ?? "readonly"}</span> }));
+vi.mock("@/components/transcript-viewer", () => ({
+  TranscriptViewer: ({
+    meetingId,
+    preferredTranslationLanguage,
+    translationLanguage,
+  }: {
+    meetingId: string | null;
+    preferredTranslationLanguage: string;
+    translationLanguage: string;
+  }) => (
+    <span>
+      transcript:{meetingId ?? "readonly"}:languages:{translationLanguage}:
+      {preferredTranslationLanguage}
+    </span>
+  ),
+}));
 
 import MeetingPage, { getTranscriptViewerRenderKey } from "@/app/meetings/[meetingId]/page";
 
@@ -44,7 +59,11 @@ describe("meeting page", () => {
     mocks.listRelated.mockResolvedValue([]);
     mocks.listRecipients.mockResolvedValue([]);
     mocks.listShares.mockResolvedValue([]);
-    mocks.getTeamConfiguration.mockResolvedValue({ name: "Example Capital", shareAudience: null });
+    mocks.getTeamConfiguration.mockResolvedValue({
+      name: "Example Capital",
+      shareAudience: null,
+      translationLanguage: "zh-CN",
+    });
     mocks.getMeeting.mockResolvedValue(meeting());
   });
 
@@ -57,6 +76,25 @@ describe("meeting page", () => {
     expect(html).toContain("transcript:meeting_1");
     expect(html).toContain("lg:grid-cols-[1fr_20rem]");
     expect(mocks.listRecipients).toHaveBeenCalled();
+  });
+
+  it("passes the stored and preferred translation languages to the transcript", async () => {
+    mocks.getMeeting.mockResolvedValue(
+      meeting({ translationLanguage: "zh-CN" }),
+    );
+    mocks.getTeamConfiguration.mockResolvedValue({
+      name: "Example Capital",
+      shareAudience: null,
+      translationLanguage: "en",
+    });
+
+    const html = renderToStaticMarkup(
+      await MeetingPage({
+        params: Promise.resolve({ meetingId: "meeting_language" }),
+      }),
+    );
+
+    expect(html).toContain("languages:zh-CN:en");
   });
 
   it("offers uploads for scheduled in person meetings", async () => {
@@ -195,6 +233,7 @@ function meeting(overrides: Record<string, unknown> = {}) {
     title: "Weekly meeting",
     transcriptJobStatus: "failed",
     translationSummary: { hasTranslations: false, status: "not_started", totalSegments: 1, translatedSegments: 0 },
+    translationLanguage: "zh-CN",
     visualAssets: [{ id: "img", capturedAt: null, timestampMs: 0, url: "/img" }],
     ...overrides,
   };

@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -69,13 +70,22 @@ export const jobStatus = pgEnum("job_status", [
 export const teams = pgTable("teams", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
+  translationLanguage: text("translation_language")
+    .$type<"zh-CN" | "en">()
+    .notNull()
+    .default("zh-CN"),
   shareAudienceName: text("share_audience_name"),
   shareAudienceEmails: jsonb("share_audience_emails")
     .$type<string[]>()
     .notNull()
     .default(sql`'[]'::jsonb`),
   ...timestamps,
-});
+}, (table) => [
+  check(
+    "teams_translation_language_check",
+    sql`${table.translationLanguage} in ('zh-CN', 'en')`,
+  ),
+]);
 
 export const allowedDomains = pgTable(
   "allowed_domains",
@@ -312,6 +322,10 @@ export const meetings = pgTable(
     translationCompletedAt: timestamp("translation_completed_at", {
       withTimezone: true,
     }),
+    translationLanguage: text("translation_language")
+      .$type<"zh-CN" | "en">()
+      .notNull()
+      .default("zh-CN"),
     ...timestamps,
   },
   (table) => [
@@ -328,6 +342,10 @@ export const meetings = pgTable(
     index("meetings_active_status_index")
       .on(table.status)
       .where(sql`${table.status} in ('recording', 'processing')`),
+    check(
+      "meetings_translation_language_check",
+      sql`${table.translationLanguage} in ('zh-CN', 'en')`,
+    ),
   ],
 );
 

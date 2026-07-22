@@ -59,6 +59,10 @@ import {
   type MeetingTranslationSummary,
 } from "@/lib/meeting-translation-status";
 import {
+  normalizeTranslationLanguage,
+  type TranslationLanguage,
+} from "@/lib/meeting-translation-language";
+import {
   formatNameFromEmail,
   getUniqueFullNameByFirstName,
   getUniqueFullNameForFirstNameAlias,
@@ -113,6 +117,7 @@ export type MeetingTranscript = {
   endedAt: string | null;
   durationMs: number | null;
   transcriptJobStatus: TranscriptJobStatus | null;
+  translationLanguage: TranslationLanguage;
   translationSummary: MeetingTranslationSummary;
   audioUrl: string | null;
   visualAssets: MeetingVisualAsset[];
@@ -1096,6 +1101,7 @@ export async function getMeetingTranscriptForWorkspace(
       calendarAttendeeEmails: calendarEvents.attendeeEmails,
       recallRecordingId: meetings.recallRecordingId,
       translationErrorMessage: meetings.translationErrorMessage,
+      translationLanguage: meetings.translationLanguage,
       translationStatus: meetings.translationStatus,
       canManage: getMeetingManagerCondition(workspace),
     })
@@ -1215,6 +1221,9 @@ export async function getMeetingTranscriptForWorkspace(
     endedAt: meeting.endedAt?.toISOString() ?? null,
     durationMs: getTranscriptDurationMs(meeting.transcriptDurationMs) ?? null,
     transcriptJobStatus: meeting.transcriptJobStatus,
+    translationLanguage: normalizeTranslationLanguage(
+      meeting.translationLanguage,
+    ),
     translationSummary: buildMeetingTranslationSummary({
       errorMessage: meeting.translationErrorMessage,
       status: meeting.translationStatus,

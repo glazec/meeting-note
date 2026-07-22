@@ -143,9 +143,14 @@ export default async function MeetingPage({
                     translationStatus: meeting.translationSummary.status,
                   })}
                   meetingId={canManage ? meetingId : null}
+                  preferredTranslationLanguage={
+                    teamConfiguration?.translationLanguage ??
+                    meeting.translationLanguage
+                  }
                   segments={meeting.segments}
                   speakerAliases={meeting.speakerAliases}
                   speakerSuggestions={meeting.speakerSuggestions}
+                  translationLanguage={meeting.translationLanguage}
                   translationSummary={meeting.translationSummary}
                   visualAssets={meeting.visualAssets}
                 />

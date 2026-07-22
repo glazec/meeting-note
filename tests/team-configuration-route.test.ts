@@ -27,6 +27,7 @@ function configurationRequest() {
   form.set("teamName", "Example Capital");
   form.set("shareAudienceName", "Investment committee");
   form.set("shareAudienceEmails", "partner@example.com");
+  form.set("translationLanguage", "en");
 
   return new Request("https://app.example.com/settings/team", {
     body: form,
@@ -75,6 +76,7 @@ describe("POST /api/team/configuration", () => {
       shareAudienceEmails: "partner@example.com",
       shareAudienceName: "Investment committee",
       teamId: "team_123",
+      translationLanguage: "en",
     });
   });
 });

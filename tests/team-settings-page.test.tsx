@@ -155,6 +155,7 @@ describe("TeamSettingsPage", () => {
         emails: ["partner@example.com", "principal@example.com"],
         name: "Investment committee",
       },
+      translationLanguage: "en",
     });
 
     const { default: TeamSettingsPage } = await import(
@@ -163,9 +164,11 @@ describe("TeamSettingsPage", () => {
     const html = renderToStaticMarkup(await TeamSettingsPage());
 
     expect(html).toContain("Transcription vocabulary");
-    expect(html).toContain("Workspace identity and sharing");
+    expect(html).toContain("Workspace defaults");
     expect(html).toContain("Example Capital");
     expect(html).toContain("Investment committee");
+    expect(html).toContain("Translations");
+    expect(html).toContain("English");
     expect(html).toContain("2 members");
     expect(html).toContain("TCG platform");
     expect(html).toContain("Meeting capture");
@@ -210,7 +213,7 @@ describe("TeamSettingsPage", () => {
       hasWorkspaceMeetings: true,
       isSharedOnly: false,
     });
-    canManageTeamSettings.mockResolvedValue(false);
+    canManageTeamSettings.mockResolvedValue(true);
     listTeamVocabularyTerms.mockResolvedValue([]);
     listWorkspaceMembers.mockResolvedValue([]);
     getMeetingBotProfile.mockResolvedValue({
@@ -220,6 +223,7 @@ describe("TeamSettingsPage", () => {
     getTeamConfiguration.mockResolvedValue({
       name: "Example Capital",
       shareAudience: null,
+      translationLanguage: "zh-CN",
     });
     getDefaultMeetingBotAvatarJpegBase64.mockReturnValue("default-avatar");
 
@@ -230,5 +234,8 @@ describe("TeamSettingsPage", () => {
 
     expect(html).toContain("Default avatar");
     expect(html).toContain("data:image/jpeg;base64,default-avatar");
+    expect(html).toContain("Translate transcripts to");
+    expect(html).toContain("Simplified Chinese");
+    expect(html).toContain('name="translationLanguage"');
   });
 });
