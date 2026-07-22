@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
@@ -62,7 +62,8 @@ type SkipTranscriptPersistence = {
   reason:
     | "missing_transcript_job_id"
     | "missing_meeting_id"
-    | "missing_transcript_text";
+    | "missing_transcript_text"
+    | "superseded_transcript_job";
 };
 
 type TranscriptPersistence =
@@ -179,6 +180,15 @@ export async function applyElevenLabsTranscriptEvent(
     "transcriptJobId",
     "transcript_job_id",
   );
+
+  if (
+    meetingId &&
+    transcriptJobId &&
+    !(await isLatestTranscriptJob(meetingId, transcriptJobId))
+  ) {
+    return { action: "skip", reason: "superseded_transcript_job" } as const;
+  }
+
   let participantTimeline: ParticipantTimelineEntry[] = [];
   let entityContext: EntityExtractionContext = {};
   let localRecorderAttribution: LocalRecorderAttributionContext | null = null;
@@ -293,6 +303,18 @@ export async function applyElevenLabsTranscriptEvent(
     .where(eq(meetings.id, persistence.meetingId));
 
   return persistence;
+}
+
+async function isLatestTranscriptJob(meetingId: string, transcriptJobId: string) {
+  const result = await db.execute<{ id: string }>(sql`
+    select id
+    from transcript_jobs
+    where meeting_id = ${meetingId}::uuid
+    order by created_at desc, id desc
+    limit 1
+  `);
+
+  return result.rows[0]?.id === transcriptJobId;
 }
 
 function getMetadataString(

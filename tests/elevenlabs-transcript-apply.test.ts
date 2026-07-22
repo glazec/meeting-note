@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { select, update } = vi.hoisted(() => ({
+const { execute, select, update } = vi.hoisted(() => ({
+  execute: vi.fn(),
   select: vi.fn(),
   update: vi.fn(),
 }));
 
 vi.mock("@/db/client", () => ({
   db: {
+    execute,
     select,
     update,
   },
@@ -23,11 +25,15 @@ vi.mock("@/lib/vendors/twenty", () => ({
 describe("applyElevenLabsTranscriptEvent", () => {
   afterEach(() => {
     select.mockReset();
+    execute.mockReset();
     update.mockReset();
     vi.resetModules();
   });
 
   it("marks the transcript job and meeting failed when ElevenLabs returns no transcript text", async () => {
+    execute.mockResolvedValue({
+      rows: [{ id: "22222222-2222-4222-8222-222222222222" }],
+    });
     const limit = vi.fn().mockResolvedValue([
       {
         attendeeEmails: [],
@@ -83,5 +89,35 @@ describe("applyElevenLabsTranscriptEvent", () => {
       status: "failed",
       updatedAt: expect.any(Date),
     });
+  });
+
+  it("ignores a delayed event for a superseded transcript job", async () => {
+    execute.mockResolvedValue({
+      rows: [{ id: "33333333-3333-4333-8333-333333333333" }],
+    });
+    const { applyElevenLabsTranscriptEvent } = await import(
+      "@/lib/elevenlabs-transcripts"
+    );
+
+    await expect(
+      applyElevenLabsTranscriptEvent({
+        eventType: "speech_to_text_transcription",
+        type: "speech_to_text_transcription",
+        requestId: "req_old",
+        transcriptId: null,
+        status: "completed",
+        transcriptionText: "Old transcript",
+        transcriptionWords: [],
+        metadata: {
+          meetingId: "11111111-1111-4111-8111-111111111111",
+          transcriptJobId: "22222222-2222-4222-8222-222222222222",
+        },
+      }),
+    ).resolves.toEqual({
+      action: "skip",
+      reason: "superseded_transcript_job",
+    });
+    expect(select).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
   });
 });
