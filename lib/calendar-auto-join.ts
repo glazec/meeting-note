@@ -36,6 +36,7 @@ type CalendarConnection = {
   userId: string;
   autoJoinEnabled: boolean;
   workspaceDomain?: string | null;
+  workspaceName?: string | null;
 };
 
 type SyncedCalendarAttendee = {
@@ -86,6 +87,8 @@ type RecallBotResponse = {
   }>;
 };
 
+type MeetingPlatform = typeof meetings.$inferSelect.platform;
+
 type ExistingMeeting = {
   id: string;
   ownerUserId: string;
@@ -93,9 +96,12 @@ type ExistingMeeting = {
   teamMeetingKey?: string | null;
   title: string;
   titleSource: string | null;
+  platform: MeetingPlatform;
   recallBotId: string | null;
+  recallRecordingId: string | null;
   meetingUrl: string | null;
   startedAt: Date | null;
+  endedAt: Date | null;
   status: string;
 };
 
@@ -124,6 +130,7 @@ export function findCalendarMeetingUrl(event: SyncedCalendarEvent) {
 
 export async function autoJoinCalendarEvent(input: AutoJoinInput) {
   const attendeeEmails = getCalendarAttendeeEmails(input.event);
+  const canonicalAttendeeEmails = [...attendeeEmails].sort();
   const declinedByExternalAttendees =
     isDeclinedByAllExternalAttendees(input);
   const meetingUrl = input.event.isDeleted
@@ -133,9 +140,10 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
     : findCalendarMeetingUrl(input.event);
   const platform = meetingUrl ? detectMeetingPlatform(meetingUrl) : null;
   const title = normalizeEventTitle(
-    { ...input.event, attendeeEmails },
+    { ...input.event, attendeeEmails: canonicalAttendeeEmails },
     platform,
     input.connection.workspaceDomain,
+    input.connection.workspaceName,
   );
   const startsAt = parseEventDate(input.event.startsAt);
   const endsAt = input.event.endsAt ? parseEventDate(input.event.endsAt) : null;
@@ -155,7 +163,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
             location,
           })
       : null;
-  const [calendarEvent] = await db
+  const [persistedCalendarEvent] = await db
     .insert(calendarEvents)
     .values({
       teamId: input.connection.teamId,
@@ -168,7 +176,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
       description,
       startsAt,
       endsAt,
-      attendeeEmails: normalizeAttendeeEmails(attendeeEmails),
+      attendeeEmails: canonicalAttendeeEmails,
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
@@ -183,14 +191,45 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
         description,
         startsAt,
         endsAt,
-        attendeeEmails: normalizeAttendeeEmails(attendeeEmails),
+        attendeeEmails: canonicalAttendeeEmails,
         updatedAt: new Date(),
       },
+      setWhere: sql`(
+        ${calendarEvents.title},
+        ${calendarEvents.meetingUrl},
+        ${calendarEvents.location},
+        ${calendarEvents.description},
+        ${calendarEvents.startsAt},
+        ${calendarEvents.endsAt},
+        ${calendarEvents.attendeeEmails}
+      ) is distinct from (
+        excluded.title,
+        excluded.meeting_url,
+        excluded.location,
+        excluded.description,
+        excluded.starts_at,
+        excluded.ends_at,
+        excluded.attendee_emails
+      ) or ${calendarEvents.teamMeetingKey} is distinct from coalesce(
+        excluded.team_meeting_key,
+        ${calendarEvents.teamMeetingKey}
+      )`,
     })
     .returning({
       id: calendarEvents.id,
       teamMeetingKey: calendarEvents.teamMeetingKey,
     });
+  const calendarEventChanged = Boolean(persistedCalendarEvent);
+  const calendarEvent =
+    persistedCalendarEvent ??
+    (await findCalendarEvent({
+      connectionId: input.connection.id,
+      externalEventId: input.event.externalEventId,
+    }));
+
+  if (!calendarEvent) {
+    throw new Error("Calendar event persistence failed");
+  }
   const activeTeamMeetingKey =
     teamMeetingKey ?? calendarEvent.teamMeetingKey ?? null;
 
@@ -212,7 +251,32 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
   const isPastRepairEvent =
     input.repairMode && isPastCalendarEvent({ startsAt, endsAt });
 
-  if (existingMeeting) {
+  if (
+    existingMeeting &&
+    !calendarEventChanged &&
+    !needsUnchangedCalendarEventRepair({
+      calendarEventId: calendarEvent.id,
+      event: input.event,
+      existingMeeting,
+      forceBotConfigRefresh: input.forceBotConfigRefresh,
+      meetingUrl,
+      platform,
+      startsAt,
+      endsAt,
+      teamMeetingKey: activeTeamMeetingKey,
+      title,
+    })
+  ) {
+    return {
+      action: "skipped" as const,
+      calendarEventId: calendarEvent.id,
+      meetingId: existingMeeting.id,
+      meetingUrl: meetingUrl ?? undefined,
+      reason: "already_scheduled" as const,
+    };
+  }
+
+  if (existingMeeting && calendarEventChanged) {
     await syncMeetingParticipantAccess({
       attendeeEmails,
       meetingId: existingMeeting.id,
@@ -286,7 +350,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
       };
     }
 
-    if (existingMeeting?.recallBotId && existingMeeting.status === "scheduled") {
+    if (existingMeeting?.status === "scheduled") {
       if (
         await hasOtherActiveCalendarEventForTeamMeeting({
           teamId: input.connection.teamId,
@@ -330,7 +394,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
   }
 
   if (!platform) {
-    if (existingMeeting?.recallBotId && existingMeeting.status === "scheduled") {
+    if (existingMeeting?.status === "scheduled") {
       if (
         await hasOtherActiveCalendarEventForTeamMeeting({
           teamId: input.connection.teamId,
@@ -473,9 +537,9 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
     }
   }
 
-  if (meeting && "recallBotId" in meeting && meeting.recallBotId) {
+  if (existingMeeting?.recallBotId) {
     return syncExistingCalendarMeeting({
-      meeting,
+      meeting: existingMeeting,
       event: input.event,
       calendarEvent,
       title,
@@ -509,7 +573,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
       ownerUserId: meeting.ownerUserId,
       teamId: input.connection.teamId,
       title: getCalendarMeetingTitle(
-        "titleSource" in meeting ? meeting : null,
+        existingMeeting,
         title,
       ),
       workspaceDomain: input.connection.workspaceDomain,
@@ -548,7 +612,7 @@ export async function autoJoinCalendarEvent(input: AutoJoinInput) {
           title,
         ),
         titleSource:
-          "titleSource" in meeting && meeting.titleSource === "manual"
+          existingMeeting?.titleSource === "manual"
             ? "manual"
             : "calendar",
         platform,
@@ -625,28 +689,50 @@ async function syncLocationCalendarMeeting(input: {
           teamMeetingKey: meetings.teamMeetingKey,
           title: meetings.title,
           titleSource: meetings.titleSource,
+          platform: meetings.platform,
           recallBotId: meetings.recallBotId,
+          recallRecordingId: meetings.recallRecordingId,
           meetingUrl: meetings.meetingUrl,
           startedAt: meetings.startedAt,
+          endedAt: meetings.endedAt,
           status: meetings.status,
         })
     )[0];
   } else {
-    await db
-      .update(meetings)
-      .set({
+    if (
+      hasCalendarMeetingRecordChange(meeting, {
         calendarEventId: input.calendarEvent.id,
+        endedAt: input.endsAt,
+        meetingUrl: null,
+        platform: "in_person",
+        recallBotId: meeting.recallBotId,
+        startsAt: input.startsAt,
         teamMeetingKey: input.teamMeetingKey,
         title,
         titleSource,
-        platform: "in_person",
-        status: "scheduled",
-        meetingUrl: null,
-        startedAt: input.startsAt,
-        endedAt: input.endsAt,
-        updatedAt: new Date(),
-      })
-      .where(eq(meetings.id, meeting.id));
+      }) ||
+      meeting.status !== "scheduled"
+    ) {
+      await db
+        .update(meetings)
+        .set({
+          calendarEventId: input.calendarEvent.id,
+          teamMeetingKey: input.teamMeetingKey,
+          title,
+          titleSource,
+          platform: "in_person",
+          status: "scheduled",
+          meetingUrl: null,
+          startedAt: input.startsAt,
+          endedAt: input.endsAt,
+          updatedAt: new Date(),
+        })
+        .where(eq(meetings.id, meeting.id));
+    }
+  }
+
+  if (!meeting) {
+    throw new Error("Location meeting creation failed");
   }
 
   await syncMeetingParticipantAccess({
@@ -687,6 +773,19 @@ async function syncLocationCalendarMeeting(input: {
         status: "pending",
         updatedAt: new Date(),
       },
+      setWhere: sql`(
+        ${meetingReminders.scheduledFor},
+        ${meetingReminders.status},
+        ${meetingReminders.errorMessage},
+        ${meetingReminders.providerNotificationId},
+        ${meetingReminders.sentAt}
+      ) is distinct from (
+        excluded.scheduled_for,
+        'pending',
+        null,
+        null,
+        null
+      )`,
     });
 
   return {
@@ -779,18 +878,38 @@ async function syncExistingCalendarMeeting(input: {
       recallBotId = recallBotId ?? input.meeting.recallBotId;
     }
 
-    await updateMeetingFromCalendar({
-      meetingId: input.meeting.id,
-      title: getCalendarMeetingTitle(input.meeting, input.title),
-      titleSource: getCalendarMeetingTitleSource(input.meeting),
-      platform: input.platform,
-      meetingUrl: input.meetingUrl,
-      startsAt: input.startsAt,
-      endsAt: input.endsAt,
-      teamMeetingKey: input.teamMeetingKey,
-      recallBotId,
-      status: canRecoverCalendarMeeting ? "scheduled" : undefined,
-    });
+    const title = getCalendarMeetingTitle(input.meeting, input.title);
+    const titleSource = getCalendarMeetingTitleSource(input.meeting);
+
+    if (
+      canRecoverCalendarMeeting ||
+      hasCalendarMeetingRecordChange(input.meeting, {
+        calendarEventId: input.calendarEvent.id,
+        endedAt: input.endsAt,
+        meetingUrl: input.meetingUrl,
+        platform: input.platform,
+        recallBotId,
+        startsAt: input.startsAt,
+        teamMeetingKey: input.teamMeetingKey,
+        title,
+        titleSource,
+        clearRecallRecordingId: true,
+      })
+    ) {
+      await updateMeetingFromCalendar({
+        calendarEventId: input.calendarEvent.id,
+        meetingId: input.meeting.id,
+        title,
+        titleSource,
+        platform: input.platform,
+        meetingUrl: input.meetingUrl,
+        startsAt: input.startsAt,
+        endsAt: input.endsAt,
+        teamMeetingKey: input.teamMeetingKey,
+        recallBotId,
+        status: canRecoverCalendarMeeting ? "scheduled" : undefined,
+      });
+    }
   } catch (error) {
     await recordCalendarAutoJoinFailure({
       calendarEventId: input.calendarEvent.id,
@@ -805,6 +924,7 @@ async function syncExistingCalendarMeeting(input: {
     });
     if (canRecoverCalendarMeeting) {
       await updateMeetingFromCalendar({
+        calendarEventId: input.calendarEvent.id,
         meetingId: input.meeting.id,
         title: getCalendarMeetingTitle(input.meeting, input.title),
         titleSource: getCalendarMeetingTitleSource(input.meeting),
@@ -858,6 +978,7 @@ async function syncExistingCalendarMeeting(input: {
 }
 
 async function updateMeetingFromCalendar(input: {
+  calendarEventId: string;
   meetingId: string;
   title: string;
   titleSource: string;
@@ -870,6 +991,7 @@ async function updateMeetingFromCalendar(input: {
   status?: "scheduled";
 }) {
   const updates = {
+    calendarEventId: input.calendarEventId,
     title: input.title,
     titleSource: input.titleSource,
     platform: input.platform,
@@ -915,9 +1037,12 @@ async function findExistingMeeting(input: {
       teamMeetingKey: meetings.teamMeetingKey,
       title: meetings.title,
       titleSource: meetings.titleSource,
+      platform: meetings.platform,
       recallBotId: meetings.recallBotId,
+      recallRecordingId: meetings.recallRecordingId,
       meetingUrl: meetings.meetingUrl,
       startedAt: meetings.startedAt,
+      endedAt: meetings.endedAt,
       status: meetings.status,
     })
     .from(meetings)
@@ -938,6 +1063,27 @@ async function findExistingMeeting(input: {
     .limit(1);
 
   return existing[0] ?? null;
+}
+
+async function findCalendarEvent(input: {
+  connectionId: string;
+  externalEventId: string;
+}) {
+  const [event] = await db
+    .select({
+      id: calendarEvents.id,
+      teamMeetingKey: calendarEvents.teamMeetingKey,
+    })
+    .from(calendarEvents)
+    .where(
+      and(
+        eq(calendarEvents.connectionId, input.connectionId),
+        eq(calendarEvents.externalEventId, input.externalEventId),
+      ),
+    )
+    .limit(1);
+
+  return event ?? null;
 }
 
 async function hasOtherActiveCalendarEventForTeamMeeting(input: {
@@ -1326,8 +1472,12 @@ function hasConflictingRecallCalendarEventBot(
   event: SyncedCalendarEvent,
   deduplicationKey: string | null,
 ) {
-  return event.recallCalendarEventBots?.some(
-    (bot) => bot.deduplicationKey !== deduplicationKey,
+  return Boolean(
+    deduplicationKey &&
+      event.recallCalendarEventBots?.length &&
+      !event.recallCalendarEventBots.some(
+        (bot) => bot.deduplicationKey === deduplicationKey,
+      ),
   );
 }
 
@@ -1349,6 +1499,109 @@ function hasScheduledBotChange(
   return (
     meeting.meetingUrl !== next.meetingUrl ||
     meeting.startedAt?.getTime() !== next.startsAt.getTime()
+  );
+}
+
+function needsUnchangedCalendarEventRepair(input: {
+  calendarEventId: string;
+  event: SyncedCalendarEvent;
+  existingMeeting: ExistingMeeting;
+  forceBotConfigRefresh?: boolean;
+  meetingUrl: string | null;
+  platform: SupportedMeetingPlatform | null;
+  startsAt: Date;
+  endsAt: Date | null;
+  teamMeetingKey?: string | null;
+  title: string;
+}) {
+  if (input.forceBotConfigRefresh) {
+    return true;
+  }
+
+  if (input.meetingUrl && input.platform) {
+    if (
+      shouldRecoverCalendarMeeting({
+        meeting: input.existingMeeting,
+        meetingUrl: input.meetingUrl,
+        startsAt: input.startsAt,
+      })
+    ) {
+      return true;
+    }
+
+    if (
+      input.existingMeeting.status === "scheduled" &&
+      !input.existingMeeting.recallBotId
+    ) {
+      return true;
+    }
+
+    const deduplicationKey = getRecallCalendarEventBotDeduplicationKey({
+      event: input.event,
+      teamMeetingKey: input.teamMeetingKey,
+    });
+
+    if (
+      input.event.recallCalendarEventId &&
+      (input.existingMeeting.calendarEventId !== input.calendarEventId ||
+        isExistingBotOutsideRecallCalendarEvent(
+          input.event,
+          input.existingMeeting.recallBotId,
+        ) ||
+        hasConflictingRecallCalendarEventBot(
+          input.event,
+          deduplicationKey,
+        ))
+    ) {
+      return true;
+    }
+  }
+
+  if (input.existingMeeting.status !== "scheduled") {
+    return false;
+  }
+
+  return hasCalendarMeetingRecordChange(input.existingMeeting, {
+    calendarEventId: input.calendarEventId,
+    endedAt: input.endsAt,
+    meetingUrl: input.meetingUrl,
+    platform: input.platform ?? input.existingMeeting.platform,
+    recallBotId: input.existingMeeting.recallBotId,
+    startsAt: input.startsAt,
+    teamMeetingKey: input.teamMeetingKey,
+    title: getCalendarMeetingTitle(input.existingMeeting, input.title),
+    titleSource: getCalendarMeetingTitleSource(input.existingMeeting),
+  });
+}
+
+function hasCalendarMeetingRecordChange(
+  meeting: ExistingMeeting,
+  next: {
+    calendarEventId: string;
+    clearRecallRecordingId?: boolean;
+    endedAt: Date | null;
+    meetingUrl: string | null;
+    platform: MeetingPlatform;
+    recallBotId: string | null;
+    startsAt: Date;
+    teamMeetingKey?: string | null;
+    title: string;
+    titleSource: string;
+  },
+) {
+  return (
+    meeting.calendarEventId !== next.calendarEventId ||
+    meeting.teamMeetingKey !== (next.teamMeetingKey ?? null) ||
+    meeting.title !== next.title ||
+    meeting.titleSource !== next.titleSource ||
+    meeting.platform !== next.platform ||
+    meeting.meetingUrl !== next.meetingUrl ||
+    meeting.startedAt?.getTime() !== next.startsAt.getTime() ||
+    (meeting.endedAt?.getTime() ?? null) !==
+      (next.endedAt?.getTime() ?? null) ||
+    meeting.recallBotId !== next.recallBotId ||
+    (next.clearRecallRecordingId === true &&
+      meeting.recallRecordingId !== null)
   );
 }
 
@@ -1499,6 +1752,7 @@ function normalizeEventTitle(
   event: SyncedCalendarEvent,
   platform: SupportedMeetingPlatform | null,
   workspaceDomain?: string | null,
+  workspaceName?: string | null,
 ) {
   const title = event.title.trim();
   const attendeeDomains = (event.attendeeEmails ?? [])
@@ -1512,6 +1766,7 @@ function normalizeEventTitle(
       title || (platform === "zoom" ? "Zoom recording" : "Google Meet recording"),
     attendeeEmails: event.attendeeEmails ?? [],
     workspaceDomain: resolvedWorkspaceDomain,
+    workspaceName,
   });
 }
 

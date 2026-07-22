@@ -20,11 +20,47 @@ export async function applyMeetingShareRules(input: {
       set revoked_at = now(), updated_at = now()
       where source.meeting_id = ${input.meetingId}::uuid
         and source.source = 'share_policy'
-        and exists (
+        and source.revoked_at is null
+        and not exists (
           select 1
           from meeting_share_policies as policy
           where policy.id::text = source.source_id
+            and source.recipient_email = policy.recipient_email
+            and policy.team_id = ${input.teamId}::uuid
+            and policy.owner_user_id = ${input.ownerUserId}::uuid
             and policy.scope = 'related'
+            and policy.revoked_at is null
+            and not exists (
+              select 1
+              from meeting_access_exclusions as exclusion
+              where exclusion.meeting_id = ${input.meetingId}::uuid
+                and exclusion.recipient_email = policy.recipient_email
+            )
+            and (
+              exists (
+                select 1
+                from meeting_share_policy_keys as email_key
+                where email_key.policy_id = policy.id
+                  and email_key.match_key like 'participant:email:%'
+                  and email_key.match_key = any(${matchKeys}::text[])
+              )
+              or (
+                exists (
+                  select 1
+                  from meeting_share_policy_keys as title_key
+                  where title_key.policy_id = policy.id
+                    and title_key.match_key like 'title:%'
+                    and title_key.match_key = any(${matchKeys}::text[])
+                )
+                and exists (
+                  select 1
+                  from meeting_share_policy_keys as domain_key
+                  where domain_key.policy_id = policy.id
+                    and domain_key.match_key like 'participant:domain:%'
+                    and domain_key.match_key = any(${matchKeys}::text[])
+                )
+              )
+            )
         )
     `,
     txn`
@@ -84,6 +120,15 @@ export async function applyMeetingShareRules(input: {
           created_by_user_id = excluded.created_by_user_id,
           revoked_at = null,
           updated_at = now()
+      where (
+        meeting_access_sources.role,
+        meeting_access_sources.created_by_user_id,
+        meeting_access_sources.revoked_at
+      ) is distinct from (
+        excluded.role,
+        excluded.created_by_user_id,
+        null
+      )
     `,
     txn`
       insert into meeting_access (
@@ -114,6 +159,19 @@ export async function applyMeetingShareRules(input: {
           created_by_user_id = excluded.created_by_user_id,
           revoked_at = null,
           updated_at = now()
+      where (
+        meeting_access.role,
+        meeting_access.source,
+        meeting_access.source_id,
+        meeting_access.created_by_user_id,
+        meeting_access.revoked_at
+      ) is distinct from (
+        excluded.role,
+        'effective',
+        'materialized',
+        excluded.created_by_user_id,
+        null
+      )
     `,
     txn`
       insert into meeting_share_invites (
@@ -146,6 +204,21 @@ export async function applyMeetingShareRules(input: {
           accepted_at = null,
           revoked_at = null,
           updated_at = now()
+      where (
+        meeting_share_invites.role,
+        meeting_share_invites.created_by_user_id,
+        meeting_share_invites.source,
+        meeting_share_invites.source_id,
+        meeting_share_invites.accepted_at,
+        meeting_share_invites.revoked_at
+      ) is distinct from (
+        excluded.role,
+        excluded.created_by_user_id,
+        'effective',
+        'materialized',
+        null,
+        null
+      )
     `,
     txn`
       update meeting_access as access
@@ -153,6 +226,7 @@ export async function applyMeetingShareRules(input: {
       from users as app_user
       where access.meeting_id = ${input.meetingId}::uuid
         and access.user_id = app_user.id
+        and access.revoked_at is null
         and not exists (
           select 1
           from meeting_access_sources as source
@@ -165,6 +239,7 @@ export async function applyMeetingShareRules(input: {
       update meeting_share_invites as invite
       set revoked_at = now(), updated_at = now()
       where invite.meeting_id = ${input.meetingId}::uuid
+        and invite.revoked_at is null
         and not exists (
           select 1
           from meeting_access_sources as source

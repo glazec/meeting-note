@@ -44,6 +44,7 @@ describe("meeting access grants", () => {
     expect(execute).toHaveBeenCalledTimes(1);
     const query = new PgDialect().sqlToQuery(execute.mock.calls[0][0]).sql;
     expect(query).toContain("meeting_access_exclusions");
+    expect(query).toContain("is distinct from");
   });
 
   it("stores an email grant until the recipient signs in", async () => {
@@ -116,5 +117,8 @@ describe("meeting access grants", () => {
     expect(queries).toContain("insert into meeting_share_invites");
     expect(queries).toContain("update meeting_access as access");
     expect(queries).toContain("update meeting_share_invites as invite");
+    expect(queries).toContain("is distinct from");
+    expect(queries).toContain("access.revoked_at is null");
+    expect(queries).toContain("invite.revoked_at is null");
   });
 });

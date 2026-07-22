@@ -1,8 +1,8 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
-import { db } from "@/db/client";
-import { calendarConnections, users } from "@/db/schema";
+import { databaseSql, db } from "@/db/client";
+import { calendarConnections, teams, users } from "@/db/schema";
 import { normalizeEmailDomain } from "@/lib/access";
 import { autoJoinCalendarEvent, type SyncedCalendarEvent } from "@/lib/calendar-auto-join";
 import {
@@ -37,8 +37,10 @@ type RecallCalendarConnection = {
   userId: string;
   autoJoinEnabled: boolean;
   recallCalendarId?: string | null;
+  recallCalendarLastSyncedAt?: Date | null;
   recallCalendarStatus?: string | null;
   workspaceDomain?: string | null;
+  workspaceName?: string | null;
 };
 
 type RecallCalendarSummary = {
@@ -57,6 +59,7 @@ export class RecallCalendarConnectionError extends Error {
 
 const LEGACY_PRIMARY_CALENDAR_ID = "primary";
 const RECALL_CALENDAR_REPAIR_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+const RECALL_CALENDAR_CHANGE_OVERLAP_MS = 5 * 60 * 1000;
 
 export function normalizeRecallCalendarWebhook(payload: unknown) {
   const parsed = recallCalendarWebhookSchema.parse(payload);
@@ -129,6 +132,8 @@ export async function ensureRecallManagedCalendarConnectionForWorkspace(
       autoJoinEnabled: true,
       teamId: workspace.teamId,
       userId: workspace.userId,
+      workspaceDomain: workspace.domain,
+      workspaceName: workspace.teamName,
       recallCalendarStatus: calendar.status,
     };
   }
@@ -176,7 +181,11 @@ export async function ensureRecallManagedCalendarConnectionForWorkspace(
 
   await tagRecallCalendarForWorkspace(calendar, workspace);
 
-  return connection;
+  return {
+    ...connection,
+    workspaceDomain: workspace.domain,
+    workspaceName: workspace.teamName,
+  };
 }
 
 export async function processRecallCalendarWebhook(
@@ -212,15 +221,10 @@ export async function processRecallCalendarWebhook(
     count += 1;
   }
 
-  await db
-    .update(calendarConnections)
-    .set({
-      recallCalendarLastSyncedAt: event.lastUpdatedTs
-        ? new Date(event.lastUpdatedTs)
-        : new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(calendarConnections.recallCalendarId, event.calendarId));
+  await advanceRecallCalendarSyncCursor(
+    connection,
+    event.lastUpdatedTs ? new Date(event.lastUpdatedTs) : new Date(),
+  );
 
   return { action: "synced" as const, count };
 }
@@ -256,11 +260,16 @@ export async function syncRecallCalendarEventsForWorkspace(input: {
     userId: connection.userId,
     autoJoinEnabled: input.autoJoinEnabled,
     workspaceDomain: input.workspace.domain,
+    workspaceName: input.workspace.teamName,
   };
   const now = input.now ?? new Date();
-  const events = await listRecallCalendarEvents({
-    calendarId: connection.recallCalendarId,
-    startTimeGte: getRecallCalendarRepairStart(now).toISOString(),
+  const events = await listRecallCalendarEventsForSync({
+    connection: {
+      ...connection,
+      recallCalendarId: connection.recallCalendarId,
+    },
+    forceFullSync: input.forceBotConfigRefresh === true,
+    now,
   });
   let count = 0;
   let failedCount = 0;
@@ -293,13 +302,7 @@ export async function syncRecallCalendarEventsForWorkspace(input: {
     }
   }
 
-  await db
-    .update(calendarConnections)
-    .set({
-      recallCalendarLastSyncedAt: now,
-      updatedAt: new Date(),
-    })
-    .where(eq(calendarConnections.id, connection.id));
+  await advanceRecallCalendarSyncCursor(connection, now);
 
   return {
     connectionId: connection.id,
@@ -310,6 +313,143 @@ export async function syncRecallCalendarEventsForWorkspace(input: {
 
 function getRecallCalendarRepairStart(now: Date) {
   return new Date(now.getTime() - RECALL_CALENDAR_REPAIR_LOOKBACK_MS);
+}
+
+async function listRecallCalendarEventsForSync(input: {
+  connection: RecallCalendarConnection & { recallCalendarId: string };
+  forceFullSync: boolean;
+  now: Date;
+}) {
+  const repairStart = getRecallCalendarRepairStart(input.now).toISOString();
+  const lastSyncedAt = input.connection.recallCalendarLastSyncedAt;
+
+  if (input.forceFullSync || !lastSyncedAt) {
+    return listRecallCalendarEvents({
+      calendarId: input.connection.recallCalendarId,
+      startTimeGte: repairStart,
+    });
+  }
+
+  const changeStart = new Date(
+    Math.min(lastSyncedAt.getTime(), input.now.getTime()) -
+      RECALL_CALENDAR_CHANGE_OVERLAP_MS,
+  );
+  const changedEvents = await listRecallCalendarEvents({
+    calendarId: input.connection.recallCalendarId,
+    updatedAtGte: changeStart.toISOString(),
+  });
+  const repairExternalEventIds = await listRecallCalendarRepairEventIds({
+    connectionId: input.connection.id,
+    now: input.now,
+  });
+
+  if (repairExternalEventIds.size === 0) {
+    return changedEvents;
+  }
+
+  const repairCandidates = await listRecallCalendarEvents({
+    calendarId: input.connection.recallCalendarId,
+    startTimeGte: repairStart,
+  });
+  const eventsByExternalId = new Map<string, unknown>();
+
+  for (const event of repairCandidates) {
+    const normalized = normalizeRecallCalendarEvent(event);
+
+    if (normalized && repairExternalEventIds.has(normalized.externalEventId)) {
+      eventsByExternalId.set(normalized.externalEventId, event);
+    }
+  }
+
+  for (const event of changedEvents) {
+    const normalized = normalizeRecallCalendarEvent(event);
+
+    if (normalized) {
+      eventsByExternalId.set(normalized.externalEventId, event);
+    }
+  }
+
+  return Array.from(eventsByExternalId.values());
+}
+
+async function listRecallCalendarRepairEventIds(input: {
+  connectionId: string;
+  now: Date;
+}) {
+  const rows = await databaseSql`
+    select distinct event.external_event_id
+    from calendar_events as event
+    join meetings as meeting
+      on meeting.team_id = event.team_id
+      and (
+        meeting.calendar_event_id = event.id
+        or (
+          event.team_meeting_key is not null
+          and meeting.team_meeting_key = event.team_meeting_key
+        )
+      )
+    where event.connection_id = ${input.connectionId}::uuid
+      and event.starts_at >= ${getRecallCalendarRepairStart(input.now)}
+      and (
+        (
+          meeting.status = 'scheduled'
+          and meeting.recall_bot_id is not null
+          and (
+            meeting.meeting_url is distinct from event.meeting_url
+            or meeting.started_at is distinct from event.starts_at
+            or meeting.ended_at is distinct from event.ends_at
+          )
+        )
+        or (
+          (
+            event.meeting_url ~* '^https?://meet[.]google[.]com/'
+            or event.meeting_url ~* '^https?://([a-z0-9-]+[.])*zoom[.]us/(j|my)/'
+          )
+          and (
+            (meeting.status = 'failed' and event.starts_at > ${input.now})
+            or (
+              meeting.status = 'scheduled'
+              and meeting.recall_bot_id is null
+            )
+          )
+        )
+      )
+  `;
+
+  return new Set(
+    (rows ?? []).flatMap((row) =>
+      typeof row.external_event_id === "string"
+        ? [row.external_event_id]
+        : [],
+    ),
+  );
+}
+
+async function advanceRecallCalendarSyncCursor(
+  connection: RecallCalendarConnection,
+  cursor: Date,
+) {
+  const currentCursor = connection.recallCalendarLastSyncedAt;
+
+  if (currentCursor && currentCursor.getTime() >= cursor.getTime()) {
+    return;
+  }
+
+  await db
+    .update(calendarConnections)
+    .set({
+      recallCalendarLastSyncedAt: cursor,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(calendarConnections.id, connection.id),
+        or(
+          isNull(calendarConnections.recallCalendarLastSyncedAt),
+          lt(calendarConnections.recallCalendarLastSyncedAt, cursor),
+        ),
+      ),
+    );
 }
 
 function shouldSyncRepairCalendarEvent(event: SyncedCalendarEvent, now: Date) {
@@ -399,8 +539,15 @@ async function findConnectionByRecallCalendarId(calendarId: string) {
       teamId: calendarConnections.teamId,
       userId: calendarConnections.userId,
       userEmail: users.email,
+      teamName: sql<string>`(
+        select ${teams.name}
+        from ${teams}
+        where ${teams.id} = ${calendarConnections.teamId}
+      )`,
       autoJoinEnabled: calendarConnections.autoJoinEnabled,
       recallCalendarId: calendarConnections.recallCalendarId,
+      recallCalendarLastSyncedAt:
+        calendarConnections.recallCalendarLastSyncedAt,
       recallCalendarStatus: calendarConnections.recallCalendarStatus,
     })
     .from(calendarConnections)
@@ -415,8 +562,10 @@ async function findConnectionByRecallCalendarId(calendarId: string) {
         userId: connection.userId,
         autoJoinEnabled: connection.autoJoinEnabled,
         recallCalendarId: connection.recallCalendarId,
+        recallCalendarLastSyncedAt: connection.recallCalendarLastSyncedAt,
         recallCalendarStatus: connection.recallCalendarStatus,
         workspaceDomain: normalizeEmailDomain(connection.userEmail),
+        workspaceName: connection.teamName,
       }
     : null;
 }
@@ -429,6 +578,8 @@ async function findConnectionByWorkspace(workspace: WorkspaceContext) {
       userId: calendarConnections.userId,
       autoJoinEnabled: calendarConnections.autoJoinEnabled,
       recallCalendarId: calendarConnections.recallCalendarId,
+      recallCalendarLastSyncedAt:
+        calendarConnections.recallCalendarLastSyncedAt,
       recallCalendarStatus: calendarConnections.recallCalendarStatus,
     })
     .from(calendarConnections)
@@ -445,7 +596,13 @@ async function findConnectionByWorkspace(workspace: WorkspaceContext) {
     connections.find((candidate) => candidate.recallCalendarId) ??
     connections[0];
 
-  return (connection ?? null) as RecallCalendarConnection | null;
+  return connection
+    ? {
+        ...connection,
+        workspaceDomain: workspace.domain,
+        workspaceName: workspace.teamName,
+      }
+    : null;
 }
 
 function normalizeRecallCalendarEvent(event: unknown): SyncedCalendarEvent | null {

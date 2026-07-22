@@ -1,7 +1,7 @@
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { calendarConnections, users } from "@/db/schema";
+import { calendarConnections, teams, users } from "@/db/schema";
 import { normalizeEmailDomain } from "@/lib/access";
 import { syncRecallCalendarEventsForWorkspace } from "@/lib/recall-calendar";
 
@@ -39,6 +39,7 @@ type ConnectedCalendarConnection = {
   teamId: string;
   userId: string;
   userEmail: string;
+  teamName: string;
   autoJoinEnabled: boolean;
 };
 
@@ -57,6 +58,7 @@ export async function syncRecallCalendarEventsForAllConnectedUsers(
           teamId: connection.teamId,
           userId: connection.userId,
           domain: normalizeEmailDomain(connection.userEmail),
+          ...(connection.teamName ? { teamName: connection.teamName } : {}),
         },
         autoJoinEnabled: connection.autoJoinEnabled,
         now: input.now,
@@ -96,6 +98,11 @@ async function listConnectedRecallCalendarConnections(): Promise<
       teamId: calendarConnections.teamId,
       userId: calendarConnections.userId,
       userEmail: users.email,
+      teamName: sql<string>`(
+        select ${teams.name}
+        from ${teams}
+        where ${teams.id} = ${calendarConnections.teamId}
+      )`,
       autoJoinEnabled: calendarConnections.autoJoinEnabled,
     })
     .from(calendarConnections)

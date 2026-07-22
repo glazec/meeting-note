@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const {
   autoJoinCalendarEvent,
+  databaseSql,
   insert,
   listRecallCalendarEvents,
   listRecallCalendars,
@@ -10,7 +11,8 @@ const {
   update,
   updateRecallCalendar,
 } = vi.hoisted(() => ({
-    autoJoinCalendarEvent: vi.fn(),
+  autoJoinCalendarEvent: vi.fn(),
+    databaseSql: vi.fn(),
     insert: vi.fn(),
     listRecallCalendarEvents: vi.fn(),
     listRecallCalendars: vi.fn(),
@@ -21,6 +23,7 @@ const {
   }));
 
 vi.mock("@/db/client", () => ({
+  databaseSql,
   db: {
     insert,
     select,
@@ -42,6 +45,7 @@ vi.mock("@/lib/vendors/recall", () => ({
 describe("processRecallCalendarWebhook", () => {
   afterEach(() => {
     autoJoinCalendarEvent.mockReset();
+    databaseSql.mockReset();
     insert.mockReset();
     listRecallCalendarEvents.mockReset();
     listRecallCalendars.mockReset();
@@ -50,6 +54,30 @@ describe("processRecallCalendarWebhook", () => {
     update.mockReset();
     updateRecallCalendar.mockReset();
     vi.resetModules();
+  });
+
+  it("normalizes update and incremental sync webhooks", async () => {
+    const { normalizeRecallCalendarWebhook } = await import("@/lib/recall-calendar");
+
+    expect(normalizeRecallCalendarWebhook({
+      event: "calendar.update",
+      data: { calendar_id: "calendar_1" },
+    })).toEqual({
+      eventType: "calendar.update",
+      calendarId: "calendar_1",
+      lastUpdatedTs: null,
+    });
+    expect(normalizeRecallCalendarWebhook({
+      event: "calendar.sync_events",
+      data: {
+        calendar_id: "calendar_1",
+        last_updated_ts: "2026-07-20T12:00:00.000Z",
+      },
+    })).toEqual({
+      eventType: "calendar.sync_events",
+      calendarId: "calendar_1",
+      lastUpdatedTs: "2026-07-20T12:00:00.000Z",
+    });
   });
 
   it("syncs changed Recall calendar events into the existing auto join worker", async () => {
@@ -144,6 +172,45 @@ describe("processRecallCalendarWebhook", () => {
     });
   });
 
+  it("does not move the sync cursor backward for an out-of-order webhook", async () => {
+    select.mockReturnValue({
+      from: () => ({
+        innerJoin: () => ({
+          where: () => ({
+            limit: vi.fn().mockResolvedValue([
+              {
+                id: "33333333-3333-4333-8333-333333333333",
+                teamId: "22222222-2222-4222-8222-222222222222",
+                userId: "11111111-1111-4111-8111-111111111111",
+                userEmail: "test@iosg.vc",
+                autoJoinEnabled: true,
+                recallCalendarId: "44444444-4444-4444-8444-444444444444",
+                recallCalendarLastSyncedAt: new Date(
+                  "2026-06-30T12:00:00.000Z",
+                ),
+              },
+            ]),
+          }),
+        }),
+      }),
+    });
+    listRecallCalendarEvents.mockResolvedValue([]);
+
+    const { processRecallCalendarWebhook } = await import("@/lib/recall-calendar");
+
+    await processRecallCalendarWebhook({
+      eventType: "calendar.sync_events",
+      calendarId: "44444444-4444-4444-8444-444444444444",
+      lastUpdatedTs: "2026-06-30T11:00:00.000Z",
+    });
+
+    expect(listRecallCalendarEvents).toHaveBeenCalledWith({
+      calendarId: "44444444-4444-4444-8444-444444444444",
+      updatedAtGte: "2026-06-30T11:00:00.000Z",
+    });
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it("pulls upcoming Recall calendar events for a connected workspace", async () => {
     select.mockReturnValue({
       from: () => ({
@@ -228,6 +295,134 @@ describe("processRecallCalendarWebhook", () => {
       forceBotConfigRefresh: true,
       repairMode: true,
     });
+  });
+
+  it("uses the change cursor for an already synchronized calendar", async () => {
+    select.mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: vi.fn().mockResolvedValue([
+            {
+              id: "33333333-3333-4333-8333-333333333333",
+              teamId: "22222222-2222-4222-8222-222222222222",
+              userId: "11111111-1111-4111-8111-111111111111",
+              autoJoinEnabled: true,
+              recallCalendarId: "44444444-4444-4444-8444-444444444444",
+              recallCalendarLastSyncedAt: new Date("2026-06-27T03:00:00.000Z"),
+            },
+          ]),
+        }),
+      }),
+    });
+    update.mockReturnValue({
+      set: () => ({ where: vi.fn().mockResolvedValue(undefined) }),
+    });
+    databaseSql.mockResolvedValue([]);
+    listRecallCalendarEvents.mockResolvedValue([]);
+
+    const { syncRecallCalendarEventsForWorkspace } = await import(
+      "@/lib/recall-calendar"
+    );
+
+    await syncRecallCalendarEventsForWorkspace({
+      workspace: {
+        userId: "11111111-1111-4111-8111-111111111111",
+        teamId: "22222222-2222-4222-8222-222222222222",
+        domain: "example.com",
+      },
+      autoJoinEnabled: true,
+      now: new Date("2026-06-27T04:00:00.000Z"),
+    });
+
+    expect(listRecallCalendarEvents).toHaveBeenCalledTimes(1);
+    expect(listRecallCalendarEvents).toHaveBeenCalledWith({
+      calendarId: "44444444-4444-4444-8444-444444444444",
+      updatedAtGte: "2026-06-27T02:55:00.000Z",
+    });
+    const repairSql = databaseSql.mock.calls[0]?.[0].join(" ") ?? "";
+
+    expect(repairSql).not.toContain("meeting.id is null");
+    expect(repairSql).toContain(
+      "meeting.meeting_url is distinct from event.meeting_url",
+    );
+    expect(repairSql).toContain(
+      "meeting.started_at is distinct from event.starts_at",
+    );
+    expect(autoJoinCalendarEvent).not.toHaveBeenCalled();
+  });
+
+  it("loads a full repair window only for local meetings needing repair", async () => {
+    select.mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: vi.fn().mockResolvedValue([
+            {
+              id: "33333333-3333-4333-8333-333333333333",
+              teamId: "22222222-2222-4222-8222-222222222222",
+              userId: "11111111-1111-4111-8111-111111111111",
+              autoJoinEnabled: true,
+              recallCalendarId: "44444444-4444-4444-8444-444444444444",
+              recallCalendarLastSyncedAt: new Date("2026-06-27T03:00:00.000Z"),
+            },
+          ]),
+        }),
+      }),
+    });
+    update.mockReturnValue({
+      set: () => ({ where: vi.fn().mockResolvedValue(undefined) }),
+    });
+    databaseSql.mockResolvedValue([{ external_event_id: "repair_event" }]);
+    listRecallCalendarEvents
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: "55555555-5555-4555-8555-555555555555",
+          platform_id: "repair_event",
+          start_time: "2026-06-30T12:00:00.000Z",
+          meeting_url: "https://meet.google.com/abc-defg-hij",
+          is_deleted: false,
+          raw: { summary: "Repair me" },
+        },
+        {
+          id: "66666666-6666-4666-8666-666666666666",
+          platform_id: "healthy_event",
+          start_time: "2026-06-30T13:00:00.000Z",
+          meeting_url: "https://meet.google.com/xyz-abcd-efg",
+          is_deleted: false,
+          raw: { summary: "Healthy" },
+        },
+      ]);
+    autoJoinCalendarEvent.mockResolvedValue({ action: "scheduled" });
+
+    const { syncRecallCalendarEventsForWorkspace } = await import(
+      "@/lib/recall-calendar"
+    );
+
+    await syncRecallCalendarEventsForWorkspace({
+      workspace: {
+        userId: "11111111-1111-4111-8111-111111111111",
+        teamId: "22222222-2222-4222-8222-222222222222",
+        domain: "example.com",
+      },
+      autoJoinEnabled: true,
+      now: new Date("2026-06-27T04:00:00.000Z"),
+    });
+
+    expect(listRecallCalendarEvents).toHaveBeenNthCalledWith(1, {
+      calendarId: "44444444-4444-4444-8444-444444444444",
+      updatedAtGte: "2026-06-27T02:55:00.000Z",
+    });
+    expect(listRecallCalendarEvents).toHaveBeenNthCalledWith(2, {
+      calendarId: "44444444-4444-4444-8444-444444444444",
+      startTimeGte: "2026-06-26T04:00:00.000Z",
+    });
+    expect(autoJoinCalendarEvent).toHaveBeenCalledTimes(1);
+    expect(autoJoinCalendarEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({ externalEventId: "repair_event" }),
+        repairMode: true,
+      }),
+    );
   });
 
   it("keeps repair sync healthy when one Recall event bot update fails", async () => {

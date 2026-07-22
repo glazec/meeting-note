@@ -43,7 +43,6 @@ vi.mock("@/db/client", () => ({
 }));
 
 vi.mock("@/lib/vendors/recall", () => ({
-  DEFAULT_RECALL_BOT_NAME: "IOSG Old Friend",
   deleteRecallCalendarEventBot,
   deleteScheduledRecallBot,
   scheduleRecallCalendarEventBot,
@@ -211,6 +210,7 @@ describe("calendar auto join", () => {
           userId: "55555555-5555-4555-8555-555555555555",
           autoJoinEnabled: true,
           workspaceDomain: "iosg.vc",
+          workspaceName: "IOSG Ventures",
         },
         event: {
           externalEventId: "google_event_123",
@@ -258,7 +258,7 @@ describe("calendar auto join", () => {
         platform: "google_meet",
         status: "scheduled",
         teamId: "22222222-2222-4222-8222-222222222222",
-        title: "IOSG <> Nascent",
+        title: "IOSG Ventures <> Nascent",
       }),
     );
     expect(syncMeetingParticipantAccess).toHaveBeenCalledWith({
@@ -272,7 +272,7 @@ describe("calendar auto join", () => {
       meetingId: "44444444-4444-4444-8444-444444444444",
       ownerUserId: "55555555-5555-4555-8555-555555555555",
       teamId: "22222222-2222-4222-8222-222222222222",
-      title: "IOSG <> Nascent",
+      title: "IOSG Ventures <> Nascent",
       workspaceDomain: "iosg.vc",
     });
     expect(scheduleRecallBot).toHaveBeenCalledWith({
@@ -292,6 +292,106 @@ describe("calendar auto join", () => {
         recallBotId: "bot_123",
       }),
     );
+  });
+
+  it("does not rewrite a healthy meeting when the Recall event is unchanged", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-27T04:00:00.000Z"));
+
+    const calendarEventReturning = vi.fn().mockResolvedValue([]);
+    const calendarEventOnConflictDoUpdate = vi
+      .fn()
+      .mockReturnValue({ returning: calendarEventReturning });
+    insert.mockReturnValue({
+      values: vi.fn().mockReturnValue({
+        onConflictDoUpdate: calendarEventOnConflictDoUpdate,
+      }),
+    });
+    select
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            limit: vi.fn().mockResolvedValue([
+              {
+                id: "33333333-3333-4333-8333-333333333333",
+                teamMeetingKey:
+                  "team:22222222-2222-4222-8222-222222222222:start:2026-06-30T12:00:00.000Z:url:https://meet.google.com/abc-defg-hij",
+              },
+            ]),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            limit: vi.fn().mockResolvedValue([
+              {
+                id: "44444444-4444-4444-8444-444444444444",
+                ownerUserId: "55555555-5555-4555-8555-555555555555",
+                calendarEventId: "33333333-3333-4333-8333-333333333333",
+                teamMeetingKey:
+                  "team:22222222-2222-4222-8222-222222222222:start:2026-06-30T12:00:00.000Z:url:https://meet.google.com/abc-defg-hij",
+                title: "Partner sync",
+                titleSource: "calendar",
+                platform: "google_meet",
+                recallBotId: "bot_123",
+                recallRecordingId: null,
+                meetingUrl: "https://meet.google.com/abc-defg-hij",
+                startedAt: new Date("2026-06-30T12:00:00.000Z"),
+                endedAt: new Date("2026-06-30T12:30:00.000Z"),
+                status: "scheduled",
+              },
+            ]),
+          }),
+        }),
+      });
+
+    const { autoJoinCalendarEvent } = await import("@/lib/calendar-auto-join");
+
+    await expect(
+      autoJoinCalendarEvent({
+        connection: {
+          id: "11111111-1111-4111-8111-111111111111",
+          teamId: "22222222-2222-4222-8222-222222222222",
+          userId: "55555555-5555-4555-8555-555555555555",
+          autoJoinEnabled: true,
+          workspaceDomain: "example.com",
+        },
+        event: {
+          externalEventId: "google_event_123",
+          recallCalendarEventId: "66666666-6666-4666-8666-666666666666",
+          recallCalendarEventBots: [
+            {
+              botId: "bot_123",
+              deduplicationKey:
+                "team:22222222-2222-4222-8222-222222222222:start:2026-06-30T12:00:00.000Z:url:https://meet.google.com/abc-defg-hij",
+            },
+            {
+              botId: "historical_bot",
+              deduplicationKey: "historical-occurrence",
+            },
+          ],
+          title: "Partner sync",
+          startsAt: "2026-06-30T12:00:00.000Z",
+          endsAt: "2026-06-30T12:30:00.000Z",
+          meetingUrl: "https://meet.google.com/abc-defg-hij",
+        },
+        repairMode: true,
+      }),
+    ).resolves.toEqual({
+      action: "skipped",
+      calendarEventId: "33333333-3333-4333-8333-333333333333",
+      meetingId: "44444444-4444-4444-8444-444444444444",
+      meetingUrl: "https://meet.google.com/abc-defg-hij",
+      reason: "already_scheduled",
+    });
+
+    expect(calendarEventOnConflictDoUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ setWhere: expect.anything() }),
+    );
+    expect(syncMeetingParticipantAccess).not.toHaveBeenCalled();
+    expect(applyMeetingShareRules).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
   });
 
   it("creates an in person meeting reminder when a calendar event has a location and no meeting link", async () => {
@@ -370,7 +470,8 @@ describe("calendar auto join", () => {
         status: "pending",
       }),
     );
-    expect(reminderOnConflictDoUpdate).toHaveBeenCalledWith({
+    expect(reminderOnConflictDoUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
       target: expect.any(Array),
       set: expect.objectContaining({
         errorMessage: null,
@@ -378,7 +479,9 @@ describe("calendar auto join", () => {
         sentAt: null,
         status: "pending",
       }),
-    });
+      setWhere: expect.anything(),
+    }),
+    );
   });
 
   it("stores the nested Recall Calendar V2 bot id instead of the calendar event id", async () => {
@@ -2378,7 +2481,7 @@ describe("calendar auto join", () => {
     const existingLimit = vi.fn().mockResolvedValue([
       {
         id: "44444444-4444-4444-8444-444444444444",
-        recallBotId: "bot_123",
+        recallBotId: null,
         meetingUrl: "https://meet.google.com/old-link",
         startedAt: new Date("2026-06-30T12:00:00.000Z"),
         status: "scheduled",

@@ -103,5 +103,8 @@ describe("meeting participant access", () => {
       "meeting_123",
       "owner_123",
     );
+    expect(onConflictDoUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ setWhere: expect.anything() }),
+    );
   });
 });

@@ -98,12 +98,19 @@ describe("meeting share rules", () => {
     ).resolves.toEqual({ sharedCount: 1 });
 
     const materializeSql = txn.mock.calls[1]?.[0].join(" ") ?? "";
+    const revokeSql = txn.mock.calls[0]?.[0].join(" ") ?? "";
     const countSql = txn.mock.calls[6]?.[0].join(" ") ?? "";
 
+    expect(revokeSql).toContain("source.revoked_at is null");
+    expect(revokeSql).toContain("not exists");
+    expect(revokeSql).toContain(
+      "source.recipient_email = policy.recipient_email",
+    );
     expect(materializeSql).toContain("participant:email:%");
     expect(materializeSql).toContain("title:%");
     expect(materializeSql).toContain("participant:domain:%");
     expect(materializeSql).toContain("meeting_access_exclusions");
+    expect(materializeSql).toContain("is distinct from");
     expect(countSql).toContain("meeting_access_sources as source");
     expect(countSql).toContain("source.source_id = policy.id::text");
     expect(countSql).toContain("source.revoked_at is null");

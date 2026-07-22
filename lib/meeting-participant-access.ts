@@ -2,7 +2,9 @@ import {
   and,
   eq,
   inArray,
+  isNull,
   notInArray,
+  sql,
 } from "drizzle-orm";
 
 import { db } from "@/db/client";
@@ -47,19 +49,22 @@ export async function syncMeetingParticipantAccess(input: {
       );
 
     for (const email of attendeeEmails) {
+      const isInternal = internalEmails.includes(email);
+
       await db
         .insert(meetingAttendees)
         .values({
           email,
-          isInternal: internalEmails.includes(email),
+          isInternal,
           meetingId: input.meetingId,
         })
         .onConflictDoUpdate({
           target: [meetingAttendees.meetingId, meetingAttendees.email],
           set: {
-            isInternal: internalEmails.includes(email),
+            isInternal,
             updatedAt: new Date(),
           },
+          setWhere: sql`${meetingAttendees.isInternal} is distinct from ${isInternal}`,
         });
     }
   } else {
@@ -97,6 +102,7 @@ export async function syncMeetingParticipantAccess(input: {
         eq(meetingAccessSources.meetingId, input.meetingId),
         eq(meetingAccessSources.source, "participant"),
         eq(meetingAccessSources.sourceId, participantSourceId),
+        isNull(meetingAccessSources.revokedAt),
         ...(eligibleEmails.length > 0
           ? [notInArray(meetingAccessSources.recipientEmail, eligibleEmails)]
           : []),

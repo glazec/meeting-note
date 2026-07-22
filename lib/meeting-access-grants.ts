@@ -56,6 +56,15 @@ export async function grantMeetingAccessByEmail(input: {
           created_by_user_id = excluded.created_by_user_id,
           revoked_at = null,
           updated_at = now()
+      where (
+        meeting_access_sources.role,
+        meeting_access_sources.created_by_user_id,
+        meeting_access_sources.revoked_at
+      ) is distinct from (
+        excluded.role,
+        excluded.created_by_user_id,
+        null
+      )
     ), access_grant as (
       insert into meeting_access (
         meeting_id,
@@ -90,6 +99,19 @@ export async function grantMeetingAccessByEmail(input: {
           created_by_user_id = excluded.created_by_user_id,
           revoked_at = null,
           updated_at = now()
+      where (
+        meeting_access.role,
+        meeting_access.source,
+        meeting_access.source_id,
+        meeting_access.created_by_user_id,
+        meeting_access.revoked_at
+      ) is distinct from (
+        excluded.role,
+        'effective',
+        'materialized',
+        excluded.created_by_user_id,
+        null
+      )
     ), invite_grant as (
       insert into meeting_share_invites (
         meeting_id,
@@ -121,6 +143,21 @@ export async function grantMeetingAccessByEmail(input: {
           accepted_at = null,
           revoked_at = null,
           updated_at = now()
+      where (
+        meeting_share_invites.role,
+        meeting_share_invites.created_by_user_id,
+        meeting_share_invites.source,
+        meeting_share_invites.source_id,
+        meeting_share_invites.accepted_at,
+        meeting_share_invites.revoked_at
+      ) is distinct from (
+        excluded.role,
+        excluded.created_by_user_id,
+        'effective',
+        'materialized',
+        null,
+        null
+      )
     )
     select email, id, name, false as pending from target_user
     union all
@@ -175,6 +212,19 @@ export async function reconcileEffectiveMeetingAccess(
           created_by_user_id = excluded.created_by_user_id,
           revoked_at = null,
           updated_at = now()
+      where (
+        meeting_access.role,
+        meeting_access.source,
+        meeting_access.source_id,
+        meeting_access.created_by_user_id,
+        meeting_access.revoked_at
+      ) is distinct from (
+        excluded.role,
+        'effective',
+        'materialized',
+        excluded.created_by_user_id,
+        null
+      )
     `,
     txn`
       insert into meeting_share_invites (
@@ -207,6 +257,21 @@ export async function reconcileEffectiveMeetingAccess(
           accepted_at = null,
           revoked_at = null,
           updated_at = now()
+      where (
+        meeting_share_invites.role,
+        meeting_share_invites.created_by_user_id,
+        meeting_share_invites.source,
+        meeting_share_invites.source_id,
+        meeting_share_invites.accepted_at,
+        meeting_share_invites.revoked_at
+      ) is distinct from (
+        excluded.role,
+        excluded.created_by_user_id,
+        'effective',
+        'materialized',
+        null,
+        null
+      )
     `,
     txn`
       update meeting_access as access
@@ -214,6 +279,7 @@ export async function reconcileEffectiveMeetingAccess(
       from users as app_user
       where access.meeting_id = ${meetingId}::uuid
         and access.user_id = app_user.id
+        and access.revoked_at is null
         and not exists (
           select 1
           from meeting_access_sources as source
@@ -226,6 +292,7 @@ export async function reconcileEffectiveMeetingAccess(
       update meeting_share_invites as invite
       set revoked_at = now(), updated_at = now()
       where invite.meeting_id = ${meetingId}::uuid
+        and invite.revoked_at is null
         and not exists (
           select 1
           from meeting_access_sources as source
