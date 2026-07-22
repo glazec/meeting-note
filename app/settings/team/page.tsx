@@ -65,13 +65,15 @@ export default async function TeamSettingsPage() {
           <h1 className="mt-3 text-3xl font-semibold">
             {teamConfiguration.name}
           </h1>
-          <p className="mt-4 text-base leading-7 text-muted-foreground">
-            Signed in as {user.email}.
-          </p>
+          {!canEditTeamSettings ? (
+            <p className="mt-3 text-sm text-muted-foreground">
+              Only team administrators can edit these settings.
+            </p>
+          ) : null}
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Team identity and sharing</CardTitle>
+            <CardTitle>Workspace identity and sharing</CardTitle>
             <CardDescription>
               Set the team name and an optional group that appears in meeting
               sharing.
@@ -152,70 +154,13 @@ export default async function TeamSettingsPage() {
                     No team sharing group configured.
                   </p>
                 )}
-                <p className="text-muted-foreground">
-                  Only team administrators can edit these settings.
-                </p>
               </div>
             )}
           </CardContent>
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Internal domains</CardTitle>
-            <CardDescription>
-              Control automatic access for internal meeting attendees.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="leading-7 text-muted-foreground">
-              Allowed internal domains define which meeting attendees can
-              receive automatic transcript access. When a meeting is processed,
-              attendees with an allowed domain and matching workspace membership
-              can be granted access without a manual share step.
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Onboarded colleagues</CardTitle>
-            <CardDescription>
-              People who have signed in and joined this workspace.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {teamMembers.length > 0 ? (
-              <ul className="divide-y rounded-lg border">
-                {teamMembers.map((member) => (
-                  <li
-                    className="flex flex-wrap items-center justify-between gap-3 px-3 py-3"
-                    key={member.id}
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">
-                        {member.name || member.email}
-                      </p>
-                      <p className="mt-1 truncate text-xs text-muted-foreground">
-                        {member.email}
-                      </p>
-                    </div>
-                    {member.isCurrentUser ? (
-                      <span className="rounded-md border px-2 py-1 text-xs font-medium">
-                        You
-                      </span>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="rounded-lg border px-3 py-4 text-sm text-muted-foreground">
-                No onboarded colleagues yet.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Team meeting bot</CardTitle>
+            <CardTitle>Meeting capture</CardTitle>
             <CardDescription>
               Set the team bot name and JPG avatar people see when it joins
               calls.
@@ -296,9 +241,6 @@ export default async function TeamSettingsPage() {
               </form>
             ) : (
               <div className="flex flex-col gap-3">
-                <p className="text-sm text-muted-foreground">
-                  Only team administrators can edit these settings.
-                </p>
                 <p className="text-sm font-medium">{botProfile.botName}</p>
                 <p className="text-xs text-muted-foreground">
                   Team meeting bot avatar
@@ -324,12 +266,12 @@ export default async function TeamSettingsPage() {
             )}
           </CardContent>
         </Card>
+        {canEditTeamSettings || vocabularyTerms.length > 0 ? (
         <Card>
           <CardHeader>
-            <CardTitle>Team vocabulary</CardTitle>
+            <CardTitle>Transcription vocabulary</CardTitle>
             <CardDescription>
-              Before transcription, these terms are sent to ElevenLabs so team
-              and deal names are easier to recognize.
+              Help Tape recognize team, company, and deal names correctly.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
@@ -372,6 +314,47 @@ export default async function TeamSettingsPage() {
             )}
           </CardContent>
         </Card>
+        ) : null}
+        <details className="group rounded-lg border bg-card shadow-sm">
+          <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+            <span>Workspace members</span>
+            <span className="text-sm font-normal text-muted-foreground">
+              {teamMembers.length.toLocaleString()}
+            </span>
+          </summary>
+          <div className="border-t p-4">
+            {teamMembers.length > 0 ? (
+              <ul className="max-h-80 divide-y overflow-y-auto rounded-lg border">
+                {teamMembers.map((member) => (
+                  <li
+                    className="flex flex-wrap items-center justify-between gap-3 px-3 py-3"
+                    key={member.id}
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">
+                        {member.name || member.email}
+                      </p>
+                      {member.name ? (
+                        <p className="mt-1 truncate text-xs text-muted-foreground">
+                          {member.email}
+                        </p>
+                      ) : null}
+                    </div>
+                    {member.isCurrentUser ? (
+                      <span className="rounded-md border px-2 py-1 text-xs font-medium">
+                        You
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No workspace members yet.
+              </p>
+            )}
+          </div>
+        </details>
       </section>
     </AppShell>
   );

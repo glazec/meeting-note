@@ -162,24 +162,26 @@ describe("TeamSettingsPage", () => {
     );
     const html = renderToStaticMarkup(await TeamSettingsPage());
 
-    expect(html).toContain("Team vocabulary");
-    expect(html).toContain("Team identity and sharing");
+    expect(html).toContain("Transcription vocabulary");
+    expect(html).toContain("Workspace identity and sharing");
     expect(html).toContain("Example Capital");
     expect(html).toContain("Investment committee");
     expect(html).toContain("2 members");
     expect(html).toContain("TCG platform");
-    expect(html).toContain("Before transcription");
-    expect(html).toContain("Team meeting bot");
+    expect(html).toContain("Meeting capture");
     expect(html).toContain("Team meeting bot avatar");
     expect(html).toContain("Deal Scribe");
     expect(html).toContain("Custom avatar saved");
-    expect(html).toContain("Onboarded colleagues");
+    expect(html).toContain("Workspace members");
     expect(html).toContain("Member");
     expect(html).toContain("member@iosg.vc");
     expect(html).toContain("Alice");
     expect(html).toContain("alice@iosg.vc");
     expect(html).toContain("You");
     expect(html).toContain("Only team administrators can edit these settings");
+    expect(
+      html.match(/Only team administrators can edit these settings/g),
+    ).toHaveLength(1);
     expect(html).not.toContain('action="/api/team/bot-profile"');
     expect(html).not.toContain('action="/api/team/vocabulary"');
     expect(listWorkspaceMembers).toHaveBeenCalledWith({

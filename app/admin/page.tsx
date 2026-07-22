@@ -1,7 +1,6 @@
 import { Eye, RotateCcw } from "lucide-react";
 
 import { AppShell } from "@/components/app-shell";
-import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
@@ -10,14 +9,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { getAdminImpersonatedUserId } from "@/lib/admin-access";
 import {
   getAdminImpersonationTarget,
@@ -78,86 +69,48 @@ export default async function AdminPage() {
           ) : null}
         </Card>
 
-        <Card className="gap-0 py-0 shadow-sm">
-          <CardHeader className="border-b bg-muted/25 px-4 py-4 sm:px-5">
+        <Card className="shadow-sm">
+          <CardHeader>
             <CardTitle>Choose user</CardTitle>
             <CardDescription>
-              The selected user becomes the effective app user after redirect.
+              Open the workspace exactly as the selected user sees it.
             </CardDescription>
           </CardHeader>
-          <CardContent className="px-0">
-            <div className="border-b px-4 py-4 sm:px-5">
-              <form
-                action="/api/admin/impersonation"
-                className="flex flex-col gap-3 sm:flex-row sm:items-end"
-                method="post"
-              >
-                <input name="redirectTo" type="hidden" value="/dashboard" />
-                <label className="flex min-w-0 flex-1 flex-col gap-2 text-sm font-medium">
-                  User
-                  <select
-                    className="h-8 min-w-0 rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                    defaultValue={currentTarget?.id ?? ""}
-                    name="userId"
-                    required
-                  >
-                    <option disabled value="">
-                      Select user
+          <CardContent>
+            <form
+              action="/api/admin/impersonation"
+              className="flex flex-col gap-3 sm:flex-row sm:items-end"
+              method="post"
+            >
+              <input name="redirectTo" type="hidden" value="/dashboard" />
+              <label className="flex min-w-0 flex-1 flex-col gap-2 text-sm font-medium">
+                User
+                <select
+                  className="h-10 min-w-0 rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                  defaultValue={currentTarget?.id ?? ""}
+                  name="userId"
+                  required
+                >
+                  <option disabled value="">
+                    Select user
+                  </option>
+                  {targets.map((target) => (
+                    <option key={target.id} value={target.id}>
+                      {target.name ? `${target.name} · ` : ""}
+                      {target.email}
+                      {target.teamName ? ` · ${target.teamName}` : ""}
                     </option>
-                    {targets.map((target) => (
-                      <option key={target.id} value={target.id}>
-                        {target.email}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button className={cn(buttonVariants(), "w-fit")} type="submit">
-                  <Eye aria-hidden="true" />
-                  View as user
-                </button>
-              </form>
-            </div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>User</TableHead>
-                  <TableHead>Team</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead className="text-right">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {targets.map((target) => (
-                  <TableRow key={target.id}>
-                    <TableCell>
-                      <div className="font-medium">{target.email}</div>
-                      {target.name ? (
-                        <div className="text-muted-foreground">{target.name}</div>
-                      ) : null}
-                    </TableCell>
-                    <TableCell>{target.teamName ?? "No team"}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{target.role ?? "none"}</Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <form action="/api/admin/impersonation" method="post">
-                        <input name="redirectTo" type="hidden" value="/dashboard" />
-                        <input name="userId" type="hidden" value={target.id} />
-                        <button
-                          className={cn(
-                            buttonVariants({ size: "sm", variant: "outline" }),
-                            "ml-auto",
-                          )}
-                          type="submit"
-                        >
-                          View as user
-                        </button>
-                      </form>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                  ))}
+                </select>
+              </label>
+              <button
+                className={cn(buttonVariants(), "min-h-10 w-fit")}
+                type="submit"
+              >
+                <Eye aria-hidden="true" />
+                View as user
+              </button>
+            </form>
           </CardContent>
         </Card>
       </section>
