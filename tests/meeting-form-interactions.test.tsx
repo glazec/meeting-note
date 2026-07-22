@@ -92,7 +92,7 @@ describe("meeting form interactions", () => {
     expect(screen.getByText("Schedule bot")).toBeTruthy();
     fireEvent.click(
       screen.getByRole("button", {
-        name: "Merge with IOSG <> Greenfield Capital, Previous",
+        name: /Add bot now for IOSG <> Greenfield Capital, Previous/,
       }),
     );
 
@@ -181,7 +181,7 @@ describe("meeting form interactions", () => {
     });
     fireEvent.click(
       screen.getByRole("button", {
-        name: "Merge with IOSG <> Greenfield Capital, Happening now",
+        name: /Add bot now for IOSG <> Greenfield Capital, Happening now/,
       }),
     );
 
