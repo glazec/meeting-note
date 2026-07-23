@@ -27,20 +27,22 @@ import { SharedOnlyAccessError } from "@/lib/access-errors";
 
 export const runtime = "nodejs";
 
-const requestSchema = z.strictObject({
-  calendarEventId: z.uuid().optional(),
-  createSeparateMeeting: z.boolean().optional(),
-  meetingUrl: z.url(),
-  recoveryMeetingId: z.uuid().optional(),
-}).refine(
-  (value) =>
-    [
-      Boolean(value.calendarEventId),
-      value.createSeparateMeeting === true,
-      Boolean(value.recoveryMeetingId),
-    ].filter(Boolean).length <= 1,
-  { message: "Choose one meeting destination" },
-);
+const requestSchema = z
+  .strictObject({
+    calendarEventId: z.uuid().optional(),
+    createSeparateMeeting: z.boolean().optional(),
+    meetingUrl: z.url(),
+    recoveryMeetingId: z.uuid().optional(),
+  })
+  .refine(
+    (value) =>
+      [
+        Boolean(value.calendarEventId),
+        value.createSeparateMeeting === true,
+        Boolean(value.recoveryMeetingId),
+      ].filter(Boolean).length <= 1,
+    { message: "Choose one meeting destination" },
+  );
 
 type RecallBotResponse = {
   id?: unknown;
@@ -73,14 +75,15 @@ export async function POST(request: Request) {
   const isRecovery = Boolean(result.data.recoveryMeetingId);
   const hasMeetingChoice = Boolean(
     result.data.calendarEventId ||
-      result.data.createSeparateMeeting ||
-      result.data.recoveryMeetingId,
+    result.data.createSeparateMeeting ||
+    result.data.recoveryMeetingId,
   );
   let scheduledMeeting: {
     meetingId: string;
     teamId: string;
     startAt?: string;
     recallBotId?: string;
+    resumeRecording?: boolean;
   };
   let skipUnconfirmedCalendarMatch = false;
 
@@ -101,7 +104,8 @@ export async function POST(request: Request) {
       );
       const potentialMeetings = [
         ...recentMeetings.map((meeting) => ({
-          action: "join" as const,
+          action:
+            meeting.mode === "resume" ? ("resume" as const) : ("join" as const),
           endedAt: meeting.endedAt,
           id: meeting.id,
           kind: "recent" as const,
@@ -110,8 +114,7 @@ export async function POST(request: Request) {
         })),
         ...calendarMeetings
           .filter(
-            (meeting) =>
-              !recentCalendarEventIds.has(meeting.calendarEventId),
+            (meeting) => !recentCalendarEventIds.has(meeting.calendarEventId),
           )
           .map((meeting) => ({
             action: meeting.action,
@@ -150,8 +153,7 @@ export async function POST(request: Request) {
           sessionUser: user,
           meetingUrl,
           platform,
-          ...(result.data.createSeparateMeeting ||
-          skipUnconfirmedCalendarMatch
+          ...(result.data.createSeparateMeeting || skipUnconfirmedCalendarMatch
             ? { skipCalendarMatch: true }
             : {}),
         });
@@ -206,11 +208,16 @@ export async function POST(request: Request) {
     const bot = (await scheduleRecallBot({
       meetingUrl,
       ...getMeetingBotRecallCreateInput(botProfile),
-      ...(scheduledMeeting.startAt ? { startAt: scheduledMeeting.startAt } : {}),
+      ...(scheduledMeeting.startAt
+        ? { startAt: scheduledMeeting.startAt }
+        : {}),
       webhookUrl: buildAppUrl("/api/recall/webhook"),
       metadata: {
         ...getMeetingBotMetadata(botProfile),
         meetingId: scheduledMeeting.meetingId,
+        ...(scheduledMeeting.resumeRecording
+          ? { resumeRecording: "true" }
+          : {}),
       },
     })) as RecallBotResponse;
 
@@ -245,7 +252,7 @@ export async function POST(request: Request) {
 }
 
 type PotentialMeeting = {
-  action: "join" | "schedule";
+  action: "join" | "resume" | "schedule";
   endedAt: string | null;
   id: string;
   kind: "calendar" | "recent";
@@ -253,10 +260,7 @@ type PotentialMeeting = {
   title: string;
 };
 
-function selectBackToBackMeetings(
-  meetings: PotentialMeeting[],
-  now: Date,
-) {
+function selectBackToBackMeetings(meetings: PotentialMeeting[], now: Date) {
   const nowMs = now.getTime();
   const candidates = meetings.flatMap((meeting) => {
     const startedAt = new Date(meeting.startedAt).getTime();
@@ -273,8 +277,7 @@ function selectBackToBackMeetings(
     .sort((left, right) => right.endedAtMs - left.endedAtMs)[0];
   const current = candidates
     .filter(
-      (meeting) =>
-        meeting.startedAtMs <= nowMs && meeting.endedAtMs > nowMs,
+      (meeting) => meeting.startedAtMs <= nowMs && meeting.endedAtMs > nowMs,
     )
     .sort((left, right) => right.startedAtMs - left.startedAtMs)[0];
   const next = candidates
@@ -292,15 +295,17 @@ function selectBackToBackMeetings(
     }
 
     seen.add(`${meeting.kind}:${meeting.id}`);
-    return [{
-      action: meeting.action,
-      endedAt: meeting.endedAt,
-      id: meeting.id,
-      kind: meeting.kind,
-      startedAt: meeting.startedAt,
-      timing: meeting.timing,
-      title: meeting.title,
-    }];
+    return [
+      {
+        action: meeting.action,
+        endedAt: meeting.endedAt,
+        id: meeting.id,
+        kind: meeting.kind,
+        startedAt: meeting.startedAt,
+        timing: meeting.timing,
+        title: meeting.title,
+      },
+    ];
   });
 }
 

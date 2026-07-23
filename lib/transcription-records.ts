@@ -1,14 +1,10 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { mediaAssets, meetings, recordings, transcriptJobs } from "@/db/schema";
 import type { SessionUser } from "@/lib/auth";
 import { reconcileMeetingSharingForMeeting } from "@/lib/meeting-share-rules";
-import {
-  buildMeetingObjectKey,
-  getObjectMetadata,
-  parseR2Env,
-} from "@/lib/r2";
+import { buildMeetingObjectKey, getObjectMetadata, parseR2Env } from "@/lib/r2";
 import {
   assertCanCreateMeetings,
   getOrCreateWorkspaceForSessionUser,
@@ -222,31 +218,102 @@ export async function completeUploadedVideoConversion(
 export async function createRecallRecordingTranscription(input: {
   durationMs?: number;
   endedAt?: Date;
+  externalBotId?: string;
+  externalRecordingId: string;
   meetingId: string;
+  mode?: "append" | "replace";
   startedAt?: Date;
 }) {
-  const [recording] = await db
-    .insert(recordings)
-    .values({
-      durationMs: input.durationMs,
-      endedAt: input.endedAt,
+  const [existingRecording] = await db
+    .select({ id: recordings.id })
+    .from(recordings)
+    .where(
+      and(
+        eq(recordings.meetingId, input.meetingId),
+        eq(recordings.source, "recall"),
+        eq(recordings.externalId, input.externalRecordingId),
+      ),
+    )
+    .limit(1);
+  let recording = existingRecording;
+
+  if (!recording) {
+    [recording] = await db
+      .insert(recordings)
+      .values({
+        durationMs: input.durationMs,
+        endedAt: input.endedAt,
+        externalBotId: input.externalBotId,
+        externalId: input.externalRecordingId,
+        meetingId: input.meetingId,
+        source: "recall",
+        startedAt: input.startedAt,
+      })
+      .onConflictDoNothing()
+      .returning({ id: recordings.id });
+  }
+
+  if (!recording) {
+    [recording] = await db
+      .select({ id: recordings.id })
+      .from(recordings)
+      .where(
+        and(
+          eq(recordings.meetingId, input.meetingId),
+          eq(recordings.source, "recall"),
+          eq(recordings.externalId, input.externalRecordingId),
+        ),
+      )
+      .limit(1);
+  }
+
+  if (!recording) {
+    throw new Error("Recall recording could not be created");
+  }
+  const [existingJob] = await db
+    .select({ id: transcriptJobs.id })
+    .from(transcriptJobs)
+    .where(eq(transcriptJobs.recordingId, recording.id))
+    .limit(1);
+
+  if (existingJob) {
+    return {
       meetingId: input.meetingId,
-      source: "recall",
-      startedAt: input.startedAt,
-    })
-    .returning({ id: recordings.id });
-  const [job] = await db
+      recordingId: recording.id,
+      shouldQueue: false,
+      transcriptJobId: existingJob.id,
+    };
+  }
+
+  let [job] = await db
     .insert(transcriptJobs)
     .values({
       meetingId: input.meetingId,
+      mode: input.mode ?? "replace",
       provider: "elevenlabs",
+      recordingId: recording.id,
       status: "queued",
     })
+    .onConflictDoNothing()
     .returning({ id: transcriptJobs.id });
+  const shouldQueue = Boolean(job);
+
+  if (!job) {
+    [job] = await db
+      .select({ id: transcriptJobs.id })
+      .from(transcriptJobs)
+      .where(eq(transcriptJobs.recordingId, recording.id))
+      .limit(1);
+  }
+
+  if (!job) {
+    throw new Error("Recall transcript job could not be created");
+  }
 
   return {
     meetingId: input.meetingId,
     recordingId: recording.id,
+    shouldQueue,
     transcriptJobId: job.id,
   };
 }

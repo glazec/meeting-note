@@ -7,12 +7,12 @@ const {
   select,
   update,
 } = vi.hoisted(() => ({
-    assertCanCreateMeetings: vi.fn(),
-    getMeetingManagerCondition: vi.fn(() => ({ queryChunks: [] })),
-    getWorkspace: vi.fn(),
-    select: vi.fn(),
-    update: vi.fn(),
-  }));
+  assertCanCreateMeetings: vi.fn(),
+  getMeetingManagerCondition: vi.fn(() => ({ queryChunks: [] })),
+  getWorkspace: vi.fn(),
+  select: vi.fn(),
+  update: vi.fn(),
+}));
 
 vi.mock("@/db/client", () => ({ db: { select, update } }));
 vi.mock("@/lib/workspace", () => ({
@@ -21,7 +21,10 @@ vi.mock("@/lib/workspace", () => ({
 }));
 vi.mock("@/lib/meeting-write-policy", () => ({ getMeetingManagerCondition }));
 
-import { isMeetingBotRecoveryEligible } from "@/lib/meeting-bot-recovery-policy";
+import {
+  isMeetingBotRecoveryEligible,
+  isMeetingRecordingResumeEligible,
+} from "@/lib/meeting-bot-recovery-policy";
 
 describe("meeting bot recovery policy", () => {
   const now = new Date("2026-07-22T12:10:00.000Z");
@@ -91,6 +94,53 @@ describe("meeting bot recovery policy", () => {
       }),
     ).toBe(true);
   });
+
+  it("keeps an early missed call recoverable during its scheduled window", () => {
+    expect(
+      isMeetingBotRecoveryEligible({
+        canManage: true,
+        endedAt: "2026-07-22T12:45:00.000Z",
+        now,
+        platform: "zoom",
+        segmentCount: 0,
+        startedAt: "2026-07-22T12:00:00.000Z",
+        status: "missed",
+        updatedAt: "2026-07-22T12:07:00.000Z",
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("meeting recording resume policy", () => {
+  const now = new Date("2026-07-22T17:20:00.000Z");
+
+  it("offers resume when recording ended but the scheduled meeting is active", () => {
+    expect(
+      isMeetingRecordingResumeEligible({
+        canManage: true,
+        lastRecordingEndedAt: "2026-07-22T17:07:23.000Z",
+        now,
+        platform: "zoom",
+        scheduledEndedAt: "2026-07-22T17:45:00.000Z",
+        scheduledStartedAt: "2026-07-22T17:00:00.000Z",
+        status: "ready",
+      }),
+    ).toBe(true);
+  });
+
+  it("does not offer resume after the scheduled meeting window", () => {
+    expect(
+      isMeetingRecordingResumeEligible({
+        canManage: true,
+        lastRecordingEndedAt: "2026-07-22T17:07:23.000Z",
+        now: new Date("2026-07-22T17:45:00.000Z"),
+        platform: "zoom",
+        scheduledEndedAt: "2026-07-22T17:45:00.000Z",
+        scheduledStartedAt: "2026-07-22T17:00:00.000Z",
+        status: "ready",
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("meeting bot recovery records", () => {
@@ -105,9 +155,8 @@ describe("meeting bot recovery records", () => {
   it("finds a recent eligible meeting for confirmation", async () => {
     mockWorkspace();
     mockRecoverableMeeting();
-    const { findMeetingBotRecoveryCandidate } = await import(
-      "@/lib/meeting-bot-recovery"
-    );
+    const { findMeetingBotRecoveryCandidate } =
+      await import("@/lib/meeting-bot-recovery");
 
     await expect(
       findMeetingBotRecoveryCandidate({
@@ -118,6 +167,7 @@ describe("meeting bot recovery records", () => {
       calendarEventId: null,
       endedAt: null,
       id: "11111111-1111-4111-8111-111111111111",
+      mode: "recover",
       startedAt: "2026-07-22T12:00:00.000Z",
       title: "Founder call",
     });
@@ -148,9 +198,8 @@ describe("meeting bot recovery records", () => {
         title: "Partner call",
       },
     ]);
-    const { findMeetingBotRecoveryCandidates } = await import(
-      "@/lib/meeting-bot-recovery"
-    );
+    const { findMeetingBotRecoveryCandidates } =
+      await import("@/lib/meeting-bot-recovery");
 
     await expect(
       findMeetingBotRecoveryCandidates({
@@ -162,6 +211,7 @@ describe("meeting bot recovery records", () => {
         calendarEventId: null,
         endedAt: null,
         id: "11111111-1111-4111-8111-111111111111",
+        mode: "recover",
         startedAt: "2026-07-22T15:00:00.000Z",
         title: "IOSG <> Greenfield Capital",
       },
@@ -169,6 +219,7 @@ describe("meeting bot recovery records", () => {
         calendarEventId: null,
         endedAt: null,
         id: "44444444-4444-4444-8444-444444444444",
+        mode: "recover",
         startedAt: "2026-07-22T14:55:00.000Z",
         title: "Partner call",
       },
@@ -181,9 +232,8 @@ describe("meeting bot recovery records", () => {
     const updateWhere = vi.fn().mockResolvedValue(undefined);
     const updateSet = vi.fn().mockReturnValue({ where: updateWhere });
     update.mockReturnValue({ set: updateSet });
-    const { prepareMeetingBotRecovery } = await import(
-      "@/lib/meeting-bot-recovery"
-    );
+    const { prepareMeetingBotRecovery } =
+      await import("@/lib/meeting-bot-recovery");
 
     await expect(
       prepareMeetingBotRecovery({
@@ -195,6 +245,7 @@ describe("meeting bot recovery records", () => {
       }),
     ).resolves.toEqual({
       meetingId: "11111111-1111-4111-8111-111111111111",
+      resumeRecording: false,
       teamId: "22222222-2222-4222-8222-222222222222",
     });
     expect(updateSet).toHaveBeenCalledWith(
@@ -236,16 +287,25 @@ function mockRecoverableMeetings(
     title: string;
   }>,
 ) {
-  const limit = vi.fn().mockResolvedValue(
-    meetings.map((meeting) => ({ calendarEventId: null, ...meeting })),
-  );
-  select.mockReturnValue({
+  select
+    .mockReturnValueOnce(buildMeetingSelect([]))
+    .mockReturnValueOnce(
+      buildMeetingSelect(
+        meetings.map((meeting) => ({ calendarEventId: null, ...meeting })),
+      ),
+    );
+}
+
+function buildMeetingSelect(rows: unknown[]) {
+  const limit = vi.fn().mockResolvedValue(rows);
+
+  return {
     from: () => ({
       where: () => ({
         orderBy: () => ({ limit }),
       }),
     }),
-  });
+  };
 }
 
 function sessionUser() {

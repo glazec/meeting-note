@@ -341,7 +341,10 @@ describe("applyRecallMeetingEvent", () => {
     expect(createRecallRecordingTranscription).toHaveBeenCalledWith({
       durationMs: 45 * 60 * 1000,
       endedAt: new Date("2026-06-23T12:45:00.000Z"),
+      externalBotId: "bot_123",
+      externalRecordingId: "recording_123",
       meetingId: "11111111-1111-4111-8111-111111111111",
+      mode: "replace",
       startedAt: new Date("2026-06-23T12:00:00.000Z"),
     });
     expect(fetchAndPersistRecallParticipantTimeline).toHaveBeenCalledWith({
@@ -373,7 +376,65 @@ describe("applyRecallMeetingEvent", () => {
     ]);
   });
 
-  it("queues extraction when a transcript job already exists", async () => {
+  it("queues a resumed recording as another transcript part", async () => {
+    update.mockReturnValue({
+      set: vi.fn().mockReturnValue({ where }),
+    });
+    select.mockReturnValue({ from: selectFrom });
+    selectFrom.mockReturnValue({ where: selectWhere });
+    selectWhere.mockReturnValue({ limit: selectLimit });
+    selectLimit.mockResolvedValue([]);
+    retrieveRecallBot.mockResolvedValue({
+      recordings: [
+        {
+          completed_at: "2026-07-22T17:40:00.000Z",
+          id: "recording_456",
+          started_at: "2026-07-22T17:21:27.000Z",
+          media_shortcuts: {
+            audio_mixed: {
+              data: { download_url: "https://recall.example.com/part-2.mp3" },
+            },
+          },
+        },
+      ],
+    });
+    createRecallRecordingTranscription.mockResolvedValue({
+      meetingId: "11111111-1111-4111-8111-111111111111",
+      transcriptJobId: "33333333-3333-4333-8333-333333333333",
+    });
+
+    await applyRecallMeetingEvent({
+      eventType: "recording.done",
+      botId: "bot_456",
+      recordingId: "recording_456",
+      meetingUrl: null,
+      statusCode: "done",
+      code: "done",
+      subCode: null,
+      updatedAt: "2026-07-22T17:40:00.000Z",
+      metadata: {
+        meetingId: "11111111-1111-4111-8111-111111111111",
+        resumeRecording: true,
+      },
+    });
+
+    expect(createRecallRecordingTranscription).toHaveBeenCalledWith(
+      expect.objectContaining({
+        externalBotId: "bot_456",
+        externalRecordingId: "recording_456",
+        mode: "append",
+      }),
+    );
+    expect(send).toHaveBeenCalledWith({
+      name: "meeting/transcribe.audio",
+      data: expect.objectContaining({
+        audioUrl: "https://recall.example.com/part-2.mp3",
+        transcriptJobId: "33333333-3333-4333-8333-333333333333",
+      }),
+    });
+  });
+
+  it("queues extraction but not duplicate transcription for the same recording", async () => {
     update.mockReturnValue({
       set: vi.fn().mockReturnValue({ where }),
     });
@@ -385,6 +446,25 @@ describe("applyRecallMeetingEvent", () => {
         id: "22222222-2222-4222-8222-222222222222",
       },
     ]);
+    retrieveRecallBot.mockResolvedValue({
+      id: "bot_123",
+      recordings: [
+        {
+          id: "recording_123",
+          media_shortcuts: {
+            audio_mixed: {
+              data: { download_url: "https://recall.example.com/audio.mp3" },
+            },
+          },
+        },
+      ],
+    });
+    createRecallRecordingTranscription.mockResolvedValue({
+      meetingId: "11111111-1111-4111-8111-111111111111",
+      recordingId: "44444444-4444-4444-8444-444444444444",
+      shouldQueue: false,
+      transcriptJobId: "22222222-2222-4222-8222-222222222222",
+    });
 
     await applyRecallMeetingEvent({
       eventType: "recording.done",
@@ -400,8 +480,10 @@ describe("applyRecallMeetingEvent", () => {
       },
     });
 
-    expect(retrieveRecallBot).not.toHaveBeenCalled();
-    expect(createRecallRecordingTranscription).not.toHaveBeenCalled();
+    expect(retrieveRecallBot).toHaveBeenCalledWith("bot_123");
+    expect(createRecallRecordingTranscription).toHaveBeenCalledWith(
+      expect.objectContaining({ externalRecordingId: "recording_123" }),
+    );
     expect(send).toHaveBeenCalledExactlyOnceWith({
       id: "video-frames:recording_123:recording",
       name: "meeting/extract.video-frames",
@@ -492,7 +574,10 @@ describe("applyRecallMeetingEvent", () => {
     expect(retrieveRecallBot).not.toHaveBeenCalled();
     expect(retrieveRecallRecording).toHaveBeenCalledWith("recording_123");
     expect(createRecallRecordingTranscription).toHaveBeenCalledWith({
+      externalBotId: undefined,
+      externalRecordingId: "recording_123",
       meetingId: "11111111-1111-4111-8111-111111111111",
+      mode: "replace",
     });
     expect(fetchAndPersistRecallParticipantTimeline).toHaveBeenCalledWith({
       meetingId: "11111111-1111-4111-8111-111111111111",

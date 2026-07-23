@@ -2,7 +2,7 @@ import { and, desc, eq, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
-import { mediaAssets, meetings } from "@/db/schema";
+import { mediaAssets, meetings, recordings } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { getReadableMeetingsCondition } from "@/lib/meeting-access-policy";
 import { createReadUrl } from "@/lib/r2";
@@ -16,6 +16,7 @@ import { getOrCreateWorkspaceForSessionUser } from "@/lib/workspace";
 export const runtime = "nodejs";
 
 const meetingIdSchema = z.uuid();
+const recordingIdSchema = z.uuid();
 
 export async function GET(
   request: Request,
@@ -30,6 +31,7 @@ export async function GET(
   const { meetingId } = await context.params;
   const parsedMeetingId = meetingIdSchema.safeParse(meetingId);
   const searchParams = new URL(request.url).searchParams;
+  const requestedRecordingId = searchParams.get("recording");
   const shouldDownload = searchParams.get("download") === "1";
   const shouldProxy = searchParams.get("proxy") === "1" || shouldDownload;
 
@@ -37,33 +39,85 @@ export async function GET(
     return Response.json({ error: "Audio not found" }, { status: 404 });
   }
 
+  const parsedRecordingId = requestedRecordingId
+    ? recordingIdSchema.safeParse(requestedRecordingId)
+    : null;
+
+  if (parsedRecordingId && !parsedRecordingId.success) {
+    return Response.json({ error: "Audio not found" }, { status: 404 });
+  }
+
   const workspace = await getOrCreateWorkspaceForSessionUser(user);
-  const rows = await db
-    .select({
-      title: meetings.title,
-      objectKey: mediaAssets.objectKey,
-      recallBotId: meetings.recallBotId,
-      recallRecordingId: meetings.recallRecordingId,
-    })
-    .from(meetings)
-    .leftJoin(
-      mediaAssets,
-      and(
-        eq(mediaAssets.meetingId, meetings.id),
-        or(eq(mediaAssets.type, "synthesized_audio"), eq(mediaAssets.type, "audio")),
-      ),
-    )
-    .where(
-      and(
-        eq(meetings.id, parsedMeetingId.data),
-        getReadableMeetingsCondition(workspace),
-      ),
-    )
-    .orderBy(
-      desc(sql`case when ${mediaAssets.type} = 'synthesized_audio' then 1 else 0 end`),
-      desc(mediaAssets.createdAt),
-    )
-    .limit(1);
+  const rows = parsedRecordingId?.success
+    ? await db
+        .select({
+          title: meetings.title,
+          objectKey: mediaAssets.objectKey,
+          recallBotId: recordings.externalBotId,
+          recallRecordingId: recordings.externalId,
+        })
+        .from(meetings)
+        .innerJoin(
+          recordings,
+          and(
+            eq(recordings.id, parsedRecordingId.data),
+            eq(recordings.meetingId, meetings.id),
+          ),
+        )
+        .leftJoin(
+          mediaAssets,
+          and(
+            eq(mediaAssets.recordingId, recordings.id),
+            or(
+              eq(mediaAssets.type, "synthesized_audio"),
+              eq(mediaAssets.type, "audio"),
+            ),
+          ),
+        )
+        .where(
+          and(
+            eq(meetings.id, parsedMeetingId.data),
+            getReadableMeetingsCondition(workspace),
+          ),
+        )
+        .orderBy(
+          desc(
+            sql`case when ${mediaAssets.type} = 'synthesized_audio' then 1 else 0 end`,
+          ),
+          desc(mediaAssets.createdAt),
+        )
+        .limit(1)
+    : await db
+        .select({
+          title: meetings.title,
+          objectKey: mediaAssets.objectKey,
+          recallBotId: meetings.recallBotId,
+          recallRecordingId: meetings.recallRecordingId,
+        })
+        .from(meetings)
+        .leftJoin(
+          mediaAssets,
+          and(
+            eq(mediaAssets.meetingId, meetings.id),
+            or(
+              eq(mediaAssets.type, "synthesized_audio"),
+              eq(mediaAssets.type, "audio"),
+            ),
+          ),
+        )
+        .where(
+          and(
+            eq(meetings.id, parsedMeetingId.data),
+            getReadableMeetingsCondition(workspace),
+          ),
+        )
+        .orderBy(
+          desc(
+            sql`case when ${mediaAssets.type} = 'synthesized_audio' then 1 else 0 end`,
+          ),
+          desc(mediaAssets.createdAt),
+        )
+        .limit(1);
   const meeting = rows[0];
   const objectKey = meeting?.objectKey;
   const downloadFilename = shouldDownload

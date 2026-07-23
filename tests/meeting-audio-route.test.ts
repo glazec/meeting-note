@@ -56,6 +56,11 @@ vi.mock("@/db/client", () => ({
   db: {
     select: () => ({
       from: () => ({
+        innerJoin: () => ({
+          leftJoin: () => ({
+            where,
+          }),
+        }),
         leftJoin: () => ({
           where,
         }),
@@ -69,14 +74,11 @@ async function getMeetingAudio(
 ) {
   const { GET } = await import("@/app/api/meetings/[meetingId]/audio/route");
 
-  return GET(
-    new Request(url),
-    {
-      params: Promise.resolve({
-        meetingId: "11111111-1111-4111-8111-111111111111",
-      }),
-    },
-  );
+  return GET(new Request(url), {
+    params: Promise.resolve({
+      meetingId: "11111111-1111-4111-8111-111111111111",
+    }),
+  });
 }
 
 describe("GET /api/meetings/[meetingId]/audio", () => {
@@ -115,7 +117,9 @@ describe("GET /api/meetings/[meetingId]/audio", () => {
       name: null,
     });
     getWorkspace.mockResolvedValue({ teamId: "team_123" });
-    limit.mockResolvedValue([{ objectKey: "users/user_123/uploads/audio.mp3" }]);
+    limit.mockResolvedValue([
+      { objectKey: "users/user_123/uploads/audio.mp3" },
+    ]);
     createReadUrl.mockResolvedValue("https://r2.example.com/audio.mp3");
 
     const response = await getMeetingAudio();
@@ -192,7 +196,9 @@ describe("GET /api/meetings/[meetingId]/audio", () => {
       name: null,
     });
     getWorkspace.mockResolvedValue({ teamId: "team_123" });
-    limit.mockResolvedValue([{ objectKey: "users/user_123/uploads/audio.mp3" }]);
+    limit.mockResolvedValue([
+      { objectKey: "users/user_123/uploads/audio.mp3" },
+    ]);
     createReadUrl.mockResolvedValue("https://r2.example.com/audio.mp3");
     const fetchMock = vi.fn().mockResolvedValue(
       new Response("fake mp3", {
@@ -281,6 +287,40 @@ describe("GET /api/meetings/[meetingId]/audio", () => {
       "recording_123",
     );
     expect(retrieveRecallRecording).not.toHaveBeenCalled();
+  });
+
+  it("plays the selected recording part instead of the meeting's latest recording", async () => {
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({ teamId: "team_123" });
+    limit.mockResolvedValue([
+      {
+        objectKey: null,
+        recallBotId: "bot_part_1",
+        recallRecordingId: "recording_part_1",
+      },
+    ]);
+    retrieveRecallBot.mockResolvedValue({ recordings: [] });
+    findRecallRecordingMediaUrl.mockReturnValue(
+      "https://recall.example.com/part-1.mp3",
+    );
+
+    const response = await getMeetingAudio(
+      "https://app.example.com/api/meetings/11111111-1111-4111-8111-111111111111/audio?recording=44444444-4444-4444-8444-444444444444",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://recall.example.com/part-1.mp3",
+    );
+    expect(retrieveRecallBot).toHaveBeenCalledWith("bot_part_1");
+    expect(findRecallRecordingMediaUrl).toHaveBeenCalledWith(
+      { recordings: [] },
+      "recording_part_1",
+    );
   });
 
   it("redirects manual Recall recordings that do not have a bot", async () => {

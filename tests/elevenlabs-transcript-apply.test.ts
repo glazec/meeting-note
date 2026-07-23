@@ -59,9 +59,8 @@ describe("applyElevenLabsTranscriptEvent", () => {
       .mockReturnValueOnce({ set: transcriptSet })
       .mockReturnValueOnce({ set: meetingSet });
 
-    const { applyElevenLabsTranscriptEvent } = await import(
-      "@/lib/elevenlabs-transcripts"
-    );
+    const { applyElevenLabsTranscriptEvent } =
+      await import("@/lib/elevenlabs-transcripts");
 
     await expect(
       applyElevenLabsTranscriptEvent({
@@ -95,9 +94,8 @@ describe("applyElevenLabsTranscriptEvent", () => {
     execute.mockResolvedValue({
       rows: [{ id: "33333333-3333-4333-8333-333333333333" }],
     });
-    const { applyElevenLabsTranscriptEvent } = await import(
-      "@/lib/elevenlabs-transcripts"
-    );
+    const { applyElevenLabsTranscriptEvent } =
+      await import("@/lib/elevenlabs-transcripts");
 
     await expect(
       applyElevenLabsTranscriptEvent({
@@ -119,5 +117,21 @@ describe("applyElevenLabsTranscriptEvent", () => {
     });
     expect(select).not.toHaveBeenCalled();
     expect(update).not.toHaveBeenCalled();
+  });
+});
+
+describe("getTranscriptSegmentOffsetMs", () => {
+  it("places a resumed transcript at its recording start within the meeting", async () => {
+    const { getTranscriptSegmentOffsetMs } =
+      await import("@/lib/elevenlabs-transcripts");
+
+    expect(
+      getTranscriptSegmentOffsetMs({
+        currentJobId: "22222222-2222-4222-8222-222222222222",
+        firstRecordingStartedAt: "2026-07-22T17:00:58.000Z",
+        mode: "append",
+        recordingStartedAt: "2026-07-22T17:20:58.000Z",
+      }),
+    ).toBe(1_200_000);
   });
 });

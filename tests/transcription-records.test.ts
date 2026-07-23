@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const getOrCreateWorkspaceForSessionUser = vi.fn();
 const assertCanCreateMeetings = vi.fn();
 const insert = vi.fn();
+const select = vi.fn();
 const values = vi.fn();
 const meetingReturning = vi.fn();
 const recordingReturning = vi.fn();
@@ -14,6 +15,7 @@ const reconcileMeetingSharingForMeeting = vi.fn();
 vi.mock("@/db/client", () => ({
   db: {
     insert,
+    select,
     update,
   },
 }));
@@ -84,9 +86,8 @@ describe("createUploadedAudioTranscription", () => {
     insert.mockReturnValue({ values });
     const startedAt = new Date("2026-06-27T15:30:00.000Z");
 
-    const { createUploadedAudioTranscription } = await import(
-      "@/lib/transcription-records"
-    );
+    const { createUploadedAudioTranscription } =
+      await import("@/lib/transcription-records");
 
     await expect(
       createUploadedAudioTranscription({
@@ -124,6 +125,100 @@ describe("createUploadedAudioTranscription", () => {
     );
   });
 });
+
+describe("createRecallRecordingTranscription", () => {
+  afterEach(() => {
+    insert.mockReset();
+    select.mockReset();
+    values.mockReset();
+    recordingReturning.mockReset();
+    jobReturning.mockReset();
+    vi.resetModules();
+  });
+
+  it("creates an append job for a new resumed Recall recording", async () => {
+    select
+      .mockReturnValueOnce(buildSelectResult([]))
+      .mockReturnValueOnce(buildSelectResult([]));
+    recordingReturning.mockResolvedValue([
+      { id: "77777777-7777-4777-8777-777777777777" },
+    ]);
+    jobReturning.mockResolvedValue([
+      { id: "55555555-5555-4555-8555-555555555555" },
+    ]);
+    values
+      .mockReturnValueOnce({
+        onConflictDoNothing: () => ({ returning: recordingReturning }),
+      })
+      .mockReturnValueOnce({
+        onConflictDoNothing: () => ({ returning: jobReturning }),
+      });
+    insert.mockReturnValue({ values });
+
+    const { createRecallRecordingTranscription } =
+      await import("@/lib/transcription-records");
+
+    await expect(
+      createRecallRecordingTranscription({
+        externalBotId: "bot_part_2",
+        externalRecordingId: "recording_part_2",
+        meetingId: "33333333-3333-4333-8333-333333333333",
+        mode: "append",
+      }),
+    ).resolves.toEqual({
+      meetingId: "33333333-3333-4333-8333-333333333333",
+      recordingId: "77777777-7777-4777-8777-777777777777",
+      shouldQueue: true,
+      transcriptJobId: "55555555-5555-4555-8555-555555555555",
+    });
+    expect(values).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        externalBotId: "bot_part_2",
+        externalId: "recording_part_2",
+        source: "recall",
+      }),
+    );
+    expect(values).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        mode: "append",
+        recordingId: "77777777-7777-4777-8777-777777777777",
+      }),
+    );
+  });
+
+  it("does not queue the same Recall recording twice", async () => {
+    select
+      .mockReturnValueOnce(
+        buildSelectResult([{ id: "77777777-7777-4777-8777-777777777777" }]),
+      )
+      .mockReturnValueOnce(
+        buildSelectResult([{ id: "55555555-5555-4555-8555-555555555555" }]),
+      );
+    const { createRecallRecordingTranscription } =
+      await import("@/lib/transcription-records");
+
+    await expect(
+      createRecallRecordingTranscription({
+        externalRecordingId: "recording_part_2",
+        meetingId: "33333333-3333-4333-8333-333333333333",
+        mode: "append",
+      }),
+    ).resolves.toMatchObject({ shouldQueue: false });
+    expect(insert).not.toHaveBeenCalled();
+  });
+});
+
+function buildSelectResult(rows: unknown[]) {
+  return {
+    from: () => ({
+      where: () => ({
+        limit: vi.fn().mockResolvedValue(rows),
+      }),
+    }),
+  };
+}
 
 describe("createUploadedVideoTranscription", () => {
   afterEach(() => {
@@ -168,9 +263,8 @@ describe("createUploadedVideoTranscription", () => {
       .mockReturnValueOnce({ returning: jobReturning });
     insert.mockReturnValue({ values });
 
-    const { createUploadedVideoTranscription } = await import(
-      "@/lib/transcription-records"
-    );
+    const { createUploadedVideoTranscription } =
+      await import("@/lib/transcription-records");
 
     await expect(
       createUploadedVideoTranscription({

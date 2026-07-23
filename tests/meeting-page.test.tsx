@@ -12,7 +12,10 @@ const mocks = vi.hoisted(() => ({
   requireUser: vi.fn(),
 }));
 
-vi.mock("next/navigation", () => ({ notFound: mocks.notFound }));
+vi.mock("next/navigation", () => ({
+  notFound: mocks.notFound,
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
 vi.mock("@/lib/auth-guards", () => ({ requireCurrentUser: mocks.requireUser }));
 vi.mock("@/lib/workspace", () => ({ getOrCreateWorkspaceForSessionUser: mocks.getWorkspace }));
 vi.mock("@/lib/meeting-queries", () => ({
@@ -173,6 +176,37 @@ describe("meeting page", () => {
     expect(html).not.toContain("recovery panel");
   });
 
+  it("offers to resume an early recording during the scheduled window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-22T17:20:00.000Z"));
+    mocks.getMeeting.mockResolvedValue(
+      meeting({
+        recordingParts: [
+          {
+            audioUrl: "/audio?recording=part-1",
+            durationMs: 385_000,
+            endedAt: "2026-07-22T17:07:23.000Z",
+            id: "part-1",
+            startedAt: "2026-07-22T17:00:58.000Z",
+          },
+        ],
+        scheduledEndedAt: "2026-07-22T17:45:00.000Z",
+        scheduledStartedAt: "2026-07-22T17:00:00.000Z",
+        status: "ready",
+      }),
+    );
+
+    const html = renderToStaticMarkup(
+      await MeetingPage({
+        params: Promise.resolve({ meetingId: "resumable_meeting" }),
+      }),
+    );
+
+    expect(html).toContain("Recording ended early");
+    expect(html).toContain("Resume recording");
+    vi.useRealTimers();
+  });
+
   it("keeps an existing transcript visible during failed recovery", async () => {
     const html = renderToStaticMarkup(
       await MeetingPage({
@@ -251,6 +285,9 @@ function meeting(overrides: Record<string, unknown> = {}) {
     endedAt: new Date("2026-07-20T10:01:00Z"),
     entities: [],
     platform: "google_meet",
+    recordingParts: [],
+    scheduledEndedAt: null,
+    scheduledStartedAt: null,
     meetingUrl: "https://meet.google.com/abc-defg-hij",
     segments: [{ id: "seg", speaker: "Alice", startMs: 0, endMs: 1000, text: "Hello", polishedText: "Hello" }],
     speakerAliases: [],

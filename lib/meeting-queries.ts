@@ -72,9 +72,7 @@ import {
   applySpeakerAliasesToSegments,
   type SpeakerAlias,
 } from "@/lib/speaker-alias-normalization";
-import {
-  listTeamSpeakerAliases,
-} from "@/lib/speaker-aliases";
+import { listTeamSpeakerAliases } from "@/lib/speaker-aliases";
 import {
   getOrCreateWorkspaceForSessionUser,
   type WorkspaceContext,
@@ -123,6 +121,9 @@ export type MeetingTranscript = {
   translationLanguage: TranslationLanguage;
   translationSummary: MeetingTranslationSummary;
   audioUrl: string | null;
+  recordingParts: MeetingRecordingPart[];
+  scheduledEndedAt: string | null;
+  scheduledStartedAt: string | null;
   visualAssets: MeetingVisualAsset[];
   segments: TranscriptSegment[];
   speakerAliases: SpeakerAlias[];
@@ -131,6 +132,14 @@ export type MeetingTranscript = {
   canManage: boolean;
   accessPeople: MeetingAccessPerson[];
   entities: MeetingTranscriptEntity[];
+};
+
+export type MeetingRecordingPart = {
+  audioUrl: string;
+  durationMs: number | null;
+  endedAt: string | null;
+  id: string;
+  startedAt: string | null;
 };
 
 type MeetingVisualAsset = {
@@ -309,7 +318,9 @@ export async function listMeetingLibraryPageForWorkspace(
         transcriptJobStatus: meeting.transcriptJobStatus,
         hasRecallBot: Boolean(meeting.recallBotId),
         startedAt: (
-          meeting.recordedStartedAt ?? meeting.startedAt ?? meeting.createdAt
+          meeting.recordedStartedAt ??
+          meeting.startedAt ??
+          meeting.createdAt
         ).toISOString(),
         endedAt:
           meeting.recordedEndedAt?.toISOString() ??
@@ -369,11 +380,11 @@ export function buildMeetingLibraryPage(
       shouldShowMeetingInLibrary(meeting, scheduledBotMeetingIds) &&
       matchesMeetingLibraryStatus(meeting, status),
   );
-  const visibleMeetingsForLibrary = eligibleMeetingsForLibrary.filter((meeting) =>
-    isMeetingInsideHistoryWindow(meeting, historyCutoff),
+  const visibleMeetingsForLibrary = eligibleMeetingsForLibrary.filter(
+    (meeting) => isMeetingInsideHistoryWindow(meeting, historyCutoff),
   );
-  const relatedMeetingsForLibrary = eligibleMeetingsForLibrary.filter((meeting) =>
-    isMeetingInsideHistoryWindow(meeting, relatedHistoryCutoff),
+  const relatedMeetingsForLibrary = eligibleMeetingsForLibrary.filter(
+    (meeting) => isMeetingInsideHistoryWindow(meeting, relatedHistoryCutoff),
   );
   const relatedMeetingsByRoot = getRelatedMeetingsByRoot(
     relatedMeetingsForLibrary,
@@ -387,7 +398,8 @@ export function buildMeetingLibraryPage(
     Array.from(allRelatedMeetingsByRoot, ([meetingId, relatedMeetings]) => [
       meetingId,
       relatedMeetings.some(
-        (meeting) => !isMeetingInsideHistoryWindow(meeting, relatedHistoryCutoff),
+        (meeting) =>
+          !isMeetingInsideHistoryWindow(meeting, relatedHistoryCutoff),
       ),
     ]),
   );
@@ -508,10 +520,7 @@ function subtractMonths(date: Date, months: number) {
   return copy;
 }
 
-function isMeetingInsideHistoryWindow(
-  meeting: MeetingListItem,
-  cutoff: Date,
-) {
+function isMeetingInsideHistoryWindow(meeting: MeetingListItem, cutoff: Date) {
   return new Date(meeting.startedAt).getTime() >= cutoff.getTime();
 }
 
@@ -947,7 +956,7 @@ function latestRecordingStartedAtSubquery(meetingId: typeof meetings.id) {
     where ${recordings.meetingId} = ${meetingId}
     order by ${recordings.createdAt} desc
     limit 1
-  )`;
+  )`.mapWith(recordings.startedAt);
 }
 
 function latestRecordingEndedAtSubquery(meetingId: typeof meetings.id) {
@@ -957,7 +966,7 @@ function latestRecordingEndedAtSubquery(meetingId: typeof meetings.id) {
     where ${recordings.meetingId} = ${meetingId}
     order by ${recordings.createdAt} desc
     limit 1
-  )`;
+  )`.mapWith(recordings.endedAt);
 }
 
 function getAttendeeCount(attendeeEmails: unknown) {
@@ -1087,7 +1096,9 @@ export async function getMeetingDashboardSummaryForWorkspace(
       transcriptJobStatus: meeting.transcriptJobStatus,
       hasRecallBot: Boolean(meeting.recallBotId),
       startedAt: (
-        meeting.recordedStartedAt ?? meeting.startedAt ?? meeting.createdAt
+        meeting.recordedStartedAt ??
+        meeting.startedAt ??
+        meeting.createdAt
       ).toISOString(),
       endedAt:
         meeting.recordedEndedAt?.toISOString() ??
@@ -1168,7 +1179,10 @@ export async function getMeetingTranscriptForWorkspace(
       mediaAssets,
       and(
         eq(mediaAssets.meetingId, meetings.id),
-        or(eq(mediaAssets.type, "synthesized_audio"), eq(mediaAssets.type, "audio")),
+        or(
+          eq(mediaAssets.type, "synthesized_audio"),
+          eq(mediaAssets.type, "audio"),
+        ),
       ),
     )
     .leftJoin(calendarEvents, eq(calendarEvents.id, meetings.calendarEventId))
@@ -1179,7 +1193,9 @@ export async function getMeetingTranscriptForWorkspace(
       ),
     )
     .orderBy(
-      desc(sql`case when ${mediaAssets.type} = 'synthesized_audio' then 1 else 0 end`),
+      desc(
+        sql`case when ${mediaAssets.type} = 'synthesized_audio' then 1 else 0 end`,
+      ),
       desc(mediaAssets.createdAt),
     )
     .limit(1);
@@ -1198,6 +1214,7 @@ export async function getMeetingTranscriptForWorkspace(
     entities,
     visualAssets,
     speakerAliases,
+    recordingParts,
   ] = await Promise.all([
     db
       .select({
@@ -1223,7 +1240,10 @@ export async function getMeetingTranscriptForWorkspace(
       )
       .orderBy(asc(transcriptSegments.startMs)),
     canManage
-      ? listMeetingSpeakerSuggestions(meeting.id, meeting.calendarAttendeeEmails)
+      ? listMeetingSpeakerSuggestions(
+          meeting.id,
+          meeting.calendarAttendeeEmails,
+        )
       : Promise.resolve([]),
     canManage
       ? listMeetingAccessPeople(meeting.id, meeting.ownerUserId)
@@ -1258,6 +1278,23 @@ export async function getMeetingTranscriptForWorkspace(
     accessScope === "workspace"
       ? listTeamSpeakerAliases(meeting.teamId)
       : Promise.resolve([]),
+    db
+      .select({
+        durationMs: recordings.durationMs,
+        endedAt: recordings.endedAt,
+        externalId: recordings.externalId,
+        id: recordings.id,
+        startedAt: recordings.startedAt,
+      })
+      .from(recordings)
+      .where(
+        and(
+          eq(recordings.meetingId, meeting.id),
+          eq(recordings.source, "recall"),
+          sql`${recordings.externalId} is not null`,
+        ),
+      )
+      .orderBy(asc(recordings.startedAt), asc(recordings.createdAt)),
   ]);
   const displaySegments = applySpeakerAliasesToSegments(
     segments,
@@ -1275,6 +1312,8 @@ export async function getMeetingTranscriptForWorkspace(
     platform: meeting.platform,
     meetingUrl: meeting.meetingUrl,
     status: meeting.status,
+    scheduledStartedAt: meeting.startedAt?.toISOString() ?? null,
+    scheduledEndedAt: meeting.endedAt?.toISOString() ?? null,
     startedAt:
       (
         meeting.recordedStartedAt ??
@@ -1308,9 +1347,18 @@ export async function getMeetingTranscriptForWorkspace(
       ).length,
     }),
     audioUrl:
-      meeting.audioObjectKey || meeting.recallRecordingId
-        ? `/api/meetings/${meeting.id}/audio`
-        : null,
+      recordingParts.length > 1
+        ? null
+        : meeting.audioObjectKey || meeting.recallRecordingId
+          ? `/api/meetings/${meeting.id}/audio`
+          : null,
+    recordingParts: recordingParts.map((recording) => ({
+      audioUrl: `/api/meetings/${meeting.id}/audio?recording=${recording.id}`,
+      durationMs: recording.durationMs,
+      endedAt: recording.endedAt?.toISOString() ?? null,
+      id: recording.id,
+      startedAt: recording.startedAt?.toISOString() ?? null,
+    })),
     visualAssets: visualAssets.map((asset) => ({
       id: asset.id,
       capturedAt: asset.capturedAt?.toISOString() ?? null,
@@ -1522,10 +1570,7 @@ async function getPrimaryEntitiesForMeetings(
   workspaceDomain: string,
 ) {
   const primaryEntityByMeetingId = new Map<string, string>();
-  const workspaceEntity = workspaceDomain
-    .trim()
-    .toLowerCase()
-    .split(".")[0];
+  const workspaceEntity = workspaceDomain.trim().toLowerCase().split(".")[0];
 
   if (meetingIds.length === 0) {
     return primaryEntityByMeetingId;

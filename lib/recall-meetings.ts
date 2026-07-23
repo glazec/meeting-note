@@ -1,7 +1,7 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { meetings, transcriptJobs } from "@/db/schema";
+import { meetings } from "@/db/schema";
 import { inngest } from "@/inngest/client";
 import { fetchAndPersistRecallParticipantTimeline } from "@/lib/meeting-participant-timeline";
 import { isRecallDesktopSdkFallbackIntent } from "@/lib/local-recorder-records";
@@ -94,7 +94,10 @@ export async function applyRecallMeetingEvent(event: RecallWebhookEvent) {
       fallbackIntentId &&
       (await isRecallDesktopSdkFallbackIntent(fallbackIntentId))
     ) {
-      return { action: "skip" as const, reason: "local_fallback_active" as const };
+      return {
+        action: "skip" as const,
+        reason: "local_fallback_active" as const,
+      };
     }
   }
 
@@ -129,7 +132,7 @@ export async function applyRecallMeetingEvent(event: RecallWebhookEvent) {
     (update.recallBotId || update.recallRecordingId) &&
     shouldQueueRecallRecordingTranscription(event)
   ) {
-    await queueRecallRecordingTranscription(update);
+    await queueRecallRecordingTranscription(update, event.metadata);
   }
 
   return update;
@@ -166,8 +169,9 @@ function shouldQueueRecallVideoFrames(event: RecallWebhookEvent) {
 
 async function queueRecallRecordingTranscription(
   update: Extract<RecallMeetingUpdate, { action: "update" }>,
+  metadata: Record<string, unknown>,
 ) {
-  if (await hasActiveTranscriptJob(update.meetingId)) {
+  if (!update.recallRecordingId) {
     return;
   }
 
@@ -192,10 +196,7 @@ async function queueRecallRecordingTranscription(
 
   if (!audioUrl) {
     if (
-      hasTerminalRecallMediaFailure(
-        recallArtifact,
-        update.recallRecordingId,
-      )
+      hasTerminalRecallMediaFailure(recallArtifact, update.recallRecordingId)
     ) {
       await db
         .update(meetings)
@@ -232,8 +233,17 @@ async function queueRecallRecordingTranscription(
     : null;
   const transcription = await createRecallRecordingTranscription({
     ...(recordingTiming ?? {}),
+    externalBotId: update.recallBotId ?? undefined,
+    externalRecordingId: update.recallRecordingId,
     meetingId: update.meetingId,
+    mode: getMetadataBoolean(metadata, "resumeRecording", "resume_recording")
+      ? "append"
+      : "replace",
   });
+
+  if (transcription.shouldQueue === false) {
+    return;
+  }
 
   await inngest.send({
     name: "meeting/transcribe.audio",
@@ -294,9 +304,11 @@ function findRecallRecordingRecord(
   const recordings = Array.isArray(artifact.recordings)
     ? artifact.recordings
     : [];
-  return recordings
-    .map(getUnknownRecord)
-    .find((recording) => recording?.id === recordingId) ?? null;
+  return (
+    recordings
+      .map(getUnknownRecord)
+      .find((recording) => recording?.id === recordingId) ?? null
+  );
 }
 
 function getRecallStatusCode(value: unknown) {
@@ -310,21 +322,6 @@ function getUnknownRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object"
     ? (value as Record<string, unknown>)
     : null;
-}
-
-async function hasActiveTranscriptJob(meetingId: string) {
-  const rows = await db
-    .select({ id: transcriptJobs.id })
-    .from(transcriptJobs)
-    .where(
-      and(
-        eq(transcriptJobs.meetingId, meetingId),
-        inArray(transcriptJobs.status, ["queued", "running", "completed"]),
-      ),
-    )
-    .limit(1);
-
-  return Boolean(rows[0]);
 }
 
 async function hasRecordingEvidence(meetingId: string) {
@@ -352,6 +349,17 @@ async function hasRecordingEvidence(meetingId: string) {
   // recallRecordingId. A late or out-of-order bot.done (no recording id) must
   // not revert such a meeting to "missed".
   return row.status === "processing" || row.status === "ready";
+}
+
+function getMetadataBoolean(
+  metadata: Record<string, unknown>,
+  ...keys: string[]
+) {
+  return keys.some((key) => {
+    const value = metadata[key];
+
+    return value === true || value === "true";
+  });
 }
 
 function getMetadataString(

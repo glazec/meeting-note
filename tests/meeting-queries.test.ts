@@ -111,10 +111,16 @@ describe("getWorkspaceMeetingTranscript", () => {
             orderBy: vi.fn().mockResolvedValue([]),
           }),
         }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: vi.fn().mockResolvedValue([]),
+          }),
+        }),
       });
-    const { getWorkspaceMeetingTranscript } = await import(
-      "@/lib/meeting-queries"
-    );
+    const { getWorkspaceMeetingTranscript } =
+      await import("@/lib/meeting-queries");
 
     await expect(
       getWorkspaceMeetingTranscript(
@@ -202,10 +208,16 @@ describe("getWorkspaceMeetingTranscript", () => {
             orderBy: vi.fn().mockResolvedValue([]),
           }),
         }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: vi.fn().mockResolvedValue([]),
+          }),
+        }),
       });
-    const { getWorkspaceMeetingTranscript } = await import(
-      "@/lib/meeting-queries"
-    );
+    const { getWorkspaceMeetingTranscript } =
+      await import("@/lib/meeting-queries");
 
     await expect(
       getWorkspaceMeetingTranscript(
@@ -368,9 +380,15 @@ describe("getWorkspaceMeetingTranscript", () => {
           }),
         }),
       });
-    const { getWorkspaceMeetingTranscript } = await import(
-      "@/lib/meeting-queries"
-    );
+    select.mockReturnValue({
+      from: () => ({
+        where: () => ({
+          orderBy: vi.fn().mockResolvedValue([]),
+        }),
+      }),
+    });
+    const { getWorkspaceMeetingTranscript } =
+      await import("@/lib/meeting-queries");
 
     await expect(
       getWorkspaceMeetingTranscript(
@@ -383,8 +401,7 @@ describe("getWorkspaceMeetingTranscript", () => {
       ),
     ).resolves.toMatchObject({
       accessScope: "workspace",
-      audioUrl:
-        "/api/meetings/11111111-1111-4111-8111-111111111111/audio",
+      audioUrl: "/api/meetings/11111111-1111-4111-8111-111111111111/audio",
       speakerSuggestions: [
         {
           email: "alice@example.com",
@@ -456,9 +473,8 @@ describe("getWorkspaceMeetingTranscript", () => {
         leftJoin: mediaLeftJoin,
       }),
     });
-    const { getWorkspaceMeetingTranscript } = await import(
-      "@/lib/meeting-queries"
-    );
+    const { getWorkspaceMeetingTranscript } =
+      await import("@/lib/meeting-queries");
 
     await expect(
       getWorkspaceMeetingTranscript(
@@ -526,9 +542,15 @@ describe("getWorkspaceMeetingTranscript", () => {
           }),
         }),
       });
-    const { getWorkspaceMeetingTranscript } = await import(
-      "@/lib/meeting-queries"
-    );
+    select.mockReturnValue({
+      from: () => ({
+        where: () => ({
+          orderBy: vi.fn().mockResolvedValue([]),
+        }),
+      }),
+    });
+    const { getWorkspaceMeetingTranscript } =
+      await import("@/lib/meeting-queries");
 
     await expect(
       getWorkspaceMeetingTranscript(
@@ -542,8 +564,7 @@ describe("getWorkspaceMeetingTranscript", () => {
     ).resolves.toMatchObject({
       accessScope: "shared",
       accessPeople: [],
-      audioUrl:
-        "/api/meetings/11111111-1111-4111-8111-111111111111/audio",
+      audioUrl: "/api/meetings/11111111-1111-4111-8111-111111111111/audio",
     });
   });
 });
@@ -566,10 +587,7 @@ describe("listMeetingDetailRelatedMeetingsForWorkspace", () => {
             title: "Nascent follow up",
             startedAt: new Date("2026-06-27T12:00:00.000Z"),
             createdAt: new Date("2026-06-27T11:59:00.000Z"),
-            calendarAttendeeEmails: [
-              "alice@iosg.vc",
-              "founder@nascent.xyz",
-            ],
+            calendarAttendeeEmails: ["alice@iosg.vc", "founder@nascent.xyz"],
           },
           {
             id: "11111111-1111-4111-8111-111111111111",
@@ -577,10 +595,7 @@ describe("listMeetingDetailRelatedMeetingsForWorkspace", () => {
             startedAt: new Date("2026-06-20T12:00:00.000Z"),
             recordedStartedAt: new Date("2026-06-20T12:05:00.000Z"),
             createdAt: new Date("2026-06-20T11:59:00.000Z"),
-            calendarAttendeeEmails: [
-              "bob@iosg.vc",
-              "founder@nascent.xyz",
-            ],
+            calendarAttendeeEmails: ["bob@iosg.vc", "founder@nascent.xyz"],
           },
           {
             id: "33333333-3333-4333-8333-333333333333",
@@ -622,9 +637,8 @@ describe("listMeetingDetailRelatedMeetingsForWorkspace", () => {
           where: previewWhere,
         }),
       });
-    const { listMeetingDetailRelatedMeetingsForWorkspace } = await import(
-      "@/lib/meeting-queries"
-    );
+    const { listMeetingDetailRelatedMeetingsForWorkspace } =
+      await import("@/lib/meeting-queries");
 
     await expect(
       listMeetingDetailRelatedMeetingsForWorkspace(
@@ -700,9 +714,8 @@ describe("listMeetingDetailRelatedMeetingsForWorkspace", () => {
           }),
         }),
       });
-    const { listMeetingDetailRelatedMeetingsForWorkspace } = await import(
-      "@/lib/meeting-queries"
-    );
+    const { listMeetingDetailRelatedMeetingsForWorkspace } =
+      await import("@/lib/meeting-queries");
 
     await expect(
       listMeetingDetailRelatedMeetingsForWorkspace(
@@ -730,6 +743,73 @@ describe("listMeetingsForWorkspace", () => {
     vi.resetModules();
   });
 
+  it("decodes recording timestamps before formatting dashboard rows", async () => {
+    select
+      .mockImplementationOnce((selection: unknown) => {
+        const projection = selection as {
+          recordedEndedAt: {
+            decoder: { mapFromDriverValue(value: string): Date | null };
+          };
+          recordedStartedAt: {
+            decoder: { mapFromDriverValue(value: string): Date | null };
+          };
+        };
+
+        return {
+          from: () => ({
+            leftJoin: () => ({
+              where: () => ({
+                orderBy: vi.fn().mockResolvedValue([
+                  {
+                    canManage: true,
+                    id: "33333333-3333-4333-8333-333333333333",
+                    teamId: "team_123",
+                    title: "Recorded meeting",
+                    platform: "upload",
+                    status: "ready",
+                    transcriptJobStatus: "completed",
+                    recallBotId: null,
+                    recordedStartedAt:
+                      projection.recordedStartedAt.decoder.mapFromDriverValue(
+                        "2026-07-22T12:05:00.000Z",
+                      ),
+                    recordedEndedAt:
+                      projection.recordedEndedAt.decoder.mapFromDriverValue(
+                        "2026-07-22T12:35:00.000Z",
+                      ),
+                    createdAt: new Date("2026-07-22T12:00:00.000Z"),
+                    calendarAttendeeEmails: [],
+                  },
+                ]),
+              }),
+            }),
+          }),
+        };
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      });
+    const { listMeetingsForWorkspace } = await import("@/lib/meeting-queries");
+
+    await expect(
+      listMeetingsForWorkspace({
+        teamId: "team_123",
+        userId: "user_123",
+        domain: "iosg.vc",
+        canCreateMeetings: true,
+      }),
+    ).resolves.toMatchObject([
+      {
+        startedAt: "2026-07-22T12:05:00.000Z",
+        endedAt: "2026-07-22T12:35:00.000Z",
+      },
+    ]);
+  });
+
   it("keeps newly uploaded MP3 meetings in the library even without calendar attendees", async () => {
     select
       .mockReturnValueOnce({
@@ -749,7 +829,10 @@ describe("listMeetingsForWorkspace", () => {
                   startedAt: new Date("2026-06-27T12:00:00.000Z"),
                   endedAt: new Date("2026-06-27T12:45:00.000Z"),
                   createdAt: new Date("2026-06-27T11:59:00.000Z"),
-                  calendarAttendeeEmails: ["alice@iosg.vc", "founder@example.com"],
+                  calendarAttendeeEmails: [
+                    "alice@iosg.vc",
+                    "founder@example.com",
+                  ],
                 },
               ]),
             }),
@@ -2025,9 +2108,8 @@ describe("getMeetingDashboardSummaryForWorkspace", () => {
           }),
         }),
       });
-    const { getMeetingDashboardSummaryForWorkspace } = await import(
-      "@/lib/meeting-queries"
-    );
+    const { getMeetingDashboardSummaryForWorkspace } =
+      await import("@/lib/meeting-queries");
 
     await expect(
       getMeetingDashboardSummaryForWorkspace({
@@ -2116,9 +2198,8 @@ describe("getMeetingDashboardSummaryForWorkspace", () => {
           }),
         }),
       });
-    const { getMeetingDashboardSummaryForWorkspace } = await import(
-      "@/lib/meeting-queries"
-    );
+    const { getMeetingDashboardSummaryForWorkspace } =
+      await import("@/lib/meeting-queries");
 
     await expect(
       getMeetingDashboardSummaryForWorkspace(

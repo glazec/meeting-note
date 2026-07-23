@@ -118,11 +118,9 @@ export function buildElevenLabsTranscriptPersistence(
     "transcript_job_id",
   );
   const providerJobId = event.requestId ?? event.transcriptId ?? undefined;
-  const recordingId = getMetadataString(
-    event.metadata,
-    "recordingId",
-    "recording_id",
-  ) ?? undefined;
+  const recordingId =
+    getMetadataString(event.metadata, "recordingId", "recording_id") ??
+    undefined;
 
   if (!transcriptJobId) {
     return { action: "skip", reason: "missing_transcript_job_id" };
@@ -136,7 +134,8 @@ export function buildElevenLabsTranscriptPersistence(
     };
   }
 
-  const words = "transcriptionWords" in event ? event.transcriptionWords : undefined;
+  const words =
+    "transcriptionWords" in event ? event.transcriptionWords : undefined;
   const segments = buildTranscriptSegments(
     words,
     options.participantTimeline ?? [],
@@ -158,7 +157,11 @@ export function buildElevenLabsTranscriptPersistence(
     };
   }
 
-  const meetingId = getMetadataString(event.metadata, "meetingId", "meeting_id");
+  const meetingId = getMetadataString(
+    event.metadata,
+    "meetingId",
+    "meeting_id",
+  );
 
   if (!meetingId) {
     return { action: "skip", reason: "missing_meeting_id" };
@@ -182,7 +185,11 @@ export function buildElevenLabsTranscriptPersistence(
 export async function applyElevenLabsTranscriptEvent(
   event: ElevenLabsTranscriptEvent,
 ) {
-  const meetingId = getMetadataString(event.metadata, "meetingId", "meeting_id");
+  const meetingId = getMetadataString(
+    event.metadata,
+    "meetingId",
+    "meeting_id",
+  );
   const transcriptJobId = getMetadataString(
     event.metadata,
     "transcriptJobId",
@@ -192,7 +199,7 @@ export async function applyElevenLabsTranscriptEvent(
   if (
     meetingId &&
     transcriptJobId &&
-    !(await isLatestTranscriptJob(meetingId, transcriptJobId))
+    !(await shouldApplyTranscriptJob(meetingId, transcriptJobId))
   ) {
     return { action: "skip", reason: "superseded_transcript_job" } as const;
   }
@@ -253,31 +260,60 @@ export async function applyElevenLabsTranscriptEvent(
     return persistence;
   }
 
-  await db
-    .delete(meetingEntities)
-    .where(eq(meetingEntities.meetingId, persistence.meetingId));
+  const applicationContext = await loadTranscriptApplicationContext(
+    persistence.meetingId,
+    persistence.transcriptJobId,
+  );
+  const segmentOffsetMs = getTranscriptSegmentOffsetMs(applicationContext);
+  const existingSegments =
+    applicationContext.mode === "append"
+      ? await loadTranscriptSnapshotSegments(
+          persistence.meetingId,
+          persistence.transcriptJobId,
+          applicationContext.currentJobId,
+        )
+      : [];
+  const snapshotJobId =
+    applicationContext.currentJobId ?? persistence.transcriptJobId;
 
-  await db
-    .delete(transcriptSegments)
-    .where(eq(transcriptSegments.meetingId, persistence.meetingId));
+  if (applicationContext.mode === "replace") {
+    await db
+      .delete(meetingEntities)
+      .where(eq(meetingEntities.meetingId, persistence.meetingId));
+    await db
+      .delete(transcriptSegments)
+      .where(eq(transcriptSegments.meetingId, persistence.meetingId));
+  } else {
+    await db
+      .delete(transcriptSegments)
+      .where(eq(transcriptSegments.jobId, snapshotJobId));
+  }
 
+  const nextSegments = [
+    ...existingSegments.map((segment) => ({
+      ...segment,
+      jobId: snapshotJobId,
+      meetingId: persistence.meetingId,
+    })),
+    ...persistence.segments.map((segment) => ({
+      meetingId: persistence.meetingId,
+      jobId: snapshotJobId,
+      speaker: segment.speaker,
+      startMs: segment.startMs + segmentOffsetMs,
+      endMs: segment.endMs === null ? null : segment.endMs + segmentOffsetMs,
+      text: segment.text,
+      emotionLabel: segment.emotionLabel,
+      emotionReason: segment.emotionReason,
+    })),
+  ];
   const insertedSegments = await db
     .insert(transcriptSegments)
-    .values(
-      persistence.segments.map((segment) => ({
-        meetingId: persistence.meetingId,
-        jobId: persistence.transcriptJobId,
-        speaker: segment.speaker,
-        startMs: segment.startMs,
-        endMs: segment.endMs,
-        text: segment.text,
-        emotionLabel: segment.emotionLabel,
-        emotionReason: segment.emotionReason,
-      })),
-    )
+    .values(nextSegments)
     .returning({ id: transcriptSegments.id });
   const segmentIdByReference = new Map(
-    insertedSegments.map((segment, index) => [`segment_${index}`, segment.id]),
+    insertedSegments
+      .slice(existingSegments.length)
+      .map((segment, index) => [`segment_${index}`, segment.id]),
   );
 
   if (persistence.entities.length > 0) {
@@ -306,8 +342,7 @@ export async function applyElevenLabsTranscriptEvent(
   }
 
   const transcriptDurationMs = persistence.segments.reduce(
-    (maximum, segment) =>
-      Math.max(maximum, segment.endMs ?? segment.startMs),
+    (maximum, segment) => Math.max(maximum, segment.endMs ?? segment.startMs),
     0,
   );
 
@@ -331,16 +366,160 @@ export async function applyElevenLabsTranscriptEvent(
   return persistence;
 }
 
-async function isLatestTranscriptJob(meetingId: string, transcriptJobId: string) {
-  const result = await db.execute<{ id: string }>(sql`
-    select id
-    from transcript_jobs
-    where meeting_id = ${meetingId}::uuid
-    order by created_at desc, id desc
-    limit 1
+async function shouldApplyTranscriptJob(
+  meetingId: string,
+  transcriptJobId: string,
+) {
+  const result = await db.execute<{
+    current_mode: string;
+    current_status: string;
+    id: string;
+  }>(sql`
+    select
+      latest.id,
+      current.mode as current_mode,
+      current.status as current_status
+    from transcript_jobs current
+    left join lateral (
+      select id
+      from transcript_jobs
+      where meeting_id = ${meetingId}::uuid
+      order by created_at desc, id desc
+      limit 1
+    ) latest on true
+    where current.id = ${transcriptJobId}::uuid
   `);
 
-  return result.rows[0]?.id === transcriptJobId;
+  return (
+    result.rows[0]?.current_status !== "completed" &&
+    (result.rows[0]?.current_mode === "append" ||
+      result.rows[0]?.id === transcriptJobId)
+  );
+}
+
+type TranscriptApplicationContext = {
+  currentJobId: string | null;
+  firstRecordingStartedAt: Date | string | null;
+  mode: "append" | "replace";
+  recordingStartedAt: Date | string | null;
+};
+
+async function loadTranscriptApplicationContext(
+  meetingId: string,
+  transcriptJobId: string,
+): Promise<TranscriptApplicationContext> {
+  const result = await db.execute<{
+    current_job_id: string | null;
+    first_recording_started_at: Date | string | null;
+    mode: "append" | "replace";
+    recording_started_at: Date | string | null;
+  }>(sql`
+    select
+      transcript_jobs.mode,
+      recordings.started_at as recording_started_at,
+      (
+        select latest_job.id
+        from transcript_jobs latest_job
+        where latest_job.meeting_id = ${meetingId}::uuid
+          and latest_job.status = 'completed'
+        order by latest_job.created_at desc, latest_job.id desc
+        limit 1
+      ) as current_job_id,
+      (
+        select min(first_recording.started_at)
+        from recordings first_recording
+        where first_recording.meeting_id = ${meetingId}::uuid
+          and first_recording.source = 'recall'
+      ) as first_recording_started_at
+    from transcript_jobs
+    left join recordings on recordings.id = transcript_jobs.recording_id
+    where transcript_jobs.id = ${transcriptJobId}::uuid
+    limit 1
+  `);
+  const row = result.rows[0];
+
+  return {
+    currentJobId: row?.current_job_id ?? null,
+    firstRecordingStartedAt: row?.first_recording_started_at ?? null,
+    mode: row?.mode === "append" ? "append" : "replace",
+    recordingStartedAt: row?.recording_started_at ?? null,
+  };
+}
+
+export function getTranscriptSegmentOffsetMs(
+  context: TranscriptApplicationContext,
+) {
+  if (
+    context.mode !== "append" ||
+    !context.recordingStartedAt ||
+    !context.firstRecordingStartedAt
+  ) {
+    return 0;
+  }
+
+  const recordingStartedAt = new Date(context.recordingStartedAt).getTime();
+  const firstRecordingStartedAt = new Date(
+    context.firstRecordingStartedAt,
+  ).getTime();
+
+  if (
+    !Number.isFinite(recordingStartedAt) ||
+    !Number.isFinite(firstRecordingStartedAt)
+  ) {
+    return 0;
+  }
+
+  return Math.max(0, recordingStartedAt - firstRecordingStartedAt);
+}
+
+async function loadTranscriptSnapshotSegments(
+  meetingId: string,
+  transcriptJobId: string,
+  currentJobId: string | null,
+) {
+  if (currentJobId && currentJobId !== transcriptJobId) {
+    return db
+      .select({
+        speaker: transcriptSegments.speaker,
+        startMs: transcriptSegments.startMs,
+        endMs: transcriptSegments.endMs,
+        text: transcriptSegments.text,
+        polishedText: transcriptSegments.polishedText,
+        translatedText: transcriptSegments.translatedText,
+        translationEditedAt: transcriptSegments.translationEditedAt,
+        emotionLabel: transcriptSegments.emotionLabel,
+        emotionReason: transcriptSegments.emotionReason,
+      })
+      .from(transcriptSegments)
+      .where(eq(transcriptSegments.jobId, currentJobId))
+      .orderBy(transcriptSegments.startMs);
+  }
+
+  return db
+    .select({
+      speaker: transcriptSegments.speaker,
+      startMs: transcriptSegments.startMs,
+      endMs: transcriptSegments.endMs,
+      text: transcriptSegments.text,
+      polishedText: transcriptSegments.polishedText,
+      translatedText: transcriptSegments.translatedText,
+      translationEditedAt: transcriptSegments.translationEditedAt,
+      emotionLabel: transcriptSegments.emotionLabel,
+      emotionReason: transcriptSegments.emotionReason,
+    })
+    .from(transcriptSegments)
+    .where(
+      sql`${transcriptSegments.jobId} = (
+      select previous.id
+      from transcript_jobs previous
+      where previous.meeting_id = ${meetingId}::uuid
+        and previous.status = 'completed'
+        and previous.id <> ${transcriptJobId}::uuid
+      order by previous.updated_at desc, previous.created_at desc
+      limit 1
+    )`,
+    )
+    .orderBy(transcriptSegments.startMs);
 }
 
 function getMetadataString(
@@ -358,10 +537,7 @@ function getMetadataString(
   return null;
 }
 
-function getMetadataList(
-  metadata: Record<string, unknown>,
-  ...keys: string[]
-) {
+function getMetadataList(metadata: Record<string, unknown>, ...keys: string[]) {
   const value = getMetadataString(metadata, ...keys);
 
   if (!value) {
@@ -429,7 +605,10 @@ async function loadLocalRecorderAttributionContext(
       .from(transcriptJobs)
       .innerJoin(
         localRecordings,
-        eq(localRecordings.synthesizedAudioAssetId, transcriptJobs.mediaAssetId),
+        eq(
+          localRecordings.synthesizedAudioAssetId,
+          transcriptJobs.mediaAssetId,
+        ),
       )
       .innerJoin(users, eq(users.id, localRecordings.ownerUserId))
       .where(eq(transcriptJobs.id, transcriptJobId))
@@ -438,7 +617,9 @@ async function loadLocalRecorderAttributionContext(
     return null;
   }
 
-  const activityWindows = parseLocalRecorderActivityWindows(recording?.manifest);
+  const activityWindows = parseLocalRecorderActivityWindows(
+    recording?.manifest,
+  );
 
   if (!recording || activityWindows.length === 0) {
     return null;
@@ -644,7 +825,9 @@ function buildEntityExtractionContext(
 
   return {
     attendeeEmails:
-      attendeeEmails.length > 0 ? attendeeEmails : context.attendeeEmails ?? [],
+      attendeeEmails.length > 0
+        ? attendeeEmails
+        : (context.attendeeEmails ?? []),
     meetingUrl:
       getMetadataString(event.metadata, "meetingUrl", "meeting_url") ??
       context.meetingUrl ??
@@ -652,7 +835,9 @@ function buildEntityExtractionContext(
     organizationDomains: context.organizationDomains ?? [],
     transcriptEntities:
       "transcriptionEntities" in event
-        ? (event.transcriptionEntities as TranscriptDetectedEntity[] | undefined)
+        ? (event.transcriptionEntities as
+            | TranscriptDetectedEntity[]
+            | undefined)
         : undefined,
     workspaceDomain:
       getMetadataString(
@@ -907,10 +1092,7 @@ function formatFallbackSpeaker(speakerId: string) {
     return `Speaker ${Number(numericId) + 1}`;
   }
 
-  return speakerId
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return speakerId.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function findDominantParticipant(input: {
@@ -923,13 +1105,12 @@ function findDominantParticipant(input: {
   }
 
   const startMs = input.startMs;
-  const endMs = input.endMs && input.endMs > startMs ? input.endMs : startMs + 1;
-  let best:
-    | {
-        entry: ParticipantTimelineEntry;
-        overlapMs: number;
-      }
-    | null = null;
+  const endMs =
+    input.endMs && input.endMs > startMs ? input.endMs : startMs + 1;
+  let best: {
+    entry: ParticipantTimelineEntry;
+    overlapMs: number;
+  } | null = null;
 
   for (const entry of input.participantTimeline) {
     const entryEndMs = entry.endMs ?? endMs;
@@ -951,5 +1132,7 @@ function isSharedMicrophoneName(name: string) {
 }
 
 function secondsToMs(value: number | null) {
-  return typeof value === "number" ? Math.max(0, Math.round(value * 1000)) : null;
+  return typeof value === "number"
+    ? Math.max(0, Math.round(value * 1000))
+    : null;
 }

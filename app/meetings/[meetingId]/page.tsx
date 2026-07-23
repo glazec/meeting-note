@@ -7,13 +7,18 @@ import { MeetingActions } from "@/components/meeting-actions";
 import { MeetingEntityLinks } from "@/components/meeting-entity-links";
 import { MeetingHeaderMetadata } from "@/components/meeting-header-metadata";
 import { MeetingRecoveryUploadPanel } from "@/components/meeting-recovery-upload-panel";
+import { MeetingRecordingParts } from "@/components/meeting-recording-parts";
+import { MeetingRecordingResume } from "@/components/meeting-recording-resume";
 import { MeetingTitleEditor } from "@/components/meeting-title-editor";
 import { RelatedMeetingsCard } from "@/components/related-meetings-card";
 import { ShareDialog } from "@/components/share-dialog";
 import { TranscriptViewer } from "@/components/transcript-viewer";
 import { requireCurrentUser } from "@/lib/auth-guards";
 import { getMeetingDisplayStatus } from "@/lib/meeting-display-status";
-import { isMeetingBotRecoveryEligible } from "@/lib/meeting-bot-recovery-policy";
+import {
+  isMeetingBotRecoveryEligible,
+  isMeetingRecordingResumeEligible,
+} from "@/lib/meeting-bot-recovery-policy";
 import { listActiveMeetingShares } from "@/lib/meeting-share-service";
 import {
   getMeetingTranscriptForWorkspace,
@@ -56,6 +61,7 @@ export default async function MeetingPage({
     meetingStatus: meeting.status,
     transcriptJobStatus: meeting.transcriptJobStatus,
   });
+  const recordingParts = meeting.recordingParts ?? [];
   const shouldOfferBotRecovery = isMeetingBotRecoveryEligible({
     canManage,
     endedAt: meeting.endedAt,
@@ -64,6 +70,15 @@ export default async function MeetingPage({
     startedAt: meeting.startedAt,
     status: displayStatus,
     updatedAt: meeting.updatedAt,
+  });
+  const shouldOfferRecordingResume = isMeetingRecordingResumeEligible({
+    canManage,
+    lastRecordingEndedAt:
+      recordingParts.at(-1)?.endedAt ?? meeting.endedAt,
+    platform: meeting.platform,
+    scheduledEndedAt: meeting.scheduledEndedAt,
+    scheduledStartedAt: meeting.scheduledStartedAt,
+    status: displayStatus,
   });
   const canAddMeetingSource =
     displayStatus === "failed" ||
@@ -130,9 +145,7 @@ export default async function MeetingPage({
 
         <section
           className={`min-w-0 ${
-            shouldCenterMeetingSource
-              ? ""
-              : "lg:col-start-1 lg:row-start-2"
+            shouldCenterMeetingSource ? "" : "lg:col-start-1 lg:row-start-2"
           }`}
         >
           <div>
@@ -159,6 +172,13 @@ export default async function MeetingPage({
               </div>
             ) : (
               <>
+                {shouldOfferRecordingResume && meeting.meetingUrl ? (
+                  <MeetingRecordingResume
+                    meetingId={meetingId}
+                    meetingUrl={meeting.meetingUrl}
+                  />
+                ) : null}
+                <MeetingRecordingParts parts={recordingParts} />
                 <TranscriptViewer
                   audioUrl={meeting.audioUrl}
                   key={getTranscriptViewerRenderKey({

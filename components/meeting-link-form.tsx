@@ -24,7 +24,7 @@ import {
 
 type FormState = "idle" | "saving" | "scheduled" | "joining" | "error";
 type MeetingChoice = {
-  action: "join" | "schedule";
+  action: "join" | "resume" | "schedule";
   endedAt: string | null;
   id: string;
   kind: "calendar" | "recent";
@@ -377,7 +377,11 @@ function getMeetingTimingLabel(timing: MeetingChoice["timing"]) {
 }
 
 function getMeetingActionLabel(action: MeetingChoice["action"]) {
-  return action === "join" ? "Add bot now" : "Schedule bot";
+  return action === "resume"
+    ? "Resume recording"
+    : action === "join"
+      ? "Add bot now"
+      : "Schedule bot";
 }
 
 function parsePotentialMeetings(value: unknown): MeetingChoice[] {
@@ -393,7 +397,9 @@ function parsePotentialMeetings(value: unknown): MeetingChoice[] {
     const candidate = entry as Record<string, unknown>;
 
     return typeof candidate.id === "string" &&
-      (candidate.action === "join" || candidate.action === "schedule") &&
+      (candidate.action === "join" ||
+        candidate.action === "resume" ||
+        candidate.action === "schedule") &&
       (candidate.kind === "calendar" || candidate.kind === "recent") &&
       (candidate.endedAt === null || typeof candidate.endedAt === "string") &&
       typeof candidate.startedAt === "string" &&

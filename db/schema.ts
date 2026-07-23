@@ -67,25 +67,31 @@ export const jobStatus = pgEnum("job_status", [
   "failed",
 ]);
 
-export const teams = pgTable("teams", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: text("name").notNull(),
-  translationLanguage: text("translation_language")
-    .$type<"zh-CN" | "en">()
-    .notNull()
-    .default("zh-CN"),
-  shareAudienceName: text("share_audience_name"),
-  shareAudienceEmails: jsonb("share_audience_emails")
-    .$type<string[]>()
-    .notNull()
-    .default(sql`'[]'::jsonb`),
-  ...timestamps,
-}, (table) => [
-  check(
-    "teams_translation_language_check",
-    sql`${table.translationLanguage} in ('zh-CN', 'en')`,
-  ),
-]);
+export const transcriptMode = pgEnum("transcript_mode", ["replace", "append"]);
+
+export const teams = pgTable(
+  "teams",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    translationLanguage: text("translation_language")
+      .$type<"zh-CN" | "en">()
+      .notNull()
+      .default("zh-CN"),
+    shareAudienceName: text("share_audience_name"),
+    shareAudienceEmails: jsonb("share_audience_emails")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    ...timestamps,
+  },
+  (table) => [
+    check(
+      "teams_translation_language_check",
+      sql`${table.translationLanguage} in ('zh-CN', 'en')`,
+    ),
+  ],
+);
 
 export const allowedDomains = pgTable(
   "allowed_domains",
@@ -596,17 +602,27 @@ export const meetingShareRules = pgTable(
   ],
 );
 
-export const recordings = pgTable("recordings", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  meetingId: uuid("meeting_id")
-    .notNull()
-    .references(() => meetings.id, { onDelete: "cascade" }),
-  source: assetSource("source").notNull(),
-  startedAt: timestamp("started_at", { withTimezone: true }),
-  endedAt: timestamp("ended_at", { withTimezone: true }),
-  durationMs: integer("duration_ms"),
-  ...timestamps,
-});
+export const recordings = pgTable(
+  "recordings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    meetingId: uuid("meeting_id")
+      .notNull()
+      .references(() => meetings.id, { onDelete: "cascade" }),
+    source: assetSource("source").notNull(),
+    externalId: text("external_id"),
+    externalBotId: text("external_bot_id"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    durationMs: integer("duration_ms"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("recordings_source_external_unique")
+      .on(table.source, table.externalId)
+      .where(sql`${table.externalId} is not null`),
+  ],
+);
 
 export const mediaAssets = pgTable(
   "media_assets",
@@ -782,16 +798,23 @@ export const transcriptJobs = pgTable(
     meetingId: uuid("meeting_id")
       .notNull()
       .references(() => meetings.id, { onDelete: "cascade" }),
+    recordingId: uuid("recording_id").references(() => recordings.id, {
+      onDelete: "set null",
+    }),
     mediaAssetId: uuid("media_asset_id").references(() => mediaAssets.id, {
       onDelete: "set null",
     }),
     provider: text("provider").notNull().default("elevenlabs"),
+    mode: transcriptMode("mode").notNull().default("replace"),
     providerJobId: text("provider_job_id"),
     status: jobStatus("status").notNull().default("queued"),
     errorMessage: text("error_message"),
     ...timestamps,
   },
   (table) => [
+    uniqueIndex("transcript_jobs_recording_unique")
+      .on(table.recordingId)
+      .where(sql`${table.recordingId} is not null`),
     uniqueIndex("transcript_jobs_provider_job_unique").on(
       table.provider,
       table.providerJobId,
