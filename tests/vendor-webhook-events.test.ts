@@ -34,9 +34,8 @@ describe("vendor webhook idempotency", () => {
 
     insert.mockReturnValue({ values });
 
-    const { recordVendorWebhookEvent } = await import(
-      "@/lib/vendor-webhook-events"
-    );
+    const { recordVendorWebhookEvent } =
+      await import("@/lib/vendor-webhook-events");
 
     await expect(
       recordVendorWebhookEvent({
@@ -49,6 +48,7 @@ describe("vendor webhook idempotency", () => {
       id: "11111111-1111-4111-8111-111111111111",
       inserted: true,
       processed: false,
+      processingStartedAt: expect.any(Date),
       shouldProcess: true,
     });
 
@@ -86,9 +86,8 @@ describe("vendor webhook idempotency", () => {
       }),
     });
 
-    const { recordVendorWebhookEvent } = await import(
-      "@/lib/vendor-webhook-events"
-    );
+    const { recordVendorWebhookEvent } =
+      await import("@/lib/vendor-webhook-events");
 
     await expect(
       recordVendorWebhookEvent({
@@ -123,9 +122,8 @@ describe("vendor webhook idempotency", () => {
     insert.mockReturnValue({ values });
     update.mockReturnValue({ set: claimSet });
 
-    const { recordVendorWebhookEvent } = await import(
-      "@/lib/vendor-webhook-events"
-    );
+    const { recordVendorWebhookEvent } =
+      await import("@/lib/vendor-webhook-events");
 
     await expect(
       recordVendorWebhookEvent({
@@ -138,6 +136,7 @@ describe("vendor webhook idempotency", () => {
       id: "11111111-1111-4111-8111-111111111111",
       inserted: false,
       processed: false,
+      processingStartedAt: new Date("2026-06-30T12:00:00.000Z"),
       shouldProcess: true,
     });
 
@@ -174,9 +173,8 @@ describe("vendor webhook idempotency", () => {
       }),
     });
 
-    const { recordVendorWebhookEvent } = await import(
-      "@/lib/vendor-webhook-events"
-    );
+    const { recordVendorWebhookEvent } =
+      await import("@/lib/vendor-webhook-events");
 
     await expect(
       recordVendorWebhookEvent({
@@ -199,9 +197,8 @@ describe("vendor webhook idempotency", () => {
 
     update.mockReturnValue({ set });
 
-    const { markVendorWebhookEventProcessed } = await import(
-      "@/lib/vendor-webhook-events"
-    );
+    const { markVendorWebhookEventProcessed } =
+      await import("@/lib/vendor-webhook-events");
 
     await markVendorWebhookEventProcessed({
       provider: "recall",

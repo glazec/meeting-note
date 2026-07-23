@@ -13,6 +13,10 @@ import {
 } from "@/lib/webhook-signatures";
 import { logWebhookProcessingError } from "@/lib/webhook-error-logging";
 import { persistRecallRealtimeParticipantTimelineEvent } from "@/lib/meeting-participant-timeline";
+import {
+  getRecallWebhookBotIdentity,
+  isRecallBotAccepted,
+} from "@/lib/meeting-bot-lineage";
 
 const RECALL_REALTIME_PROCESSING_CLAIM_TIMEOUT_MS = 30 * 1000;
 const RECALL_CHAT_PROCESSING_CLAIM_TIMEOUT_MS = 10 * 60 * 1000;
@@ -68,6 +72,20 @@ export async function handleRecallRealtimeWebhook(request: Request) {
       return Response.json({
         received: true,
         result: { action: "skipped", reason: "duplicate" },
+      });
+    }
+
+    const identity = getRecallWebhookBotIdentity(body);
+
+    if (identity && !(await isRecallBotAccepted(identity))) {
+      await markVendorWebhookEventProcessed({
+        provider: "recall",
+        idempotencyKey,
+      });
+
+      return Response.json({
+        received: true,
+        result: { action: "skipped", reason: "stale_bot" },
       });
     }
 

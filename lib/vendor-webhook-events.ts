@@ -61,6 +61,7 @@ export async function recordVendorWebhookEvent(
       id: rows[0].id,
       inserted: true,
       processed: false,
+      processingStartedAt: rows[0].processingStartedAt ?? now,
       shouldProcess: true,
     };
   }
@@ -93,6 +94,7 @@ export async function recordVendorWebhookEvent(
       id: claimedRows[0].id,
       inserted: false,
       processed: false,
+      processingStartedAt: claimedRows[0].processingStartedAt ?? now,
       shouldProcess: true,
     };
   }
@@ -141,6 +143,31 @@ export async function markVendorWebhookEventProcessed(input: {
       and(
         eq(vendorWebhookEvents.provider, input.provider),
         eq(vendorWebhookEvents.idempotencyKey, input.idempotencyKey),
+      ),
+    );
+}
+
+export async function releaseVendorWebhookEventClaim(input: {
+  provider: Provider;
+  idempotencyKey: string;
+  processingStartedAt: Date;
+}) {
+  if (!input.idempotencyKey) {
+    throw new MissingWebhookIdempotencyKeyError(input.provider);
+  }
+
+  await db
+    .update(vendorWebhookEvents)
+    .set({
+      processingStartedAt: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(vendorWebhookEvents.provider, input.provider),
+        eq(vendorWebhookEvents.idempotencyKey, input.idempotencyKey),
+        eq(vendorWebhookEvents.processingStartedAt, input.processingStartedAt),
+        isNull(vendorWebhookEvents.processedAt),
       ),
     );
 }

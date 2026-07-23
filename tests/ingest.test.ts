@@ -29,30 +29,33 @@ const {
   markMeetingTranslationFailed,
   markMeetingTranslationQueued,
   recordVendorWebhookEvent,
+  releaseVendorWebhookEventClaim,
   sendInngestEvent,
   MissingWebhookIdempotencyKeyError,
 } = vi.hoisted(() => ({
-    applyElevenLabsTranscriptEvent: vi.fn(),
-    applyRecallMeetingEvent: vi.fn(),
-    getMeetingTranslationLanguage: vi.fn(),
-    markVendorWebhookEventProcessed: vi.fn(),
-    markMeetingTranslationCompleted: vi.fn(),
-    markMeetingTranslationFailed: vi.fn(),
-    markMeetingTranslationQueued: vi.fn(),
-    recordVendorWebhookEvent: vi.fn(),
-    sendInngestEvent: vi.fn(),
-    MissingWebhookIdempotencyKeyError: class MissingWebhookIdempotencyKeyError extends Error {
-      constructor() {
-        super("Missing webhook idempotency key");
-      }
-    },
-  }));
+  applyElevenLabsTranscriptEvent: vi.fn(),
+  applyRecallMeetingEvent: vi.fn(),
+  getMeetingTranslationLanguage: vi.fn(),
+  markVendorWebhookEventProcessed: vi.fn(),
+  markMeetingTranslationCompleted: vi.fn(),
+  markMeetingTranslationFailed: vi.fn(),
+  markMeetingTranslationQueued: vi.fn(),
+  recordVendorWebhookEvent: vi.fn(),
+  releaseVendorWebhookEventClaim: vi.fn(),
+  sendInngestEvent: vi.fn(),
+  MissingWebhookIdempotencyKeyError: class MissingWebhookIdempotencyKeyError extends Error {
+    constructor() {
+      super("Missing webhook idempotency key");
+    }
+  },
+}));
 
 vi.mock("@/lib/vendor-webhook-events", () => {
   return {
     MissingWebhookIdempotencyKeyError,
     markVendorWebhookEventProcessed,
     recordVendorWebhookEvent,
+    releaseVendorWebhookEventClaim,
   };
 });
 
@@ -209,8 +212,10 @@ describe("vendor webhook normalization", () => {
   beforeEach(() => {
     recordVendorWebhookEvent.mockResolvedValue({
       inserted: true,
+      processingStartedAt: new Date("2026-07-22T18:04:25.000Z"),
       shouldProcess: true,
     });
+    releaseVendorWebhookEventClaim.mockResolvedValue(undefined);
     sendInngestEvent.mockResolvedValue(undefined);
     markVendorWebhookEventProcessed.mockResolvedValue(undefined);
     markMeetingTranslationCompleted.mockResolvedValue(undefined);
@@ -231,6 +236,7 @@ describe("vendor webhook normalization", () => {
     markMeetingTranslationQueued.mockReset();
     getMeetingTranslationLanguage.mockReset();
     recordVendorWebhookEvent.mockReset();
+    releaseVendorWebhookEventClaim.mockReset();
     sendInngestEvent.mockReset();
     applyElevenLabsTranscriptEvent.mockReset();
     applyRecallMeetingEvent.mockReset();
@@ -869,9 +875,64 @@ describe("vendor webhook normalization", () => {
     expect(markVendorWebhookEventProcessed).not.toHaveBeenCalled();
   });
 
+  it("releases a failed recording claim so the next Recall delivery can retry immediately", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    applyRecallMeetingEvent
+      .mockRejectedValueOnce(
+        new Error("Recall recording is not ready: timing_mismatch"),
+      )
+      .mockResolvedValueOnce({ action: "update" });
+    const processingStartedAt = new Date("2026-07-22T18:04:25.000Z");
+    recordVendorWebhookEvent.mockResolvedValue({
+      inserted: true,
+      processingStartedAt,
+      shouldProcess: true,
+    });
+    const payload = {
+      event: "recording.done",
+      data: {
+        data: {
+          code: "done",
+          sub_code: null,
+          updated_at: "2026-07-22T18:04:24.599Z",
+        },
+        bot: {
+          id: "bot_123",
+          metadata: {
+            meetingId: "11111111-1111-4111-8111-111111111111",
+          },
+        },
+        recording: { id: "recording_123" },
+      },
+    };
+
+    try {
+      const firstResponse = await postRecallWebhook(payload);
+      const secondResponse = await postRecallWebhook(payload);
+
+      expect(firstResponse.status).toBe(500);
+      expect(secondResponse.status).toBe(200);
+      expect(releaseVendorWebhookEventClaim).toHaveBeenCalledExactlyOnceWith({
+        provider: "recall",
+        idempotencyKey: "msg_test",
+        processingStartedAt,
+      });
+      expect(applyRecallMeetingEvent).toHaveBeenCalledTimes(2);
+      expect(markVendorWebhookEventProcessed).toHaveBeenCalledExactlyOnceWith({
+        provider: "recall",
+        idempotencyKey: "msg_test",
+      });
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it("processes signed Recall Desktop SDK upload completion webhooks", async () => {
     recordVendorWebhookEvent.mockResolvedValueOnce({
       inserted: true,
+      processingStartedAt: new Date("2026-07-22T18:04:25.000Z"),
       shouldProcess: true,
     });
     applyRecallMeetingEvent.mockResolvedValueOnce({
@@ -1142,9 +1203,9 @@ describe("vendor job creation", () => {
         b64_data: expect.any(String),
       },
     });
-    expect(body.automatic_video_output.in_call_recording.b64_data.length).toBeGreaterThan(
-      1000,
-    );
+    expect(
+      body.automatic_video_output.in_call_recording.b64_data.length,
+    ).toBeGreaterThan(1000);
     expect(body.automatic_video_output.in_call_recording.b64_data).toBe(
       body.automatic_video_output.in_call_not_recording.b64_data,
     );
@@ -1190,7 +1251,8 @@ describe("vendor job creation", () => {
           meetingId: "11111111-1111-4111-8111-111111111111",
           source: "local_recorder_sdk",
         },
-        webhookUrl: "https://app.example.com/api/local-recorder/recordings/sdk-upload",
+        webhookUrl:
+          "https://app.example.com/api/local-recorder/recordings/sdk-upload",
       }),
     ).resolves.toEqual({
       id: "33333333-3333-4333-8333-333333333333",
@@ -1458,12 +1520,14 @@ describe("vendor job creation", () => {
 
   it("deletes a scheduled Recall bot before it joins", async () => {
     vi.stubEnv("RECALL_API_KEY", "recall-key\n");
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(deleteScheduledRecallBot({ botId: "bot_123" })).resolves.toEqual(
-      {},
-    );
+    await expect(
+      deleteScheduledRecallBot({ botId: "bot_123" }),
+    ).resolves.toEqual({});
 
     expect(fetchMock).toHaveBeenCalledWith(
       "https://us-east-1.recall.ai/api/v1/bot/bot_123/",
@@ -1488,9 +1552,9 @@ describe("vendor job creation", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(deleteScheduledRecallBot({ botId: "missing_bot" })).resolves.toEqual(
-      {},
-    );
+    await expect(
+      deleteScheduledRecallBot({ botId: "missing_bot" }),
+    ).resolves.toEqual({});
   });
 
   it("retrieves Recall bot details", async () => {
@@ -1574,7 +1638,9 @@ describe("vendor job creation", () => {
               started_at: "2026-07-10T10:00:00.000Z",
               media_shortcuts: {
                 video_mixed: {
-                  data: { download_url: "https://recall.example.com/video.mp4" },
+                  data: {
+                    download_url: "https://recall.example.com/video.mp4",
+                  },
                 },
                 participant_events: {
                   data: {

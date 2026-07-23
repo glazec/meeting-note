@@ -339,9 +339,8 @@ export function getRecallApiBaseUrl(env?: {
     env ?? (process.env as { RECALL_API_BASE_URL?: string | undefined }),
   );
 
-  return new URL(
-    parsedEnv.RECALL_API_BASE_URL ?? DEFAULT_RECALL_API_BASE_URL,
-  ).origin;
+  return new URL(parsedEnv.RECALL_API_BASE_URL ?? DEFAULT_RECALL_API_BASE_URL)
+    .origin;
 }
 
 export async function scheduleRecallBot(input: {
@@ -583,7 +582,10 @@ export async function listRecallCalendars() {
 export async function retrieveRecallCalendar(calendarId: string) {
   const env = recallApiEnvSchema.parse(process.env);
   const response = await fetch(
-    buildRecallApiUrl(env, `/api/v2/calendars/${encodeURIComponent(calendarId)}/`),
+    buildRecallApiUrl(
+      env,
+      `/api/v2/calendars/${encodeURIComponent(calendarId)}/`,
+    ),
     {
       method: "GET",
       headers: buildRecallReadHeaders(env),
@@ -607,7 +609,9 @@ export async function listRecallCalendarEvents(input: {
 }) {
   const parsedInput = recallCalendarEventListInputSchema.parse(input);
   const env = recallApiEnvSchema.parse(process.env);
-  const initialUrl = new URL(buildRecallApiUrl(env, "/api/v2/calendar-events/"));
+  const initialUrl = new URL(
+    buildRecallApiUrl(env, "/api/v2/calendar-events/"),
+  );
 
   initialUrl.searchParams.set("calendar_id", parsedInput.calendarId);
   if (parsedInput.updatedAtGte) {
@@ -748,7 +752,10 @@ export async function updateScheduledRecallBot(input: {
   const env = recallApiEnvSchema.parse(process.env);
 
   const response = await fetch(
-    buildRecallApiUrl(env, `/api/v1/bot/${encodeURIComponent(parsedInput.botId)}/`),
+    buildRecallApiUrl(
+      env,
+      `/api/v1/bot/${encodeURIComponent(parsedInput.botId)}/`,
+    ),
     {
       method: "PATCH",
       headers: {
@@ -792,7 +799,10 @@ export async function deleteScheduledRecallBot(input: { botId: string }) {
   const env = recallApiEnvSchema.parse(process.env);
 
   const response = await fetch(
-    buildRecallApiUrl(env, `/api/v1/bot/${encodeURIComponent(parsedInput.botId)}/`),
+    buildRecallApiUrl(
+      env,
+      `/api/v1/bot/${encodeURIComponent(parsedInput.botId)}/`,
+    ),
     {
       method: "DELETE",
       headers: {
@@ -853,13 +863,16 @@ export async function sendRecallChatMessage(input: {
 
 export async function retrieveRecallBot(botId: string) {
   const env = recallApiEnvSchema.parse(process.env);
-  const response = await fetch(buildRecallApiUrl(env, `/api/v1/bot/${botId}/`), {
-    method: "GET",
-    headers: {
-      Authorization: `Token ${env.RECALL_API_KEY}`,
-      Accept: "application/json",
+  const response = await fetch(
+    buildRecallApiUrl(env, `/api/v1/bot/${botId}/`),
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Token ${env.RECALL_API_KEY}`,
+        Accept: "application/json",
+      },
     },
-  });
+  );
 
   if (!response.ok) {
     throw new Error(
@@ -924,6 +937,24 @@ export function findRecallRecordingMediaUrl(
   }
 
   return null;
+}
+
+export function findRecallRecordingVideoUrl(
+  artifact: unknown,
+  recordingId: string,
+) {
+  const artifactRecord = getRecord(artifact);
+  const recordings = getArray(artifactRecord?.recordings);
+  const recording =
+    artifactRecord?.id === recordingId
+      ? artifactRecord
+      : getRecord(
+          recordings?.find(
+            (candidate) => getRecord(candidate)?.id === recordingId,
+          ),
+        );
+
+  return getDownloadUrl(getRecord(recording?.media_shortcuts)?.video_mixed);
 }
 
 export function findRecallRecordingDurationMs(
@@ -1091,8 +1122,9 @@ function findRecallSpeakerTimelineUrlInRecord(
   }
 
   return (
-    getSpeakerTimelineDownloadUrl(candidate.media_shortcuts?.participant_events) ??
-    getDownloadUrl(candidate.media_shortcuts?.speaker_timeline)
+    getSpeakerTimelineDownloadUrl(
+      candidate.media_shortcuts?.participant_events,
+    ) ?? getDownloadUrl(candidate.media_shortcuts?.speaker_timeline)
   );
 }
 

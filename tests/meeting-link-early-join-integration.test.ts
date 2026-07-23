@@ -10,6 +10,7 @@ const {
   getOrCreateWorkspaceForSessionUser,
   markMeetingBotFailed,
   markMeetingBotScheduled,
+  send,
   select,
 } = vi.hoisted(() => ({
   assertCanCreateMeetings: vi.fn(),
@@ -21,12 +22,17 @@ const {
   getOrCreateWorkspaceForSessionUser: vi.fn(),
   markMeetingBotFailed: vi.fn(),
   markMeetingBotScheduled: vi.fn(),
+  send: vi.fn(),
   select: vi.fn(),
 }));
 
 vi.mock("@/lib/auth", () => ({ getCurrentUser }));
 
 vi.mock("@/db/client", () => ({ db: { select } }));
+
+vi.mock("@/inngest/client", () => ({
+  inngest: { send },
+}));
 
 vi.mock("@/lib/workspace", () => ({
   assertCanCreateMeetings,
@@ -120,6 +126,7 @@ describe("New Meeting existing URL early join", () => {
     getOrCreateWorkspaceForSessionUser.mockReset();
     markMeetingBotFailed.mockReset();
     markMeetingBotScheduled.mockReset();
+    send.mockReset();
     select.mockReset();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
@@ -158,25 +165,27 @@ describe("New Meeting existing URL early join", () => {
     });
     mockScheduledCalendarMeeting();
 
-    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
-      if (init?.method === "GET") {
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, init?: RequestInit) => {
+        if (init?.method === "GET") {
+          return Response.json({
+            next: null,
+            results: [
+              { id: "recall_event_123", platform_id: "google_event_123" },
+            ],
+          });
+        }
+
         return Response.json({
-          next: null,
-          results: [
-            { id: "recall_event_123", platform_id: "google_event_123" },
+          bots: [
+            {
+              bot_id: "immediate_bot",
+              deduplication_key: "shared_event_key",
+            },
           ],
         });
-      }
-
-      return Response.json({
-        bots: [
-          {
-            bot_id: "immediate_bot",
-            deduplication_key: "shared_event_key",
-          },
-        ],
-      });
-    });
+      },
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const { POST } = await import("@/app/api/meetings/link/route");
@@ -197,7 +206,7 @@ describe("New Meeting existing URL early join", () => {
       meetingId: "11111111-1111-4111-8111-111111111111",
       status: "joining",
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(String(fetchMock.mock.calls[0][0])).toContain(
       "/api/v2/calendar-events/?calendar_id=calendar_123",
     );
@@ -214,6 +223,10 @@ describe("New Meeting existing URL early join", () => {
       bot_config: { join_at: "2026-07-16T15:30:10.000Z" },
       deduplication_key: "shared_event_key",
     });
+    expect(fetchMock.mock.calls[2][0]).toBe(
+      "https://us-east-1.recall.ai/api/v1/bot/scheduled_bot/",
+    );
+    expect(fetchMock.mock.calls[2][1]?.method).toBe("DELETE");
     expect(markMeetingBotScheduled).toHaveBeenCalledWith({
       meetingId: "11111111-1111-4111-8111-111111111111",
       recallBotId: "immediate_bot",
@@ -249,13 +262,15 @@ describe("New Meeting existing URL early join", () => {
     });
     mockDirectScheduledMeeting();
 
-    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
-      if (init?.method === "DELETE") {
-        return new Response(null, { status: 204 });
-      }
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, init?: RequestInit) => {
+        if (init?.method === "DELETE") {
+          return new Response(null, { status: 204 });
+        }
 
-      return Response.json({ id: "immediate_bot" });
-    });
+        return Response.json({ id: "immediate_bot" });
+      },
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const { POST } = await import("@/app/api/meetings/link/route");
@@ -277,19 +292,20 @@ describe("New Meeting existing URL early join", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0]).toEqual([
-      "https://us-east-1.recall.ai/api/v1/bot/scheduled_bot/",
-      expect.objectContaining({ method: "DELETE" }),
-    ]);
-    expect(fetchMock.mock.calls[1][0]).toBe(
       "https://us-east-1.recall.ai/api/v1/bot/",
-    );
+      expect.objectContaining({ method: "POST" }),
+    ]);
     const requestBody = JSON.parse(
-      String(fetchMock.mock.calls[1][1]?.body),
+      String(fetchMock.mock.calls[0][1]?.body),
     ) as { join_at?: string; meeting_url: string };
     expect(requestBody).toMatchObject({
       meeting_url: "https://meet.google.com/abc-defg-hij",
     });
     expect(requestBody).not.toHaveProperty("join_at");
+    expect(fetchMock.mock.calls[1]).toEqual([
+      "https://us-east-1.recall.ai/api/v1/bot/scheduled_bot/",
+      expect.objectContaining({ method: "DELETE" }),
+    ]);
     expect(markMeetingBotScheduled).toHaveBeenCalledWith({
       meetingId: "11111111-1111-4111-8111-111111111111",
       recallBotId: "immediate_bot",

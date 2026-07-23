@@ -5,19 +5,20 @@ const {
   completeUploadedVideoConversion,
   convertVideoObjectToAudio,
   createReadUrl,
+  deleteScheduledRecallBot,
   scheduleRecallBot,
   syncRecallCalendarEventsForAllConnectedUsers,
   update,
-} =
-  vi.hoisted(() => ({
-    createElevenLabsTranscriptJob: vi.fn(),
-    completeUploadedVideoConversion: vi.fn(),
-    convertVideoObjectToAudio: vi.fn(),
-    createReadUrl: vi.fn(),
-    scheduleRecallBot: vi.fn(),
-    syncRecallCalendarEventsForAllConnectedUsers: vi.fn(),
-    update: vi.fn(),
-  }));
+} = vi.hoisted(() => ({
+  createElevenLabsTranscriptJob: vi.fn(),
+  completeUploadedVideoConversion: vi.fn(),
+  convertVideoObjectToAudio: vi.fn(),
+  createReadUrl: vi.fn(),
+  deleteScheduledRecallBot: vi.fn(),
+  scheduleRecallBot: vi.fn(),
+  syncRecallCalendarEventsForAllConnectedUsers: vi.fn(),
+  update: vi.fn(),
+}));
 
 vi.mock("@/db/client", () => ({
   db: {
@@ -42,6 +43,7 @@ vi.mock("@/lib/vendors/elevenlabs", () => ({
 }));
 
 vi.mock("@/lib/vendors/recall", () => ({
+  deleteScheduledRecallBot,
   scheduleRecallBot,
 }));
 
@@ -74,6 +76,10 @@ describe("Inngest functions", () => {
         triggers: [{ event: "meeting/schedule.bot" }],
       },
       {
+        id: "delete-recall-bot",
+        triggers: [{ event: "meeting/delete.recall-bot" }],
+      },
+      {
         id: "transcribe-audio",
         triggers: [{ event: "meeting/transcribe.audio" }],
       },
@@ -103,6 +109,20 @@ describe("Inngest functions", () => {
     ]);
   });
 
+  it("retries deletion of a displaced Recall bot", async () => {
+    deleteScheduledRecallBot.mockResolvedValue({});
+    const { deleteRecallBot } = await import("@/inngest/functions");
+
+    await expect(
+      (deleteRecallBot as unknown as RunnableInngestFunction).fn({
+        event: { data: { botId: "scheduled_bot" } },
+      }),
+    ).resolves.toEqual({});
+    expect(deleteScheduledRecallBot).toHaveBeenCalledWith({
+      botId: "scheduled_bot",
+    });
+  });
+
   it("runs the hourly Recall Calendar repair sync", async () => {
     const syncResult = {
       connectionCount: 2,
@@ -118,11 +138,15 @@ describe("Inngest functions", () => {
     await expect(
       (syncRecallCalendarsHourly as unknown as RunnableInngestFunction).fn(),
     ).resolves.toEqual(syncResult);
-    expect(syncRecallCalendarEventsForAllConnectedUsers).toHaveBeenCalledTimes(1);
+    expect(syncRecallCalendarEventsForAllConnectedUsers).toHaveBeenCalledTimes(
+      1,
+    );
   });
 
   it("marks the transcript job failed when the final transcription attempt fails", async () => {
-    const error = new Error("ElevenLabs transcript job failed with 400 Bad Request");
+    const error = new Error(
+      "ElevenLabs transcript job failed with 400 Bad Request",
+    );
     const where = vi.fn().mockResolvedValue(undefined);
     const set = vi.fn().mockReturnValue({ where });
     update.mockReturnValue({ set });

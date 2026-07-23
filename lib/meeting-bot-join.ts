@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { calendarConnections, calendarEvents, meetings } from "@/db/schema";
+import { inngest } from "@/inngest/client";
 import type { SessionUser } from "@/lib/auth";
 import { markMeetingBotScheduled } from "@/lib/meeting-bot-records";
 import {
@@ -85,8 +86,7 @@ export async function joinScheduledMeetingBotNow(input: {
       recallCalendarId: meeting.recallCalendarId,
       startedAt: meeting.startedAt,
     });
-    const deduplicationKey =
-      meeting.teamMeetingKey ?? recallCalendarEventId;
+    const deduplicationKey = meeting.teamMeetingKey ?? recallCalendarEventId;
     const response = await scheduleRecallCalendarEventBot({
       calendarEventId: recallCalendarEventId,
       deduplicationKey,
@@ -98,12 +98,24 @@ export async function joinScheduledMeetingBotNow(input: {
     });
     const botId = getRecallCalendarBotId(response, deduplicationKey);
 
-    if (botId && botId !== meeting.recallBotId) {
-      await markMeetingBotScheduled({ meetingId: meeting.id, recallBotId: botId });
+    if (!botId) {
+      throw new Error("Recall calendar bot response missing id");
+    }
+
+    if (botId !== meeting.recallBotId) {
+      try {
+        await markMeetingBotScheduled({
+          meetingId: meeting.id,
+          recallBotId: botId,
+        });
+      } catch (error) {
+        await deleteScheduledRecallBot({ botId }).catch(() => undefined);
+        throw error;
+      }
       activeBotId = botId;
+      await retireRecallBot(meeting.recallBotId);
     }
   } else {
-    await deleteScheduledRecallBot({ botId: meeting.recallBotId });
     const response = (await scheduleRecallBot({
       meetingUrl: meeting.meetingUrl,
       ...getMeetingBotRecallCreateInput(botProfile),
@@ -115,14 +127,45 @@ export async function joinScheduledMeetingBotNow(input: {
       throw new Error("Recall bot response missing id");
     }
 
-    await markMeetingBotScheduled({
-      meetingId: meeting.id,
-      recallBotId: response.id,
-    });
+    try {
+      await markMeetingBotScheduled({
+        meetingId: meeting.id,
+        recallBotId: response.id,
+      });
+    } catch (error) {
+      await deleteScheduledRecallBot({ botId: response.id }).catch(
+        () => undefined,
+      );
+      throw error;
+    }
     activeBotId = response.id;
+    await retireRecallBot(meeting.recallBotId);
   }
 
   return { botId: activeBotId, meetingId: meeting.id };
+}
+
+async function retireRecallBot(botId: string) {
+  let retryQueued = false;
+
+  try {
+    await inngest.send({
+      id: `delete-recall-bot:${botId}`,
+      name: "meeting/delete.recall-bot",
+      data: { botId },
+    });
+    retryQueued = true;
+  } catch {
+    // The direct delete below is still authoritative when queueing is down.
+  }
+
+  try {
+    await deleteScheduledRecallBot({ botId });
+  } catch (error) {
+    if (!retryQueued) {
+      throw error;
+    }
+  }
 }
 
 async function findRecallCalendarEventId(input: {

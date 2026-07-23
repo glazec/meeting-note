@@ -4,12 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   answerRecallChatMessage,
+  getRecallWebhookBotIdentity,
+  isRecallBotAccepted,
   persistRecallRealtimeParticipantTimelineEvent,
   markVendorWebhookEventProcessed,
   recordVendorWebhookEvent,
   MissingWebhookIdempotencyKeyError,
 } = vi.hoisted(() => ({
   answerRecallChatMessage: vi.fn(),
+  getRecallWebhookBotIdentity: vi.fn(),
+  isRecallBotAccepted: vi.fn(),
   persistRecallRealtimeParticipantTimelineEvent: vi.fn(),
   markVendorWebhookEventProcessed: vi.fn(),
   recordVendorWebhookEvent: vi.fn(),
@@ -38,6 +42,13 @@ vi.mock("@/lib/vendor-webhook-events", () => ({
 vi.mock("@/lib/meeting-participant-timeline", () => ({
   persistRecallRealtimeParticipantTimelineEvent,
 }));
+
+vi.mock("@/lib/meeting-bot-lineage", () => {
+  return {
+    getRecallWebhookBotIdentity,
+    isRecallBotAccepted,
+  };
+});
 
 const recallWebhookSecret = "whsec_cmVjYWxsLXdlYmhvb2stc2VjcmV0";
 
@@ -167,6 +178,11 @@ describe("POST /api/recall/chat/webhook", () => {
       action: "replied",
       reply: "We decided to follow up next week.",
     });
+    getRecallWebhookBotIdentity.mockReturnValue({
+      botId: "bot_123",
+      meetingId: "11111111-1111-4111-8111-111111111111",
+    });
+    isRecallBotAccepted.mockResolvedValue(true);
     persistRecallRealtimeParticipantTimelineEvent.mockResolvedValue({
       action: "speech_on",
       entry: {
@@ -184,6 +200,8 @@ describe("POST /api/recall/chat/webhook", () => {
     recordVendorWebhookEvent.mockReset();
     markVendorWebhookEventProcessed.mockReset();
     answerRecallChatMessage.mockReset();
+    getRecallWebhookBotIdentity.mockReset();
+    isRecallBotAccepted.mockReset();
     persistRecallRealtimeParticipantTimelineEvent.mockReset();
     vi.unstubAllEnvs();
     vi.resetModules();
@@ -238,6 +256,33 @@ describe("POST /api/recall/chat/webhook", () => {
     });
     expect(answerRecallChatMessage).not.toHaveBeenCalled();
     expect(markVendorWebhookEventProcessed).not.toHaveBeenCalled();
+  });
+
+  it("ignores realtime events from a displaced meeting bot", async () => {
+    isRecallBotAccepted.mockResolvedValue(false);
+
+    const response = await postRecallRealtimeWebhook(chatPayload);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      received: true,
+      result: {
+        action: "skipped",
+        reason: "stale_bot",
+      },
+    });
+    expect(isRecallBotAccepted).toHaveBeenCalledWith({
+      botId: "bot_123",
+      meetingId: "11111111-1111-4111-8111-111111111111",
+    });
+    expect(answerRecallChatMessage).not.toHaveBeenCalled();
+    expect(
+      persistRecallRealtimeParticipantTimelineEvent,
+    ).not.toHaveBeenCalled();
+    expect(markVendorWebhookEventProcessed).toHaveBeenCalledWith({
+      provider: "recall",
+      idempotencyKey: "msg_chat",
+    });
   });
 
   it("asks Recall to retry unfinished duplicate chat webhook deliveries", async () => {

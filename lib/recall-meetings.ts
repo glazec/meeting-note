@@ -4,6 +4,8 @@ import { db } from "@/db/client";
 import { meetings } from "@/db/schema";
 import { inngest } from "@/inngest/client";
 import { fetchAndPersistRecallParticipantTimeline } from "@/lib/meeting-participant-timeline";
+import { isRecallBotAccepted } from "@/lib/meeting-bot-lineage";
+import { getRecallRecordingReadiness } from "@/lib/recall-recording-readiness";
 import { isRecallDesktopSdkFallbackIntent } from "@/lib/local-recorder-records";
 import { createRecallRecordingTranscription } from "@/lib/transcription-records";
 import type { normalizeRecallWebhook } from "@/lib/vendors/recall";
@@ -75,6 +77,16 @@ export async function applyRecallMeetingEvent(event: RecallWebhookEvent) {
     return update;
   }
 
+  if (
+    update.recallBotId &&
+    !(await isRecallBotAccepted({
+      botId: update.recallBotId,
+      meetingId: update.meetingId,
+    }))
+  ) {
+    return { action: "skip" as const, reason: "stale_bot" as const };
+  }
+
   const status =
     update.status === "missed" && (await hasRecordingEvidence(update.meetingId))
       ? null
@@ -111,28 +123,20 @@ export async function applyRecallMeetingEvent(event: RecallWebhookEvent) {
     })
     .where(eq(meetings.id, update.meetingId));
 
-  if (
-    update.recallBotId &&
-    update.recallRecordingId &&
-    shouldQueueRecallVideoFrames(event)
-  ) {
-    await inngest.send({
-      id: `video-frames:${update.recallRecordingId}:${getVideoFrameReadiness(event)}`,
-      name: "meeting/extract.video-frames",
-      data: {
-        meetingId: update.meetingId,
-        recallBotId: update.recallBotId,
-        recallRecordingId: update.recallRecordingId,
-      },
-    });
-  }
+  const shouldQueueTranscription =
+    status === "processing" && shouldQueueRecallRecordingTranscription(event);
+  const shouldQueueVideoFrames =
+    Boolean(update.recallBotId) && shouldQueueRecallVideoFrames(event);
 
   if (
-    status === "processing" &&
-    (update.recallBotId || update.recallRecordingId) &&
-    shouldQueueRecallRecordingTranscription(event)
+    update.recallRecordingId &&
+    (shouldQueueTranscription || shouldQueueVideoFrames)
   ) {
-    await queueRecallRecordingTranscription(update, event.metadata);
+    await queueRecallRecordingProcessing(update, event.metadata, {
+      shouldQueueTranscription,
+      shouldQueueVideoFrames,
+      videoFrameReadiness: getVideoFrameReadiness(event),
+    });
   }
 
   return update;
@@ -167,9 +171,14 @@ function shouldQueueRecallVideoFrames(event: RecallWebhookEvent) {
   );
 }
 
-async function queueRecallRecordingTranscription(
+async function queueRecallRecordingProcessing(
   update: Extract<RecallMeetingUpdate, { action: "update" }>,
   metadata: Record<string, unknown>,
+  options: {
+    shouldQueueTranscription: boolean;
+    shouldQueueVideoFrames: boolean;
+    videoFrameReadiness: string;
+  },
 ) {
   if (!update.recallRecordingId) {
     return;
@@ -182,13 +191,38 @@ async function queueRecallRecordingTranscription(
       : null;
 
   if (!recallArtifact) {
-    return;
+    throw new Error("Recall recording is not available");
   }
 
-  const audioUrl = findRecallRecordingMediaUrl(
-    recallArtifact,
-    update.recallRecordingId,
-  );
+  const readiness = update.recallBotId
+    ? await getRecallRecordingReadiness(
+        recallArtifact,
+        update.recallRecordingId,
+      )
+    : null;
+
+  if (readiness?.action === "wait") {
+    if (
+      readiness.reason === "media_unavailable" &&
+      hasTerminalRecallMediaFailure(recallArtifact, update.recallRecordingId)
+    ) {
+      await db
+        .update(meetings)
+        .set({
+          status: "failed",
+          updatedAt: new Date(),
+        })
+        .where(eq(meetings.id, update.meetingId));
+      return;
+    }
+
+    throw new Error(`Recall recording is not ready: ${readiness.reason}`);
+  }
+
+  const audioUrl =
+    readiness?.action === "ready"
+      ? readiness.audioUrl
+      : findRecallRecordingMediaUrl(recallArtifact, update.recallRecordingId);
   const speakerTimelineUrl = findRecallSpeakerTimelineUrl(
     recallArtifact,
     update.recallRecordingId,
@@ -210,6 +244,22 @@ async function queueRecallRecordingTranscription(
     return;
   }
 
+  if (options.shouldQueueVideoFrames && update.recallBotId) {
+    await inngest.send({
+      id: `video-frames:${update.recallRecordingId}:${options.videoFrameReadiness}`,
+      name: "meeting/extract.video-frames",
+      data: {
+        meetingId: update.meetingId,
+        recallBotId: update.recallBotId,
+        recallRecordingId: update.recallRecordingId,
+      },
+    });
+  }
+
+  if (!options.shouldQueueTranscription) {
+    return;
+  }
+
   if (speakerTimelineUrl) {
     if (update.recallBotId) {
       try {
@@ -228,9 +278,14 @@ async function queueRecallRecordingTranscription(
     }
   }
 
-  const recordingTiming = update.recallRecordingId
-    ? findRecallRecordingTiming(recallArtifact, update.recallRecordingId)
-    : null;
+  const recordingTiming =
+    readiness?.action === "ready"
+      ? {
+          durationMs: readiness.durationMs,
+          endedAt: readiness.endedAt,
+          startedAt: readiness.startedAt,
+        }
+      : findRecallRecordingTiming(recallArtifact, update.recallRecordingId);
   const transcription = await createRecallRecordingTranscription({
     ...(recordingTiming ?? {}),
     externalBotId: update.recallBotId ?? undefined,

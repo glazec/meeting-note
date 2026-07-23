@@ -26,7 +26,10 @@ import {
   DEFAULT_TRANSLATION_LANGUAGE,
   translationLanguageSchema,
 } from "@/lib/meeting-translation-language";
-import { scheduleRecallBot } from "@/lib/vendors/recall";
+import {
+  deleteScheduledRecallBot,
+  scheduleRecallBot,
+} from "@/lib/vendors/recall";
 import { syncRecallCalendarEventsForAllConnectedUsers } from "@/lib/recall-calendar-bulk-sync";
 import { reconcileStaleMeetingJobs } from "@/lib/stale-meeting-jobs";
 
@@ -35,6 +38,9 @@ const appUrlSchema = z.string().trim().url();
 const scheduleMeetingBotDataSchema = z.object({
   meetingUrl: z.url(),
   startAt: z.iso.datetime().optional(),
+});
+const deleteRecallBotDataSchema = z.object({
+  botId: z.string().trim().min(1),
 });
 
 const transcribeAudioDataSchema = z.union([
@@ -89,6 +95,19 @@ const scheduleMeetingBot = inngest.createFunction(
       startAt: data.startAt,
       webhookUrl: `${appUrl}/api/recall/webhook`,
     });
+  },
+);
+
+export const deleteRecallBot = inngest.createFunction(
+  {
+    id: "delete-recall-bot",
+    retries: 4,
+    triggers: [{ event: "meeting/delete.recall-bot" }],
+  },
+  async ({ event }) => {
+    const data = deleteRecallBotDataSchema.parse(event.data);
+
+    return deleteScheduledRecallBot({ botId: data.botId });
   },
 );
 
@@ -390,6 +409,7 @@ const reconcileStaleJobs = inngest.createFunction(
 
 export const functions = [
   scheduleMeetingBot,
+  deleteRecallBot,
   transcribeAudio,
   convertVideoToAudio,
   enrichTranscript,
