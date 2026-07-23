@@ -27,8 +27,9 @@ function expectUsesCurrentTranscriptJob(condition: SQL) {
   const query = toQuery(condition);
 
   expect(query.sql).toContain('"transcript_segments"."job_id"');
-  expect(query.sql).toContain('"transcript_jobs"');
-  expect(query.sql).toContain('"transcript_jobs"."status" = \'completed\'');
+  expect(query.sql).toContain("from transcript_jobs");
+  expect(query.sql).toContain("current_jobs.status = 'completed'");
+  expect(query.sql).toContain("current_jobs.mode = 'append'");
 }
 
 function expectScopesDashboardToUser(condition: SQL, userId: string) {

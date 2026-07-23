@@ -228,33 +228,29 @@ export async function applyElevenLabsTranscriptEvent(
   }
 
   const now = new Date();
-  const status = persistence.action === "complete" ? "completed" : "failed";
-  const jobUpdate: {
-    errorMessage?: string;
-    providerJobId?: string;
-    status: "completed" | "failed";
-    updatedAt: Date;
-  } = { status, updatedAt: now };
-
-  if (persistence.providerJobId) {
-    jobUpdate.providerJobId = persistence.providerJobId;
-  }
-
-  if (persistence.action === "fail" && persistence.errorMessage) {
-    jobUpdate.errorMessage = persistence.errorMessage;
-  }
-
-  await db
-    .update(transcriptJobs)
-    .set(jobUpdate)
-    .where(eq(transcriptJobs.id, persistence.transcriptJobId));
 
   if (persistence.action === "fail") {
+    await db
+      .update(transcriptJobs)
+      .set({
+        ...(persistence.errorMessage
+          ? { errorMessage: persistence.errorMessage }
+          : {}),
+        ...(persistence.providerJobId
+          ? { providerJobId: persistence.providerJobId }
+          : {}),
+        status: "failed",
+        updatedAt: now,
+      })
+      .where(eq(transcriptJobs.id, persistence.transcriptJobId));
+
     if (meetingId) {
       await db
         .update(meetings)
         .set({ status: "failed", updatedAt: now })
-        .where(eq(meetings.id, meetingId));
+        .where(
+          and(eq(meetings.id, meetingId), eq(meetings.status, "processing")),
+        );
     }
 
     return persistence;
@@ -265,18 +261,8 @@ export async function applyElevenLabsTranscriptEvent(
     persistence.transcriptJobId,
   );
   const segmentOffsetMs = getTranscriptSegmentOffsetMs(applicationContext);
-  const existingSegments =
-    applicationContext.mode === "append"
-      ? await loadTranscriptSnapshotSegments(
-          persistence.meetingId,
-          persistence.transcriptJobId,
-          applicationContext.currentJobId,
-        )
-      : [];
-  const snapshotJobId =
-    applicationContext.currentJobId ?? persistence.transcriptJobId;
 
-  if (applicationContext.mode === "replace") {
+  if (applicationContext.mode === "replace" && !persistence.recordingId) {
     await db
       .delete(meetingEntities)
       .where(eq(meetingEntities.meetingId, persistence.meetingId));
@@ -286,34 +272,26 @@ export async function applyElevenLabsTranscriptEvent(
   } else {
     await db
       .delete(transcriptSegments)
-      .where(eq(transcriptSegments.jobId, snapshotJobId));
+      .where(eq(transcriptSegments.jobId, persistence.transcriptJobId));
   }
 
-  const nextSegments = [
-    ...existingSegments.map((segment) => ({
-      ...segment,
-      jobId: snapshotJobId,
-      meetingId: persistence.meetingId,
-    })),
-    ...persistence.segments.map((segment) => ({
-      meetingId: persistence.meetingId,
-      jobId: snapshotJobId,
-      speaker: segment.speaker,
-      startMs: segment.startMs + segmentOffsetMs,
-      endMs: segment.endMs === null ? null : segment.endMs + segmentOffsetMs,
-      text: segment.text,
-      emotionLabel: segment.emotionLabel,
-      emotionReason: segment.emotionReason,
-    })),
-  ];
   const insertedSegments = await db
     .insert(transcriptSegments)
-    .values(nextSegments)
+    .values(
+      persistence.segments.map((segment) => ({
+        meetingId: persistence.meetingId,
+        jobId: persistence.transcriptJobId,
+        speaker: segment.speaker,
+        startMs: segment.startMs + segmentOffsetMs,
+        endMs: segment.endMs === null ? null : segment.endMs + segmentOffsetMs,
+        text: segment.text,
+        emotionLabel: segment.emotionLabel,
+        emotionReason: segment.emotionReason,
+      })),
+    )
     .returning({ id: transcriptSegments.id });
   const segmentIdByReference = new Map(
-    insertedSegments
-      .slice(existingSegments.length)
-      .map((segment, index) => [`segment_${index}`, segment.id]),
+    insertedSegments.map((segment, index) => [`segment_${index}`, segment.id]),
   );
 
   if (persistence.entities.length > 0) {
@@ -361,7 +339,23 @@ export async function applyElevenLabsTranscriptEvent(
   await db
     .update(meetings)
     .set({ status: "ready", updatedAt: now })
-    .where(eq(meetings.id, persistence.meetingId));
+    .where(
+      and(
+        eq(meetings.id, persistence.meetingId),
+        eq(meetings.status, "processing"),
+      ),
+    );
+
+  await db
+    .update(transcriptJobs)
+    .set({
+      ...(persistence.providerJobId
+        ? { providerJobId: persistence.providerJobId }
+        : {}),
+      status: "completed",
+      updatedAt: now,
+    })
+    .where(eq(transcriptJobs.id, persistence.transcriptJobId));
 
   return persistence;
 }
@@ -374,11 +368,13 @@ async function shouldApplyTranscriptJob(
     current_mode: string;
     current_status: string;
     id: string;
+    recording_id: string | null;
   }>(sql`
     select
       latest.id,
       current.mode as current_mode,
-      current.status as current_status
+      current.status as current_status,
+      current.recording_id
     from transcript_jobs current
     left join lateral (
       select id
@@ -390,15 +386,29 @@ async function shouldApplyTranscriptJob(
     where current.id = ${transcriptJobId}::uuid
   `);
 
+  return isTranscriptJobApplicable(result.rows[0], transcriptJobId);
+}
+
+export function isTranscriptJobApplicable(
+  row:
+    | {
+        current_mode: string;
+        current_status: string;
+        id: string;
+        recording_id: string | null;
+      }
+    | undefined,
+  transcriptJobId: string,
+) {
   return (
-    result.rows[0]?.current_status !== "completed" &&
-    (result.rows[0]?.current_mode === "append" ||
-      result.rows[0]?.id === transcriptJobId)
+    row?.current_status !== "completed" &&
+    (typeof row?.recording_id === "string" ||
+      row?.current_mode === "append" ||
+      row?.id === transcriptJobId)
   );
 }
 
 type TranscriptApplicationContext = {
-  currentJobId: string | null;
   firstRecordingStartedAt: Date | string | null;
   mode: "append" | "replace";
   recordingStartedAt: Date | string | null;
@@ -409,7 +419,6 @@ async function loadTranscriptApplicationContext(
   transcriptJobId: string,
 ): Promise<TranscriptApplicationContext> {
   const result = await db.execute<{
-    current_job_id: string | null;
     first_recording_started_at: Date | string | null;
     mode: "append" | "replace";
     recording_started_at: Date | string | null;
@@ -417,14 +426,6 @@ async function loadTranscriptApplicationContext(
     select
       transcript_jobs.mode,
       recordings.started_at as recording_started_at,
-      (
-        select latest_job.id
-        from transcript_jobs latest_job
-        where latest_job.meeting_id = ${meetingId}::uuid
-          and latest_job.status = 'completed'
-        order by latest_job.created_at desc, latest_job.id desc
-        limit 1
-      ) as current_job_id,
       (
         select min(first_recording.started_at)
         from recordings first_recording
@@ -439,7 +440,6 @@ async function loadTranscriptApplicationContext(
   const row = result.rows[0];
 
   return {
-    currentJobId: row?.current_job_id ?? null,
     firstRecordingStartedAt: row?.first_recording_started_at ?? null,
     mode: row?.mode === "append" ? "append" : "replace",
     recordingStartedAt: row?.recording_started_at ?? null,
@@ -470,56 +470,6 @@ export function getTranscriptSegmentOffsetMs(
   }
 
   return Math.max(0, recordingStartedAt - firstRecordingStartedAt);
-}
-
-async function loadTranscriptSnapshotSegments(
-  meetingId: string,
-  transcriptJobId: string,
-  currentJobId: string | null,
-) {
-  if (currentJobId && currentJobId !== transcriptJobId) {
-    return db
-      .select({
-        speaker: transcriptSegments.speaker,
-        startMs: transcriptSegments.startMs,
-        endMs: transcriptSegments.endMs,
-        text: transcriptSegments.text,
-        polishedText: transcriptSegments.polishedText,
-        translatedText: transcriptSegments.translatedText,
-        translationEditedAt: transcriptSegments.translationEditedAt,
-        emotionLabel: transcriptSegments.emotionLabel,
-        emotionReason: transcriptSegments.emotionReason,
-      })
-      .from(transcriptSegments)
-      .where(eq(transcriptSegments.jobId, currentJobId))
-      .orderBy(transcriptSegments.startMs);
-  }
-
-  return db
-    .select({
-      speaker: transcriptSegments.speaker,
-      startMs: transcriptSegments.startMs,
-      endMs: transcriptSegments.endMs,
-      text: transcriptSegments.text,
-      polishedText: transcriptSegments.polishedText,
-      translatedText: transcriptSegments.translatedText,
-      translationEditedAt: transcriptSegments.translationEditedAt,
-      emotionLabel: transcriptSegments.emotionLabel,
-      emotionReason: transcriptSegments.emotionReason,
-    })
-    .from(transcriptSegments)
-    .where(
-      sql`${transcriptSegments.jobId} = (
-      select previous.id
-      from transcript_jobs previous
-      where previous.meeting_id = ${meetingId}::uuid
-        and previous.status = 'completed'
-        and previous.id <> ${transcriptJobId}::uuid
-      order by previous.updated_at desc, previous.created_at desc
-      limit 1
-    )`,
-    )
-    .orderBy(transcriptSegments.startMs);
 }
 
 function getMetadataString(

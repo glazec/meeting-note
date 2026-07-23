@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { transcriptJobs, transcriptSegments } from "@/db/schema";
 import { inngest } from "./client";
-import { currentTranscriptJobIdSubquery } from "@/lib/current-transcript-job";
+import { currentTranscriptJobIdsSubquery } from "@/lib/current-transcript-job";
 import { convertVideoObjectToAudio } from "@/lib/media-conversion";
 import { createReadUrl } from "@/lib/r2";
 import { sendDueLocationReminders } from "@/lib/location-reminders";
@@ -209,9 +209,9 @@ export const enrichTranscript = inngest.createFunction(
         .where(
           and(
             eq(transcriptSegments.meetingId, data.meetingId),
-            eq(
+            inArray(
               transcriptSegments.jobId,
-              currentTranscriptJobIdSubquery(data.meetingId),
+              currentTranscriptJobIdsSubquery(data.meetingId),
             ),
           ),
         )
@@ -231,9 +231,9 @@ export const enrichTranscript = inngest.createFunction(
             .where(
               and(
                 eq(transcriptSegments.meetingId, data.meetingId),
-                eq(
+                inArray(
                   transcriptSegments.jobId,
-                  currentTranscriptJobIdSubquery(data.meetingId),
+                  currentTranscriptJobIdsSubquery(data.meetingId),
                 ),
               ),
             );
@@ -265,24 +265,21 @@ export const enrichTranscript = inngest.createFunction(
             index,
             index + TRANSLATION_BATCH_SIZE,
           );
-          const translations = await translateTranscriptSegments(
-            batch,
-            {
-              batchSize: TRANSLATION_BATCH_SIZE,
-              onTranslated: async (translatedRows) => {
-                for (const translation of translatedRows) {
-                  await db
-                    .update(transcriptSegments)
-                    .set({
-                      translatedText: translation.text,
-                      updatedAt: new Date(),
-                    })
-                    .where(eq(transcriptSegments.id, translation.id));
-                }
-              },
-              targetLanguage: translationLanguage,
+          const translations = await translateTranscriptSegments(batch, {
+            batchSize: TRANSLATION_BATCH_SIZE,
+            onTranslated: async (translatedRows) => {
+              for (const translation of translatedRows) {
+                await db
+                  .update(transcriptSegments)
+                  .set({
+                    translatedText: translation.text,
+                    updatedAt: new Date(),
+                  })
+                  .where(eq(transcriptSegments.id, translation.id));
+              }
             },
-          );
+            targetLanguage: translationLanguage,
+          });
 
           newTranslatedCount += translations.length;
         }
@@ -401,7 +398,9 @@ export const functions = [
   reconcileStaleJobs,
 ];
 
-function buildTranscriptMetadata(data: z.infer<typeof transcribeAudioDataSchema>) {
+function buildTranscriptMetadata(
+  data: z.infer<typeof transcribeAudioDataSchema>,
+) {
   const metadata: Record<string, string> = {};
 
   if ("objectKey" in data) {
@@ -433,10 +432,7 @@ async function markTranscriptJobFailedAfterFinalAttempt(input: {
   maxAttempts: number;
   transcriptJobId?: string;
 }) {
-  if (
-    !input.transcriptJobId ||
-    input.attempt < input.maxAttempts
-  ) {
+  if (!input.transcriptJobId || input.attempt < input.maxAttempts) {
     return;
   }
 

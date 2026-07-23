@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { and, asc, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
@@ -11,7 +11,7 @@ import {
   users,
 } from "@/db/schema";
 import type { TranscriptSegment } from "@/components/transcript-viewer";
-import { currentTranscriptJobIdSubquery } from "@/lib/current-transcript-job";
+import { currentTranscriptJobIdsSubquery } from "@/lib/current-transcript-job";
 
 export type SharedTranscript = {
   sharedBy: string;
@@ -54,7 +54,10 @@ export async function getSharedTranscriptByToken(
       transcriptSegments,
       and(
         eq(transcriptSegments.meetingId, meetings.id),
-        eq(transcriptSegments.jobId, currentTranscriptJobIdSubquery(meetings.id)),
+        inArray(
+          transcriptSegments.jobId,
+          currentTranscriptJobIdsSubquery(meetings.id),
+        ),
       ),
     )
     .where(

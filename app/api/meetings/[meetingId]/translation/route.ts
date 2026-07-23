@@ -1,11 +1,11 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
 import { meetings, transcriptSegments } from "@/db/schema";
 import { inngest } from "@/inngest/client";
 import { getCurrentUser } from "@/lib/auth";
-import { currentTranscriptJobIdSubquery } from "@/lib/current-transcript-job";
+import { currentTranscriptJobIdsSubquery } from "@/lib/current-transcript-job";
 import { getManageableMeetingCondition } from "@/lib/meeting-write-policy";
 import { markMeetingTranslationQueued } from "@/lib/meeting-translation-jobs";
 import { getTeamConfiguration } from "@/lib/team-configuration";
@@ -49,9 +49,9 @@ export async function POST(
     .where(
       and(
         eq(transcriptSegments.meetingId, parsedMeetingId.data),
-        eq(
+        inArray(
           transcriptSegments.jobId,
-          currentTranscriptJobIdSubquery(parsedMeetingId.data),
+          currentTranscriptJobIdsSubquery(parsedMeetingId.data),
         ),
       ),
     )

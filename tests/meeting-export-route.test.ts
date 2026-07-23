@@ -40,14 +40,11 @@ async function getMeetingExport(
 ) {
   const { GET } = await import("@/app/api/meetings/[meetingId]/export/route");
 
-  return GET(
-    new Request(url),
-    {
-      params: Promise.resolve({
-        meetingId: "11111111-1111-4111-8111-111111111111",
-      }),
-    },
-  );
+  return GET(new Request(url), {
+    params: Promise.resolve({
+      meetingId: "11111111-1111-4111-8111-111111111111",
+    }),
+  });
 }
 
 describe("GET /api/meetings/[meetingId]/export", () => {
@@ -139,8 +136,8 @@ describe("GET /api/meetings/[meetingId]/export", () => {
     expect(select).toHaveBeenCalledTimes(2);
     const segmentQuery = toQuery(segmentWhere.mock.calls[0][0]);
     expect(segmentQuery.sql).toContain('"transcript_segments"."job_id"');
-    expect(segmentQuery.sql).toContain('"transcript_jobs"');
-    expect(segmentQuery.sql).toContain('"transcript_jobs"."status" = \'completed\'');
+    expect(segmentQuery.sql).toContain("from transcript_jobs");
+    expect(segmentQuery.sql).toContain("current_jobs.status = 'completed'");
   });
 
   it("keeps text export raw when a language query is present", async () => {
@@ -349,8 +346,8 @@ describe("GET /api/meetings/[meetingId]/export", () => {
       "fetch",
       vi
         .fn()
-        .mockImplementation(async () =>
-          new Response(new Uint8Array([137, 80, 78, 71])),
+        .mockImplementation(
+          async () => new Response(new Uint8Array([137, 80, 78, 71])),
         ),
     );
 
@@ -413,9 +410,7 @@ describe("GET /api/meetings/[meetingId]/export", () => {
   });
 
   it("names image entries with sequence, timestamp, and extension", async () => {
-    const { buildImageEntryName } = await import(
-      "@/lib/meeting-image-export"
-    );
+    const { buildImageEntryName } = await import("@/lib/meeting-image-export");
 
     expect(buildImageEntryName(0, 65000, "image/png")).toBe(
       "image-01-1m05s.png",
@@ -423,6 +418,59 @@ describe("GET /api/meetings/[meetingId]/export", () => {
     expect(buildImageEntryName(11, null, "image/jpeg")).toBe("image-12.jpg");
     expect(buildImageEntryName(2, 0, "application/octet-stream")).toBe(
       "image-03-0m00s.bin",
+    );
+  });
+
+  it("exports resumed audio parts as one archive", async () => {
+    getCurrentUser.mockResolvedValue({
+      id: "user_123",
+      email: "user@example.com",
+      name: null,
+    });
+    getWorkspace.mockResolvedValue({ teamId: "team_123" });
+    select
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            limit: vi.fn().mockResolvedValue([
+              {
+                id: "11111111-1111-4111-8111-111111111111",
+                title: "Nascent Sync",
+              },
+            ]),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: vi
+              .fn()
+              .mockResolvedValue([
+                { id: "22222222-2222-4222-8222-222222222222" },
+                { id: "33333333-3333-4333-8333-333333333333" },
+              ]),
+          }),
+        }),
+      });
+    const fetchAudio = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(new Uint8Array([1, 2, 3])))
+      .mockResolvedValueOnce(new Response(new Uint8Array([4, 5, 6])));
+    vi.stubGlobal("fetch", fetchAudio);
+
+    const response = await getMeetingExport(
+      "https://app.example.com/api/meetings/11111111-1111-4111-8111-111111111111/export?format=audio-parts",
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/zip");
+    expect(response.headers.get("content-disposition")).toContain(
+      "Nascent Sync audio parts.zip",
+    );
+    expect(fetchAudio).toHaveBeenCalledTimes(2);
+    expect(fetchAudio.mock.calls[0][0].toString()).toContain(
+      "recording=22222222-2222-4222-8222-222222222222&proxy=1",
     );
   });
 

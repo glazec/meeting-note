@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "@/db/client";
 import { meetings, transcriptSegments } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
-import { currentTranscriptJobIdSubquery } from "@/lib/current-transcript-job";
+import { currentTranscriptJobIdsSubquery } from "@/lib/current-transcript-job";
 import { getManageableMeetingCondition } from "@/lib/meeting-write-policy";
 import { upsertTeamSpeakerAliases } from "@/lib/speaker-aliases";
 import { getOrCreateWorkspaceForSessionUser } from "@/lib/workspace";
@@ -13,7 +13,9 @@ export const runtime = "nodejs";
 
 const speakerUpdateSchema = z
   .strictObject({
-    applyTo: z.enum(["matching_speaker", "segment"]).default("matching_speaker"),
+    applyTo: z
+      .enum(["matching_speaker", "segment"])
+      .default("matching_speaker"),
     currentSpeaker: z.preprocess(
       (value) =>
         typeof value === "string" && value.trim() === "" ? null : value,
@@ -82,9 +84,9 @@ export async function PATCH(
     .where(
       and(
         eq(transcriptSegments.meetingId, parsedMeetingId.data),
-        eq(
+        inArray(
           transcriptSegments.jobId,
-          currentTranscriptJobIdSubquery(parsedMeetingId.data),
+          currentTranscriptJobIdsSubquery(parsedMeetingId.data),
         ),
         targetFilter,
       ),

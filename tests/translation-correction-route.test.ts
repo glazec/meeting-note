@@ -66,9 +66,8 @@ describe("PATCH /api/meetings/[meetingId]/segments/[segmentId]/translation", () 
     const set = vi.fn().mockReturnValue({ where });
     update.mockReturnValue({ set });
 
-    const { PATCH } = await import(
-      "@/app/api/meetings/[meetingId]/segments/[segmentId]/translation/route"
-    );
+    const { PATCH } =
+      await import("@/app/api/meetings/[meetingId]/segments/[segmentId]/translation/route");
 
     const response = await PATCH(
       new Request("https://app.example.com", {
@@ -93,7 +92,7 @@ describe("PATCH /api/meetings/[meetingId]/segments/[segmentId]/translation", () 
 
     const segmentQuery = toQuery(segmentWhere.mock.calls[0][0]);
     expect(segmentQuery.sql).toContain('"transcript_segments"."job_id"');
-    expect(segmentQuery.sql).toContain('"transcript_jobs"');
-    expect(segmentQuery.sql).toContain('"transcript_jobs"."status" = \'completed\'');
+    expect(segmentQuery.sql).toContain("from transcript_jobs");
+    expect(segmentQuery.sql).toContain("current_jobs.status = 'completed'");
   });
 });

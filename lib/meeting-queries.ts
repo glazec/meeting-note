@@ -41,7 +41,7 @@ import {
   type DashboardWorkflowSegment,
   type DashboardWorkflowSummaryModel,
 } from "@/lib/dashboard-workflow-summary";
-import { currentTranscriptJobIdSubquery } from "@/lib/current-transcript-job";
+import { currentTranscriptJobIdsSubquery } from "@/lib/current-transcript-job";
 import { normalizeEmailAddress } from "@/lib/email-domains";
 import {
   getMeetingDisplayStatus,
@@ -263,7 +263,7 @@ export async function listMeetingLibraryPageForWorkspace(
         select count(distinct lower(btrim(${transcriptSegments.speaker})))::int
         from ${transcriptSegments}
         where ${transcriptSegments.meetingId} = ${meetings.id}
-          and ${transcriptSegments.jobId} = ${currentTranscriptJobIdSubquery(meetings.id)}
+          and ${transcriptSegments.jobId} in ${currentTranscriptJobIdsSubquery(meetings.id)}
           and ${transcriptSegments.speaker} is not null
           and btrim(${transcriptSegments.speaker}) <> ''
       )`,
@@ -271,7 +271,7 @@ export async function listMeetingLibraryPageForWorkspace(
         select count(*)::int
         from ${transcriptSegments}
         where ${transcriptSegments.meetingId} = ${meetings.id}
-          and ${transcriptSegments.jobId} = ${currentTranscriptJobIdSubquery(meetings.id)}
+          and ${transcriptSegments.jobId} in ${currentTranscriptJobIdsSubquery(meetings.id)}
       )`,
       transcriptDurationMs: sql<number | null>`(
         select max(greatest(
@@ -280,7 +280,7 @@ export async function listMeetingLibraryPageForWorkspace(
         ))::int
         from ${transcriptSegments}
         where ${transcriptSegments.meetingId} = ${meetings.id}
-          and ${transcriptSegments.jobId} = ${currentTranscriptJobIdSubquery(meetings.id)}
+          and ${transcriptSegments.jobId} in ${currentTranscriptJobIdsSubquery(meetings.id)}
       )`,
       recordedDurationMs: latestRecordingDurationMsSubquery(meetings.id),
       recordedStartedAt: latestRecordingStartedAtSubquery(meetings.id),
@@ -788,7 +788,7 @@ function getMeetingLibrarySearchCondition(
     select 1
     from ${transcriptSegments}
     where ${transcriptSegments.meetingId} = ${meetings.id}
-      and ${transcriptSegments.jobId} = ${currentTranscriptJobIdSubquery(meetings.id)}
+      and ${transcriptSegments.jobId} in ${currentTranscriptJobIdsSubquery(meetings.id)}
       and (
         ${transcriptSegments.text} ilike ${pattern}
         or ${transcriptSegments.speaker} ilike ${pattern}
@@ -1066,9 +1066,9 @@ export async function getMeetingDashboardSummaryForWorkspace(
           eq(meetings.teamId, workspace.teamId),
           eq(meetings.ownerUserId, workspace.userId),
           ne(meetings.status, "cancelled"),
-          eq(
+          inArray(
             transcriptSegments.jobId,
-            currentTranscriptJobIdSubquery(meetings.id),
+            currentTranscriptJobIdsSubquery(meetings.id),
           ),
           sql`coalesce(${meetings.startedAt}, ${meetings.createdAt}) >= ${statsCutoff}`,
           sql`coalesce(${meetings.startedAt}, ${meetings.createdAt}) <= ${now}`,
@@ -1154,7 +1154,7 @@ export async function getMeetingTranscriptForWorkspace(
         ))::int
         from ${transcriptSegments}
         where ${transcriptSegments.meetingId} = ${meetings.id}
-          and ${transcriptSegments.jobId} = ${currentTranscriptJobIdSubquery(meetings.id)}
+          and ${transcriptSegments.jobId} in ${currentTranscriptJobIdsSubquery(meetings.id)}
       )`,
       recordedDurationMs: latestRecordingDurationMsSubquery(meetings.id),
       recordedStartedAt: latestRecordingStartedAtSubquery(meetings.id),
@@ -1232,9 +1232,9 @@ export async function getMeetingTranscriptForWorkspace(
       .where(
         and(
           eq(transcriptSegments.meetingId, meeting.id),
-          eq(
+          inArray(
             transcriptSegments.jobId,
-            currentTranscriptJobIdSubquery(meeting.id),
+            currentTranscriptJobIdsSubquery(meeting.id),
           ),
         ),
       )
@@ -1449,9 +1449,9 @@ export async function listMeetingDetailRelatedMeetingsForWorkspace(
         .where(
           and(
             eq(transcriptSegments.meetingId, relatedMeetingId),
-            eq(
+            inArray(
               transcriptSegments.jobId,
-              currentTranscriptJobIdSubquery(relatedMeetingId),
+              currentTranscriptJobIdsSubquery(relatedMeetingId),
             ),
           ),
         )
